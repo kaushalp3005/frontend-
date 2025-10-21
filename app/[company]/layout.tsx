@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import { useAuthStore, type Company } from "@/lib/stores/auth";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -9,8 +9,14 @@ export default function CompanyLayout({ children }: { children: React.ReactNode 
   const router = useRouter();
   const params = useParams() as { company?: string };
   const pathname = usePathname();
+  const [isClient, setIsClient] = useState(false);
 
-  const company = (params?.company || "").toUpperCase();
+  // Ensure we're on the client side
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
+
+  const company = isClient ? (params?.company || "").toUpperCase() : "";
   const {
     user,
     isLoading,
@@ -21,6 +27,7 @@ export default function CompanyLayout({ children }: { children: React.ReactNode 
 
   // Kick off permissions load when company changes
   useEffect(() => {
+    if (!isClient) return;
     if (!company) return;
     if (!user) return; // auth not ready yet, let your global auth loader handle this
 
@@ -32,10 +39,26 @@ export default function CompanyLayout({ children }: { children: React.ReactNode 
       console.log("[LAYOUT] setCurrentCompany →", company);
       setCurrentCompany(company as Company);
     }
-  }, [company, user, currentCompany, currentCompanyAccess, setCurrentCompany]);
+  }, [isClient, company, user, currentCompany, currentCompanyAccess, setCurrentCompany]);
+
+  // Check if user has access to current company
+  useEffect(() => {
+    if (!isClient) return;
+    if (!user || isLoading) return;
+
+    // Check company access
+    const userCompanies = user.companies || [];
+    const hasCompanyAccess = userCompanies.some((c: any) => c.code === company);
+
+    if (company && !hasCompanyAccess) {
+      console.warn('[LAYOUT] User does not have access to company:', company);
+      router.push('/403');
+    }
+  }, [isClient, user, company, isLoading, router]);
 
   // Decide what to render based on loading + access
   const gate = useMemo(() => {
+    if (!isClient) return { state: "loading" as const, reason: "Client-side hydration" };
     if (!user) return { state: "auth-wait" as const, reason: "No user yet" };
     if (isLoading) return { state: "loading" as const, reason: "Store loading" };
     if (!company) return { state: "error" as const, reason: "No company in route" };
@@ -56,12 +79,14 @@ export default function CompanyLayout({ children }: { children: React.ReactNode 
         (m: any) => m.moduleCode === "dashboard" && m.permissions?.access
       );
       if (!hasDashboard) {
+        console.warn('[LAYOUT] No dashboard access, redirecting to 403');
+        router.push('/403');
         return { state: "error" as const, reason: "No dashboard access" };
       }
     }
 
     return { state: "ok" as const, reason: "Ready" };
-  }, [user, isLoading, company, currentCompany, currentCompanyAccess]);
+  }, [isClient, user, isLoading, company, currentCompany, currentCompanyAccess, router]);
 
   if (gate.state === "loading" || gate.state === "auth-wait") {
     return (
