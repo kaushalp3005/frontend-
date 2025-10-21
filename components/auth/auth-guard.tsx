@@ -42,14 +42,20 @@ export function AuthGuard({
     // Check company access
     if (company && !hasCompanyAccess(company)) {
       console.warn('[AUTH GUARD] User does not have access to company:', company)
-      router.push("/403")
+      const params = new URLSearchParams({ company })
+      router.push(`/403?${params.toString()}`)
       return
     }
 
     // Check module/permission access if both module and action are specified
     if (module && !hasPermission(module, action)) {
       console.warn('[AUTH GUARD] User does not have permission for module:', module, 'action:', action)
-      router.push("/403")
+      const params = new URLSearchParams({
+        module,
+        action,
+        ...(company && { company })
+      })
+      router.push(`/403?${params.toString()}`)
       return
     }
   }, [company, module, action, isAuthenticated, hasCompanyAccess, hasPermission, router, accessToken])
