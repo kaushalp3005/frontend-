@@ -128,6 +128,7 @@ export interface RequestLine {
   pack_size: string
   package_size?: string
   net_weight: string
+  sku_id?: number | null  // SKU ID for the item (optional)
   batch_number?: string
   lot_number?: string
   created_at: string
@@ -424,6 +425,8 @@ export const transformFormDataToApi = (
     packSize: string
     packageSize: string
     netWeight: string
+    batchNumber?: string
+    lotNumber?: string
   }[],
   requestNo?: string
 ): RequestCreate => {
@@ -455,8 +458,9 @@ export const transformFormDataToApi = (
       uom: article.uom,
       pack_size: article.packSize,
       package_size: article.packageSize || "0", // Default to "0" if empty
-      batch_number: "BATCH-001", // Default batch number
-      lot_number: "LOT-001" // Default lot number
+      net_weight: article.netWeight || "0", // Include net weight
+      batch_number: article.batchNumber || "BATCH-001", // Use provided batch number or default
+      lot_number: article.lotNumber || "LOT-001" // Use provided lot number or default
     })),
     computed_fields: {
       request_no: requestNo || generateRequestNo()
