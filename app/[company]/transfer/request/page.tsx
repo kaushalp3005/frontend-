@@ -650,7 +650,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                   value={articleData.quantity}
                   onChange={(e) => handleArticleChange('quantity', e.target.value)}
                   className="w-full h-8 bg-white border-gray-300 text-gray-700"
-                  placeholder="0"
+                  placeholder="Enter quantity"
                 />
               </div>
 
@@ -675,17 +675,17 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                 </Select>
               </div>
 
-              {/* Pack Size */}
+              {/* Pack units */}
               <div className="space-y-1">
                 <Label className="text-xs font-medium text-gray-600">
-                  Pack Size ({articleData.materialType === 'FG' ? 'gm' : 'Kg'}) *
+                  Pack units *
                 </Label>
                 <Input
                   type="text"
                   value={articleData.packSize}
                   onChange={(e) => handleArticleChange('packSize', e.target.value)}
                   className="w-full h-8 bg-white border-gray-300 text-gray-700"
-                  placeholder="0.00"
+                  placeholder="Enter pack units"
                 />
               </div>
 
@@ -700,7 +700,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                     value={articleData.packageSize}
                     onChange={(e) => handleArticleChange('packageSize', e.target.value)}
                     className="w-full h-8 bg-white border-gray-300 text-gray-700"
-                    placeholder="0"
+                    placeholder="Enter package size"
                   />
                 </div>
               )}
