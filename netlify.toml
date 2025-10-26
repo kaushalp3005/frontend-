@@ -3,7 +3,7 @@
 
 [build]
   # Build command
-  command = "rm -rf .next node_modules/.cache && npm ci && npm run build"
+  command = "npm run build"
 
   # Publish directory (Next.js export output - empty for Next.js Runtime)
   publish = ".next"
