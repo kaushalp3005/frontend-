@@ -329,9 +329,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
   // Get requestId from URL parameter
   const requestIdFromUrl = searchParams.get('requestId')
   
-  // Add a key to force re-render when request data is loaded
-  const [refreshKey, setRefreshKey] = useState(0)
-  
   // Generate transfer request number with format: TRANSYYYYMMDDHHMM
   const generateTransferNo = () => {
     const now = new Date()
@@ -555,20 +552,8 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         // Populate article/item data from first line item (if exists)
         if (request.lines && request.lines.length > 0) {
           const firstItem = request.lines[0]
-          console.log('📦 ===== RECEIVED FIRST ITEM FROM API =====')
           console.log('📦 First item from API:', firstItem)
           console.log('📋 Full first item details:', JSON.stringify(firstItem, null, 2))
-          console.log('🔍 Field Check:')
-          console.log('  - material_type:', firstItem.material_type, '| Type:', typeof firstItem.material_type, '| Empty?', !firstItem.material_type)
-          console.log('  - item_category:', firstItem.item_category, '| Type:', typeof firstItem.item_category, '| Empty?', !firstItem.item_category)
-          console.log('  - sub_category:', firstItem.sub_category, '| Type:', typeof firstItem.sub_category, '| Empty?', !firstItem.sub_category)
-          console.log('  - item_description:', firstItem.item_description, '| Type:', typeof firstItem.item_description, '| Empty?', !firstItem.item_description)
-          console.log('  - quantity:', firstItem.quantity, '| Type:', typeof firstItem.quantity)
-          console.log('  - uom:', firstItem.uom, '| Type:', typeof firstItem.uom)
-          console.log('  - pack_size:', firstItem.pack_size, '| Type:', typeof firstItem.pack_size)
-          console.log('  - net_weight:', firstItem.net_weight, '| Type:', typeof firstItem.net_weight)
-          console.log('  - sku_id:', firstItem.sku_id, '| Type:', typeof firstItem.sku_id)
-          console.log('===========================================')
 
           // Normalize field values to match dropdown options
           const normalizeField = (value: string | undefined | null) => {
@@ -581,21 +566,28 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
             return trimmedValue
           }
           
-          // Convert uppercase to Title Case to match dropdown options
-          const toTitleCase = (str: string) => {
-            return str.toLowerCase().replace(/\b\w/g, (char) => char.toUpperCase())
+          // Convert uppercase to CamelCase to match dropdown options
+          const toCamelCase = (str: string) => {
+            return str.toLowerCase()
+              .replace(/(?:^\w|[A-Z]|\b\w)/g, (word, index) => {
+                return index === 0 ? word.toLowerCase() : word.toUpperCase()
+              })
+              .replace(/\s+/g, '')
+              .replace(/-/g, '')
+              .replace(/\[/g, '')
+              .replace(/\]/g, '')
           }
           
-          // Check if value is all uppercase and convert to Title Case
+          // Check if value is all uppercase and convert to CamelCase
           const normalizeCase = (value: string) => {
             if (!value) return value
-            // If value is all uppercase AND has spaces or special chars, convert to Title Case
-            // This handles cases like "ALMOND - BROKEN" → "Almond - Broken"
-            // But keeps acronyms like "FG", "PM", "RM" as-is
+            // If value is all uppercase AND has spaces or special chars, convert to CamelCase
+            // This handles cases like "ALMOND - BROKEN" → "almondBroken"
+            // But keeps simple acronyms like "FG", "PM", "RM" as-is
             if (value === value.toUpperCase() && value !== value.toLowerCase() && (value.includes(' ') || value.includes('-') || value.includes('['))) {
-              const titleCase = toTitleCase(value)
-              console.log(`  Converting case: "${value}" → "${titleCase}"`)
-              return titleCase
+              const camelCase = toCamelCase(value)
+              console.log(`  Converting case: "${value}" → "${camelCase}"`)
+              return camelCase
             }
             return value
           }
@@ -615,12 +607,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
               console.log('  - sku_id:', firstItem.sku_id)
               console.log('===============================================')
 
-              const quantityUnits = parseInt(firstItem.quantity) || 0
-              const packSize = parseFloat(firstItem.pack_size) || 0
-              const calculatedNetWeight = quantityUnits * packSize
-
-              console.log('🔢 Calculating net_weight:', quantityUnits, '×', packSize, '=', calculatedNetWeight)
-
               return {
                 ...art,
                 // Auto-fill all item classification fields
@@ -632,10 +618,10 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                 item_description: normalizeCase(normalizeField(firstItem.item_description)),
 
                 // Auto-fill quantity and measurement fields
-                quantity_units: quantityUnits,
+                quantity_units: parseInt(firstItem.quantity) || 0,
                 uom: normalizeCase(normalizeField(firstItem.uom)),
-                packaging_type: packSize,
-                net_weight: calculatedNetWeight, // Use calculated value instead of API value
+                packaging_type: parseFloat(firstItem.pack_size) || 0,
+                net_weight: parseFloat(firstItem.net_weight) || 0,
 
                 // Auto-fill SKU ID if available
                 sku_id: firstItem.sku_id || null,
@@ -655,33 +641,14 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
           console.log('   - item_category case:', updatedArticles[0]?.item_category, '(should match dropdown options exactly)')
           console.log('   - sub_category case:', updatedArticles[0]?.sub_category, '(should match dropdown options exactly)')
           console.log('   - item_description case:', updatedArticles[0]?.item_description, '(should match dropdown options exactly)')
-          
-          // Set all article data at once - the hooks will automatically fetch dependent dropdown options
           setArticles(updatedArticles)
           
-          // Force re-render after a short delay to allow dropdowns to load options
-          setTimeout(() => {
-            setRefreshKey(prev => prev + 1)
-            console.log('🔄 Forced re-render to update dropdowns with loaded options')
-          }, 500)
-          console.log('✅ Articles set with auto-filled data')
-          
           // Store all items for display and initialize scanned counters
-          // Also calculate net_weight for each item
-          setLoadedItems(request.lines.map((it: any) => {
-            const quantity = parseInt(it.quantity) || 0
-            const packSize = parseFloat(it.pack_size) || 0
-            const calculatedNetWeight = quantity * packSize
-            
-            console.log(`📦 Item: ${it.item_description}, Qty: ${quantity}, Pack: ${packSize}, Net Wt: ${calculatedNetWeight}`)
-            
-            return {
-              ...it,
-              net_weight: calculatedNetWeight, // Override with calculated value
-              scanned_count: 0,
-              pending: Math.max(0, quantity - 0)
-            }
-          }))
+          setLoadedItems(request.lines.map((it: any) => ({
+            ...it,
+            scanned_count: 0,
+            pending: Math.max(0, (parseInt(it.quantity) || 0) - 0)
+          })))
           console.log('✅ All items stored:', request.lines.length, 'items')
           console.log('📋 Items:', request.lines.map(l => ({
             material_type: l.material_type,
@@ -775,28 +742,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     fetchSkuIdForAutoFilledArticle()
   }, [articles[0]?.material_type, articles[0]?.item_category, articles[0]?.sub_category, articles[0]?.item_description, articles[0]?.sku_id, requestIdFromUrl])
 
-  // Auto-calculate net_weight when articles are loaded from request
-  useEffect(() => {
-    if (requestIdFromUrl && articles.length > 0) {
-      const needsCalculation = articles.some(article => {
-        const calculatedNetWeight = (article.quantity_units || 0) * (article.packaging_type || 0)
-        return article.net_weight !== calculatedNetWeight && (article.quantity_units > 0 || article.packaging_type > 0)
-      })
-
-      if (needsCalculation) {
-        console.log('🔢 Auto-calculating net_weight for loaded articles')
-        setArticles(prevArticles => prevArticles.map(article => {
-          const calculatedNetWeight = (article.quantity_units || 0) * (article.packaging_type || 0)
-          if (article.net_weight !== calculatedNetWeight) {
-            console.log(`  Article ${article.id}: ${article.quantity_units} × ${article.packaging_type} = ${calculatedNetWeight}`)
-            return { ...article, net_weight: calculatedNetWeight }
-          }
-          return article
-        }))
-      }
-    }
-  }, [requestIdFromUrl, articles[0]?.quantity_units, articles[0]?.packaging_type])
-
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({
       ...prev,
@@ -841,7 +786,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
 
   const updateArticle = (id: string, field: string, value: any) => {
     console.log("updateArticle called:", { id, field, value })
-    setArticles((prevArticles) => prevArticles.map((article) => {
+    const updatedArticles = articles.map((article) => {
       if (article.id === id) {
         const updatedArticle = { ...article, [field]: value }
         console.log("Updated article:", updatedArticle)
@@ -859,16 +804,14 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         if (field === "unit_rate" || field === "quantity_units") {
           updatedArticle.total_amount = (Number(updatedArticle.unit_rate) || 0) * (Number(updatedArticle.quantity_units) || 0)
         }
-        
-        // Auto-calculate net weight when quantity_units or packaging_type changes
-        if (field === "quantity_units" || field === "packaging_type") {
-          updatedArticle.net_weight = (Number(updatedArticle.quantity_units) || 0) * (Number(updatedArticle.packaging_type) || 0)
-        }
 
         return updatedArticle
       }
       return article
-    }))
+    })
+
+    console.log("Setting articles:", updatedArticles)
+    setArticles(updatedArticles)
   }
 
   const handleTransferInfoChange = (field: string, value: string) => {
@@ -1867,7 +1810,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
           {articles.map((article, index) => {
             console.log("Rendering article:", { id: article.id, material_type: article.material_type, index })
             return (
-            <div key={`${article.id}-${refreshKey}`} className="border rounded-lg p-4 space-y-4">
+            <div key={article.id} className="border rounded-lg p-4 space-y-4">
               <div className="flex items-center justify-between">
                 <h4 className="font-medium">Article {index + 1}</h4>
                 <div className="flex items-center gap-2">
@@ -2012,10 +1955,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                     type="number"
                     min="0"
                     value={article.quantity_units}
-                    onChange={(e) => {
-                      const newQuantity = Number(e.target.value)
-                      updateArticle(article.id, "quantity_units", newQuantity)
-                    }}
+                    onChange={(e) => updateArticle(article.id, "quantity_units", Number(e.target.value))}
                     onWheel={(e) => e.currentTarget.blur()}
                     placeholder="Enter quantity"
                   />
@@ -2049,27 +1989,24 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                     step="0.01"
                     min="0"
                     value={article.packaging_type}
-                    onChange={(e) => {
-                      const newPackUnits = parseFloat(e.target.value) || 0
-                      updateArticle(article.id, "packaging_type", newPackUnits)
-                    }}
+                    onChange={(e) => updateArticle(article.id, "packaging_type", parseFloat(e.target.value) || 0)}
                     onWheel={(e) => e.currentTarget.blur()}
                     placeholder="Enter pack units"
                   />
                 </div>
 
-                {/* Net Weight - Auto-calculated and Read-only */}
+                {/* Net Weight */}
                 <div>
-                  <Label htmlFor={`net_weight_${article.id}`}>Net Weight (Auto-calculated)</Label>
+                  <Label htmlFor={`net_weight_${article.id}`}>Net Weight</Label>
                   <Input
                     id={`net_weight_${article.id}`}
                     type="number"
                     step="0.01"
                     min="0"
                     value={article.net_weight}
-                    disabled
-                    className="bg-gray-100 cursor-not-allowed"
-                    placeholder="Auto-calculated"
+                    onChange={(e) => updateArticle(article.id, "net_weight", parseFloat(e.target.value) || 0)}
+                    onWheel={(e) => e.currentTarget.blur()}
+                    placeholder="Enter net weight"
                   />
                 </div>
               </div>
@@ -2082,11 +2019,11 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         {loadedItems.length > 0 && (
           <Card className="w-full bg-blue-50 border-blue-200">
             <CardHeader className="pb-3 bg-blue-100">
-              <CardTitle className="text-base font-semibold text-blue-800">
-                Items from Request ({loadedItems.length})
+              <CardTitle className="text-base font-semibold text-blue-800 flex items-center">
+                📦 Items from Request ({loadedItems.length})
               </CardTitle>
               <p className="text-xs text-blue-600">
-                All items included in the original transfer request
+                Complete details: Category → Sub-Category → Item Description for all items
               </p>
             </CardHeader>
             <CardContent className="pt-0 bg-blue-50">
@@ -2098,36 +2035,54 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex-1 space-y-1">
-                        {/* Item Number */}
-                        <div className="flex items-center space-x-2">
-                          <span className="text-xs font-bold text-blue-600 bg-blue-100 px-2 py-0.5 rounded">
-                            Item #{index + 1}
-                          </span>
-                          <span className="text-xs font-semibold text-gray-700 bg-gray-100 px-2 py-0.5 rounded">
-                            {item.material_type}
-                          </span>
+                        {/* Item Header */}
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center space-x-2">
+                            <span className="text-xs font-bold text-blue-600 bg-blue-100 px-3 py-1 rounded-full">
+                              Item #{index + 1}
+                            </span>
+                            <span className="text-xs font-semibold text-white bg-gray-600 px-3 py-1 rounded-full">
+                              {item.material_type || "N/A"}
+                            </span>
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            Qty: <span className="font-bold text-gray-700">{item.quantity} {item.uom}</span>
+                          </div>
                         </div>
                         
-                        {/* Item Classification - More Prominent */}
-                        <div className="bg-gray-50 p-2 rounded border border-gray-200 space-y-1">
-                          <div className="text-sm font-semibold text-gray-800">
-                            📦 {item.item_description || 'N/A'}
-                          </div>
-                          <div className="flex items-center gap-3 text-xs">
-                            <div>
-                              <span className="text-gray-500">Category:</span>
-                              <span className="ml-1 text-blue-700 font-semibold">{item.item_category || 'N/A'}</span>
+                        {/* Product Classification - More Prominent */}
+                        <div className="space-y-2">
+                          {/* Item Description - Main Product Name */}
+                          <div className="bg-gray-50 p-2 rounded border">
+                            <div className="text-xs text-gray-500 font-medium mb-1">ITEM DESCRIPTION</div>
+                            <div className="text-sm font-bold text-gray-800">
+                              {item.item_description || "No description available"}
                             </div>
-                            <div className="text-gray-300">|</div>
-                            <div>
-                              <span className="text-gray-500">Sub-Category:</span>
-                              <span className="ml-1 text-blue-700 font-semibold">{item.sub_category || 'N/A'}</span>
+                          </div>
+                          
+                          {/* Category & Sub-Category - Side by Side */}
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="bg-blue-50 p-2 rounded border border-blue-200">
+                              <div className="text-xs text-blue-600 font-medium mb-1">CATEGORY</div>
+                              <div className="text-sm font-semibold text-blue-800">
+                                {item.item_category || "Not specified"}
+                              </div>
+                            </div>
+                            <div className="bg-green-50 p-2 rounded border border-green-200">
+                              <div className="text-xs text-green-600 font-medium mb-1">SUB-CATEGORY</div>
+                              <div className="text-sm font-semibold text-green-800">
+                                {item.sub_category || "Not specified"}
+                              </div>
                             </div>
                           </div>
                         </div>
                         
                         {/* Item Details Grid */}
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs mt-2">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs mt-3 pt-2 border-t border-gray-200">
+                          <div>
+                            <span className="text-gray-500">SKU ID:</span>
+                            <span className="ml-1 text-gray-700 font-medium">{item.sku_id || "N/A"}</span>
+                          </div>
                           <div>
                             <span className="text-gray-500">Quantity:</span>
                             <span className="ml-1 text-gray-700 font-medium">{item.quantity} {item.uom}</span>
@@ -2257,6 +2212,9 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                       <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Net Wt</th>
                       <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Total Wt</th>
                       <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Batch No</th>
+                      <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Lot No</th>
+                      <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Mfg Date</th>
+                      <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Exp Date</th>
                       <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Transaction No</th>
                       <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Time</th>
                       <th className="text-center py-2 px-2 text-xs font-medium text-gray-700">Action</th>
@@ -2291,6 +2249,17 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                           <span className="font-mono text-gray-700">
                             {box.batchNumber !== 'N/A' ? box.batchNumber : '-'}
                           </span>
+                        </td>
+                        <td className="py-2 px-2 text-xs">
+                          <span className="font-mono text-gray-700">
+                            {box.lotNumber !== 'N/A' ? box.lotNumber : '-'}
+                          </span>
+                        </td>
+                        <td className="py-2 px-2 text-xs text-gray-600">
+                          {box.manufacturingDate !== 'N/A' ? box.manufacturingDate : '-'}
+                        </td>
+                        <td className="py-2 px-2 text-xs text-gray-600">
+                          {box.expiryDate !== 'N/A' ? box.expiryDate : '-'}
                         </td>
                         <td className="py-2 px-2 text-xs">
                           <span className="font-mono text-gray-800 font-medium">
@@ -2342,13 +2311,13 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                     <div>
                       <p className="text-xs text-gray-600 mb-1">Total Net Weight</p>
                       <p className="text-lg font-bold text-gray-800">
-                        {scannedBoxes.reduce((sum, box) => sum + parseFloat(box.netWeight || '0'), 0).toFixed(2)} {scannedBoxes.length > 0 && scannedBoxes[0].transactionNo?.startsWith('CONS') ? 'g' : 'kg'}
+                        {scannedBoxes.reduce((sum, box) => sum + parseFloat(box.netWeight || '0'), 0).toFixed(2)} kg
                       </p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-600 mb-1">Total Weight</p>
                       <p className="text-lg font-bold text-gray-800">
-                        {scannedBoxes.reduce((sum, box) => sum + parseFloat(box.totalWeight || '0'), 0).toFixed(2)} {scannedBoxes.length > 0 && scannedBoxes[0].transactionNo?.startsWith('CONS') ? 'g' : 'kg'}
+                        {scannedBoxes.reduce((sum, box) => sum + parseFloat(box.totalWeight || '0'), 0).toFixed(2)} kg
                       </p>
                     </div>
                   </div>
@@ -2416,3 +2385,4 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     </form>
   )
 }
+  
