@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -184,13 +184,13 @@ function MaterialTypeDropdown({
 }
 
 // Item Category dropdown component
-function ItemCategoryDropdown({ 
+function ItemCategoryDropdown({
   materialType,
-  value, 
-  onValueChange, 
+  value,
+  onValueChange,
   company,
   error,
-  disabled 
+  disabled
 }: {
   materialType: string
   value: string
@@ -200,7 +200,7 @@ function ItemCategoryDropdown({
   disabled?: boolean
 }) {
   const itemCategoriesHook = useItemCategories({ company, material_type: materialType })
-  
+
   return (
     <SearchableSelect
       value={value}
@@ -212,14 +212,15 @@ function ItemCategoryDropdown({
       error={itemCategoriesHook.error}
       disabled={disabled}
       className={error ? "border-red-500" : ""}
+      onSearchChange={itemCategoriesHook.search}
     />
   )
 }
 
 function SubCategoryDropdown({ categoryId, value, onValueChange, company, error, disabled, materialType }: SubCategoryDropdownProps & { materialType?: string }) {
   const subCategoriesHook = useSubCategories(categoryId, { company, material_type: materialType })
-  
-  
+
+
   return (
     <SearchableSelect
       value={value}
@@ -231,6 +232,7 @@ function SubCategoryDropdown({ categoryId, value, onValueChange, company, error,
       error={subCategoriesHook.error}
       disabled={disabled || !categoryId}
       className={error ? "border-red-500" : ""}
+      onSearchChange={subCategoriesHook.search}
     />
   )
 }
@@ -313,6 +315,7 @@ function ItemDescriptionDropdown({
       error={itemDescriptionsHook.error}
       disabled={disabled || !categoryId || !subCategoryId}
       className={error ? "border-red-500" : ""}
+      onSearchChange={itemDescriptionsHook.search}
     />
   )
 }
@@ -466,6 +469,10 @@ export default function InwardFormPage({ params }: InwardFormPageProps) {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [printingBoxes, setPrintingBoxes] = useState<Set<number>>(new Set())
   const [quantityWarnings, setQuantityWarnings] = useState<Record<string, string>>({})
+  
+  // Ref to prevent infinite loop in useEffect
+  const isUpdatingArticles = useRef(false)
+  const prevArticlesRef = useRef<Article[]>(articles)
 
   const generateBoxes = (articlesToUse?: Article[], forceRecalculate: boolean = false) => {
     const articlesForGeneration = articlesToUse || articles
@@ -576,8 +583,73 @@ export default function InwardFormPage({ params }: InwardFormPageProps) {
   }
 
   useEffect(() => {
-    generateBoxes()
+    // Check if only weights changed (to prevent infinite loop with weight update effect)
+    const prevArticles = prevArticlesRef.current
+    const onlyWeightsChanged = articles.length === prevArticles.length &&
+      articles.every((article, index) => {
+        const prev = prevArticles[index]
+        if (!prev) return false
+
+        // Check if all fields except weights are the same
+        return (
+          article.id === prev.id &&
+          article.item_description === prev.item_description &&
+          article.quantity_units === prev.quantity_units &&
+          article.uom === prev.uom &&
+          // Only net_weight and total_weight can be different
+          article.material_type === prev.material_type &&
+          article.item_category === prev.item_category &&
+          article.sub_category === prev.sub_category
+        )
+      })
+
+    // Update the ref for next comparison
+    prevArticlesRef.current = articles
+
+    // Only regenerate boxes if something other than weights changed
+    if (!onlyWeightsChanged) {
+      generateBoxes()
+    }
   }, [articles, articles.length])
+
+  // Update article net_weight and total_weight based on box management summary
+  useEffect(() => {
+    if (boxes.length === 0) return
+    if (isUpdatingArticles.current) return // Prevent infinite loop
+    
+    // Only update articles if boxes have meaningful weights
+    const hasValidWeights = boxes.some(box => box.net_weight > 0 || box.gross_weight > 0)
+    if (!hasValidWeights) return
+    
+    isUpdatingArticles.current = true
+    
+    setArticles(prevArticles => {
+      const updatedArticles = prevArticles.map(article => {
+        // Find all boxes for this article
+        const articleBoxes = boxes.filter(box => box.article === article.item_description)
+        
+        if (articleBoxes.length > 0) {
+          const totalNetWeight = articleBoxes.reduce((sum, box) => sum + box.net_weight, 0)
+          const totalGrossWeight = articleBoxes.reduce((sum, box) => sum + box.gross_weight, 0)
+          
+          // Only update if the values have actually changed to prevent infinite loops
+          if (Math.abs(article.net_weight - totalNetWeight) > 0.01 || 
+              Math.abs(article.total_weight - totalGrossWeight) > 0.01) {
+            return {
+              ...article,
+              net_weight: totalNetWeight,
+              total_weight: totalGrossWeight
+            }
+          }
+        }
+        
+        return article
+      })
+      
+      isUpdatingArticles.current = false
+      return updatedArticles
+    })
+  }, [boxes])
 
   const addArticle = () => {
     const newArticle: Article = {
@@ -884,16 +956,28 @@ export default function InwardFormPage({ params }: InwardFormPageProps) {
                   padding: 0;
                   box-sizing: border-box;
                 }
-                body {
+                html, body {
+                  width: 4in;
+                  height: 2in;
+                  margin: 0;
+                  padding: 0;
+                  overflow: hidden;
                   font-family: Arial, sans-serif;
                   background: white;
+                  position: relative;
                 }
                 .label-container {
+                  position: absolute;
+                  top: 0;
+                  left: 0;
                   width: 4in;
                   height: 2in;
                   background: white;
                   border: 1px solid #000;
                   display: flex;
+                  margin: 0;
+                  padding: 0;
+                  box-sizing: border-box;
                 }
                 .qr-section {
                   width: 2in;
@@ -978,18 +1062,56 @@ export default function InwardFormPage({ params }: InwardFormPageProps) {
                   @page {
                     size: 4in 2in;
                     margin: 0;
+                    padding: 0;
+                  }
+                  * {
+                    margin: 0 !important;
+                    padding: 0 !important;
+                    page-break-after: avoid !important;
+                    page-break-before: avoid !important;
+                    page-break-inside: avoid !important;
+                    -webkit-print-color-adjust: exact !important;
+                    print-color-adjust: exact !important;
+                    orphans: 1 !important;
+                    widows: 1 !important;
+                  }
+                  html {
+                    width: 4in !important;
+                    height: 2in !important;
+                    max-height: 2in !important;
+                    min-height: 2in !important;
+                    overflow: hidden !important;
+                    page-break-after: avoid !important;
                   }
                   body {
-                    margin: 0;
-                    padding: 0;
+                    position: relative !important;
+                    width: 4in !important;
+                    height: 2in !important;
+                    max-height: 2in !important;
+                    min-height: 2in !important;
+                    margin: 0 !important;
+                    padding: 0 !important;
                     background: white;
+                    overflow: hidden !important;
+                    page-break-after: avoid !important;
                   }
                   .label-container {
-                    width: 4in;
-                    height: 2in;
-                    border: 1px solid #000;
-                    page-break-after: avoid;
-                    page-break-inside: avoid;
+                    position: absolute !important;
+                    top: 0 !important;
+                    left: 0 !important;
+                    width: 4in !important;
+                    height: 2in !important;
+                    max-height: 2in !important;
+                    min-height: 2in !important;
+                    border: 1px solid #000 !important;
+                    margin: 0 !important;
+                    padding: 0 !important;
+                    box-sizing: border-box !important;
+                    page-break-after: avoid !important;
+                    page-break-inside: avoid !important;
+                  }
+                  script {
+                    display: none !important;
                   }
                 }
               </style>
@@ -1027,10 +1149,22 @@ export default function InwardFormPage({ params }: InwardFormPageProps) {
                     <div class="batch-info">Batch: ${qrPayload.batch_number.length > 20 ? qrPayload.batch_number.substring(0, 20) + '...' : qrPayload.batch_number}</div>
                     ` : ''}
                   </div>
-                  <div></div>
                 </div>
               </div>
               <script>
+                // Remove any extra content that might cause blank pages
+                document.addEventListener('DOMContentLoaded', function() {
+                  // Remove any empty divs or extra elements
+                  const body = document.body;
+                  const children = Array.from(body.children);
+                  children.forEach(child => {
+                    if (child.classList.contains('label-container') === false && 
+                        child.tagName !== 'SCRIPT') {
+                      body.removeChild(child);
+                    }
+                  });
+                });
+
                 // Auto-trigger browser print dialog
                 window.onload = function() {
                   setTimeout(() => {
