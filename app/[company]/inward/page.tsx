@@ -256,7 +256,7 @@ export default function InwardListPage({ params }: InwardListPageProps) {
             hsn_code: detailResponse.articles[0]?.hsn_code,
             quality_grade: detailResponse.articles[0]?.quality_grade,
             uom: detailResponse.articles[0]?.uom,
-            packaging_type: detailResponse.articles[0]?.packaging_type,
+            packaging_type: detailResponse.articles[0]?.packaging_type?.toString(),
             quantity_units: detailResponse.articles[0]?.quantity_units,
             net_weight: detailResponse.articles[0]?.net_weight,
             total_weight: detailResponse.articles[0]?.total_weight,
