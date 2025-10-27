@@ -992,20 +992,28 @@ export default function InwardFormPage({ params }: InwardFormPageProps) {
                   height: 1.7in;
                 }
                 .info-section {
+                  position: relative;
                   width: 2in;
                   height: 2in;
                   padding: 0.08in;
-                  display: flex;
-                  flex-direction: column;
-                  justify-content: space-between;
                   font-size: 8pt;
                   line-height: 1.1;
                   overflow: hidden;
                 }
+                .info-section-content {
+                  position: absolute;
+                  top: 50%;
+                  left: 0.08in;
+                  right: 0.08in;
+                  transform: translateY(-50%);
+                  display: flex;
+                  flex-direction: column;
+                  gap: 0.05in;
+                }
                 .company-info {
                   font-weight: bold;
                   font-size: 9pt;
-                  margin-bottom: 0.02in;
+                  margin-bottom: 0;
                   overflow: hidden;
                   text-overflow: ellipsis;
                   white-space: nowrap;
@@ -1013,7 +1021,7 @@ export default function InwardFormPage({ params }: InwardFormPageProps) {
                 .transaction-info {
                   font-size: 7pt;
                   font-family: monospace;
-                  margin-bottom: 0.03in;
+                  margin-bottom: 0;
                   overflow: hidden;
                   text-overflow: ellipsis;
                   white-space: nowrap;
@@ -1029,7 +1037,7 @@ export default function InwardFormPage({ params }: InwardFormPageProps) {
                   -webkit-box-orient: vertical;
                   word-wrap: break-word;
                   word-break: break-word;
-                  margin-bottom: 0.03in;
+                  margin-bottom: 0;
                 }
                 .details {
                   font-size: 7.5pt;
@@ -1038,7 +1046,7 @@ export default function InwardFormPage({ params }: InwardFormPageProps) {
                   overflow: hidden;
                 }
                 .details-row {
-                  margin-bottom: 0.01in;
+                  margin-bottom: 0;
                   overflow: hidden;
                   text-overflow: ellipsis;
                   white-space: nowrap;
@@ -1046,7 +1054,7 @@ export default function InwardFormPage({ params }: InwardFormPageProps) {
                 .batch-info {
                   font-size: 7pt;
                   font-family: monospace;
-                  margin-bottom: 0.01in;
+                  margin-bottom: 0;
                   overflow: hidden;
                   text-overflow: ellipsis;
                   white-space: nowrap;
@@ -1122,32 +1130,34 @@ export default function InwardFormPage({ params }: InwardFormPageProps) {
                   <img src="${qrCodeDataURL}" alt="QR Code" />
                 </div>
                 <div class="info-section">
-                  <div>
-                    <div class="company-info">${qrPayload.company}</div>
-                    <div class="transaction-info">${qrPayload.transaction_no}</div>
-                  </div>
-                  <div class="item-description">${qrPayload.item_description}</div>
-                  <div class="details">
-                    <div class="details-row">
-                      <span>Box #${qrPayload.box_number}</span>
+                  <div class="info-section-content">
+                    <div>
+                      <div class="company-info">${qrPayload.company}</div>
+                      <div class="transaction-info">${qrPayload.transaction_no}</div>
                     </div>
-                    <div class="details-row">
-                      <span>Net Wt: ${qrPayload.net_weight}kg</span>
+                    <div class="item-description">${qrPayload.item_description}</div>
+                    <div class="details">
+                      <div class="details-row">
+                        <span>Box #${qrPayload.box_number}</span>
+                      </div>
+                      <div class="details-row">
+                        <span>Net Wt: ${qrPayload.net_weight}kg</span>
+                      </div>
+                      <div class="details-row">
+                        <span>Gross Wt: ${qrPayload.total_weight}kg</span>
+                      </div>
+                      <div class="details-row">
+                        <span>Entry: ${formatDate(qrPayload.entry_date)}</span>
+                      </div>
+                      ${qrPayload.expiry_date ? `
+                      <div class="details-row exp-date">
+                        <span>Exp: ${formatDate(qrPayload.expiry_date)}</span>
+                      </div>
+                      ` : ''}
+                      ${qrPayload.batch_number ? `
+                      <div class="batch-info">Batch: ${qrPayload.batch_number.length > 20 ? qrPayload.batch_number.substring(0, 20) + '...' : qrPayload.batch_number}</div>
+                      ` : ''}
                     </div>
-                    <div class="details-row">
-                      <span>Gross Wt: ${qrPayload.total_weight}kg</span>
-                    </div>
-                    <div class="details-row">
-                      <span>Entry: ${formatDate(qrPayload.entry_date)}</span>
-                    </div>
-                    ${qrPayload.expiry_date ? `
-                    <div class="details-row exp-date">
-                      <span>Exp: ${formatDate(qrPayload.expiry_date)}</span>
-                    </div>
-                    ` : ''}
-                    ${qrPayload.batch_number ? `
-                    <div class="batch-info">Batch: ${qrPayload.batch_number.length > 20 ? qrPayload.batch_number.substring(0, 20) + '...' : qrPayload.batch_number}</div>
-                    ` : ''}
                   </div>
                 </div>
               </div>
