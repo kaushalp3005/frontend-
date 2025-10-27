@@ -1,456 +1,938 @@
 "use client"
 
-import { useMemo, useState, useEffect } from "react"
+import React, { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Printer, Package, ArrowLeft, CheckCircle, AlertCircle, Wifi, Usb, Bluetooth, Monitor } from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import Link from "next/link"
-import { useParams } from "next/navigation"
+import { ArrowLeft, Download, Printer, QrCode, Edit, Loader2, AlertCircle } from "lucide-react"
+import { format } from "date-fns"
+import { getInwardDetail, convertToLegacyRecord, type Company, type InwardDetailResponse } from "@/types/inward"
 
-interface BoxData {
-  id?: number
-  transaction_no?: string
-  box_number: number
-  article?: string
-  article_description?: string
-  net_weight?: number
-  gross_weight?: number
-  lot_number?: string
-}
-
-interface ArticleGroup {
-  article: string
-  boxes: BoxData[]
-}
-
-interface PrinterInfo {
-  name: string
-  type: "USB" | "WiFi" | "Bluetooth" | "Network"
-  status: "online" | "offline" | "busy"
-  supports_label_printing: boolean
-  max_width_inches?: number
-  max_height_inches?: number
-  dpi?: number
-}
-
-interface InwardRecord {
-  transaction_id?: string
-  transaction_no?: string
-  company: string
-  transaction?: {
-    transaction_no?: string
-    entry_date?: string
+interface InwardDetailPageProps {
+  params: {
+    company: Company
+    id: string
   }
-  boxes?: BoxData[]
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || ""
-
-export default function SimplifiedQRPrintPage() {
-  const params = useParams()
-  const company = params.company as string
-  const transaction_no = params.id as string
-
-  const [selectedBoxes, setSelectedBoxes] = useState<number[]>([])
-  const [printers, setPrinters] = useState<PrinterInfo[]>([])
-  const [selectedPrinter, setSelectedPrinter] = useState<string>("")
-  const [loading, setLoading] = useState(false)
+export default function InwardDetailPage({ params }: InwardDetailPageProps) {
+  const { company, id } = params
+  
+  // State management
+  const [data, setData] = useState<InwardDetailResponse | null>(null)
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
-  const [record, setRecord] = useState<InwardRecord | null>(null)
-  const [printJobId, setPrintJobId] = useState<string | null>(null)
-  const [printProgress, setPrintProgress] = useState<number>(0)
+  const [printingBoxes, setPrintingBoxes] = useState<Set<number>>(new Set())
 
-  const boxes = record?.boxes || []
-
+  // Fetch data
   useEffect(() => {
-    loadRecord()
-    loadPrinters()
-  }, [transaction_no])
-
-  const loadRecord = async () => {
-    try {
-      const response = await fetch(`${API_BASE}/inward/${company}/${transaction_no}`)
-      
-      if (response.ok) {
-        const data = await response.json()
-        setRecord(data)
-        // Auto-select all boxes
-        if (data.boxes && data.boxes.length > 0) {
-          setSelectedBoxes(data.boxes.map((box: BoxData) => box.box_number))
-        }
-      } else {
-        const errorText = await response.text()
-        setError(`Failed to load record: HTTP ${response.status} - ${errorText}`)
+    const fetchData = async () => {
+      try {
+        setLoading(true)
+        setError(null)
+        const response = await getInwardDetail(company, id)
+        setData(response)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to fetch inward record")
+      } finally {
+        setLoading(false)
       }
-    } catch (err) {
-      setError(`Failed to load transaction data: ${err instanceof Error ? err.message : 'Unknown error'}`)
-    }
-  }
-
-  const loadPrinters = async () => {
-    try {
-      const response = await fetch(`${API_BASE}/qr/available-printers`)
-      if (!response.ok) {
-        setError(`Failed to load printers: HTTP ${response.status}`)
-        return
-      }
-      
-      const data = await response.json()
-      setPrinters(data.printers || [])
-
-      // Auto-select first available label printer
-      const labelPrinter = data.printers?.find((p: PrinterInfo) => 
-        p.supports_label_printing && p.status === "online"
-      )
-      if (labelPrinter) {
-        setSelectedPrinter(labelPrinter.name)
-      }
-    } catch (err) {
-      setError(`Failed to load printers: ${err instanceof Error ? err.message : 'Unknown error'}`)
-    }
-  }
-
-  const handlePrint = async () => {
-    if (selectedBoxes.length === 0 || !record || !selectedPrinter) {
-      setError("Please select boxes and a printer")
-      return
     }
 
-    setLoading(true)
-    setError(null)
-    setSuccess(null)
-    setPrintProgress(0)
+    fetchData()
+  }, [company, id])
 
+  const generateAndPrintLabel = async (box: any, article: any) => {
     try {
-      const printPayload = {
-        transaction_no: record.transaction_id || record.transaction_no || record.transaction?.transaction_no,
-        company: record.company,
-        box_numbers: selectedBoxes,
-        printer_name: selectedPrinter,
-        print_settings: {
-          width: "4in",
-          height: "2in",
-          dpi: 203,
-          copies: 1,
-        },
+      // Dynamically import QR utilities and React QRCode component
+      const { generateSimplifiedQRData } = await import('@/lib/utils/qr')
+      const QRCode = (await import('qrcode')).default
+
+      // Prepare QR payload
+      const qrPayload = {
+        company: company,
+        entry_date: data!.transaction.entry_date,
+        vendor_name: data!.transaction.vendor_supplier_name || '',
+        customer_name: data!.transaction.customer_party_name || '',
+        item_description: article.item_description,
+        net_weight: box.net_weight || 0,
+        total_weight: box.gross_weight || 0,
+        batch_number: article.batch_number || '',
+        box_number: box.box_number,
+        manufacturing_date: article.manufacturing_date,
+        expiry_date: article.expiry_date,
+        transaction_no: data!.transaction.transaction_no,
+        sku_id: article.sku_id || 0,
+        approval_authority: data!.transaction.approval_authority
       }
 
-      const response = await fetch(`${API_BASE}/qr/print-labels`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(printPayload),
+      // Generate QR data string
+      const qrDataString = generateSimplifiedQRData(qrPayload)
+
+      // Generate QR code as Data URL
+      const qrCodeDataURL = await QRCode.toDataURL(qrDataString, {
+        width: 170,
+        margin: 1,
+        errorCorrectionLevel: 'M'
       })
 
-      if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(`Failed to create print job: ${errorText}`)
+      // Format dates
+      const formatDate = (dateString?: string) => {
+        if (!dateString) return ''
+        try {
+          return new Date(dateString).toLocaleDateString('en-GB', {
+            day: '2-digit',
+            month: '2-digit',
+            year: '2-digit'
+          })
+        } catch {
+          return ''
+        }
       }
 
-      const printJob = await response.json()
-      setPrintJobId(printJob.job_id)
-      setSuccess(`Print job ${printJob.job_id} created successfully. ${printJob.labels_count} labels sent to ${selectedPrinter}`)
-      
-      // Start polling for print progress
-      pollPrintProgress(printJob.job_id)
-      
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to print labels")
-    } finally {
-      setLoading(false)
-    }
-  }
+      // Create a hidden iframe for printing
+      const iframe = document.createElement('iframe')
+      iframe.style.position = 'absolute'
+      iframe.style.width = '0'
+      iframe.style.height = '0'
+      iframe.style.border = 'none'
+      iframe.style.visibility = 'hidden'
+      document.body.appendChild(iframe)
 
-  const pollPrintProgress = async (jobId: string) => {
-    const poll = async () => {
-      try {
-        const response = await fetch(`${API_BASE}/qr/print-job/${jobId}`)
-        if (response.ok) {
-          const jobStatus = await response.json()
-          setPrintProgress(jobStatus.progress || 0)
-          
-          if (jobStatus.status === 'completed') {
-            setSuccess(`Print job completed successfully! All labels printed.`)
-            return
-          } else if (jobStatus.status === 'failed') {
-            setError(`Print job failed: ${jobStatus.error_message}`)
-            return
-          }
-          
-          // Continue polling if still processing
-          if (jobStatus.status === 'printing' || jobStatus.status === 'queued') {
-            setTimeout(poll, 2000)
+      const iframeDoc = iframe.contentWindow?.document
+      if (iframeDoc) {
+        iframeDoc.open()
+        iframeDoc.write(`
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title></title>
+              <style>
+                * {
+                  margin: 0;
+                  padding: 0;
+                  box-sizing: border-box;
+                }
+                html, body {
+                  width: 4in;
+                  height: 2in;
+                  margin: 0;
+                  padding: 0;
+                  overflow: hidden;
+                  font-family: Arial, sans-serif;
+                  background: white;
+                  position: relative;
+                }
+                .label-container {
+                  position: absolute;
+                  top: 0;
+                  left: 0;
+                  width: 4in;
+                  height: 2in;
+                  background: white;
+                  border: 1px solid #000;
+                  display: flex;
+                  margin: 0;
+                  padding: 0;
+                  box-sizing: border-box;
+                }
+                .qr-section {
+                  width: 2in;
+                  height: 2in;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  padding: 0.1in;
+                }
+                .qr-section img {
+                  width: 1.7in;
+                  height: 1.7in;
+                }
+                .info-section {
+                  position: relative;
+                  width: 2in;
+                  height: 2in;
+                  padding: 0.08in;
+                  font-size: 8pt;
+                  line-height: 1.1;
+                  overflow: hidden;
+                }
+                .info-section-content {
+                  position: absolute;
+                  top: 50%;
+                  left: 0.08in;
+                  right: 0.08in;
+                  transform: translateY(-50%);
+                  display: flex;
+                  flex-direction: column;
+                  gap: 0.05in;
+                }
+                .company-info {
+                  font-weight: bold;
+                  font-size: 9pt;
+                  margin-bottom: 0;
+                  overflow: hidden;
+                  text-overflow: ellipsis;
+                  white-space: nowrap;
+                }
+                .transaction-info {
+                  font-size: 7pt;
+                  font-family: monospace;
+                  margin-bottom: 0;
+                  overflow: hidden;
+                  text-overflow: ellipsis;
+                  white-space: nowrap;
+                }
+                .item-description {
+                  font-weight: bold;
+                  font-size: 7.5pt;
+                  line-height: 1.1;
+                  max-height: 0.5in;
+                  overflow: hidden;
+                  display: -webkit-box;
+                  -webkit-line-clamp: 2;
+                  -webkit-box-orient: vertical;
+                  word-wrap: break-word;
+                  word-break: break-word;
+                  margin-bottom: 0;
+                }
+                .details {
+                  font-size: 7.5pt;
+                  line-height: 1.15;
+                  flex: 1;
+                  overflow: hidden;
+                }
+                .details-row {
+                  margin-bottom: 0;
+                  overflow: hidden;
+                  text-overflow: ellipsis;
+                  white-space: nowrap;
+                }
+                .batch-info {
+                  font-size: 7pt;
+                  font-family: monospace;
+                  margin-bottom: 0;
+                  overflow: hidden;
+                  text-overflow: ellipsis;
+                  white-space: nowrap;
+                  max-width: 1.84in;
+                  display: block;
+                }
+                .exp-date {
+                  color: #d00;
+                  font-weight: bold;
+                }
+
+                @media print {
+                  @page {
+                    size: 4in 2in;
+                    margin: 0;
+                    padding: 0;
+                  }
+                  * {
+                    margin: 0 !important;
+                    padding: 0 !important;
+                    page-break-after: avoid !important;
+                    page-break-before: avoid !important;
+                    page-break-inside: avoid !important;
+                    -webkit-print-color-adjust: exact !important;
+                    print-color-adjust: exact !important;
+                    orphans: 1 !important;
+                    widows: 1 !important;
+                  }
+                  html {
+                    width: 4in !important;
+                    height: 2in !important;
+                    max-height: 2in !important;
+                    min-height: 2in !important;
+                    overflow: hidden !important;
+                    page-break-after: avoid !important;
+                  }
+                  body {
+                    position: relative !important;
+                    width: 4in !important;
+                    height: 2in !important;
+                    max-height: 2in !important;
+                    min-height: 2in !important;
+                    margin: 0 !important;
+                    padding: 0 !important;
+                    background: white;
+                    overflow: hidden !important;
+                    page-break-after: avoid !important;
+                  }
+                  .label-container {
+                    position: absolute !important;
+                    top: 0 !important;
+                    left: 0 !important;
+                    width: 4in !important;
+                    height: 2in !important;
+                    max-height: 2in !important;
+                    min-height: 2in !important;
+                    border: 1px solid #000 !important;
+                    margin: 0 !important;
+                    padding: 0 !important;
+                    box-sizing: border-box !important;
+                    page-break-after: avoid !important;
+                    page-break-inside: avoid !important;
+                  }
+                  script {
+                    display: none !important;
+                  }
+                }
+                @page { margin: 0; }
+                html { margin: 0; }
+                body { margin: 0; }
+              </style>
+              <style>
+                @page { margin: 0mm; }
+                @page :first { margin: 0mm; }
+                @page :left { margin: 0mm; }
+                @page :right { margin: 0mm; }
+              </style>
+            </head>
+            <body>
+              <div class="label-container">
+                <div class="qr-section">
+                  <img src="${qrCodeDataURL}" alt="QR Code" />
+                </div>
+                <div class="info-section">
+                  <div class="info-section-content">
+                    <div>
+                      <div class="company-info">${qrPayload.company}</div>
+                      <div class="transaction-info">${qrPayload.transaction_no}</div>
+                    </div>
+                    <div class="item-description">${qrPayload.item_description}</div>
+                    <div class="details">
+                      <div class="details-row">
+                        <span>Box #${qrPayload.box_number}</span>
+                      </div>
+                      <div class="details-row">
+                        <span>Net Wt: ${qrPayload.net_weight}kg</span>
+                      </div>
+                      <div class="details-row">
+                        <span>Gross Wt: ${qrPayload.total_weight}kg</span>
+                      </div>
+                      <div class="details-row">
+                        <span>Entry: ${formatDate(qrPayload.entry_date)}</span>
+                      </div>
+                      ${qrPayload.expiry_date ? `
+                      <div class="details-row exp-date">
+                        <span>Exp: ${formatDate(qrPayload.expiry_date)}</span>
+                      </div>
+                      ` : ''}
+                      ${qrPayload.batch_number ? `
+                      <div class="batch-info">Batch: ${qrPayload.batch_number.length > 20 ? qrPayload.batch_number.substring(0, 20) + '...' : qrPayload.batch_number}</div>
+                      ` : ''}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <script>
+                // Auto-trigger browser print dialog
+                window.onload = function() {
+                  setTimeout(() => {
+                    window.print();
+                    // Close iframe after printing or canceling
+                    window.onafterprint = function() {
+                      window.parent.postMessage('print-complete', '*');
+                    };
+                  }, 300);
+                };
+              </script>
+            </body>
+          </html>
+        `)
+        iframeDoc.close()
+
+        // Listen for print completion to remove iframe
+        const handleMessage = (event: MessageEvent) => {
+          if (event.data === 'print-complete') {
+            document.body.removeChild(iframe)
+            window.removeEventListener('message', handleMessage)
           }
         }
-      } catch (err) {
-        // Silently handle polling errors
+        window.addEventListener('message', handleMessage)
+
+        // Fallback cleanup after 30 seconds
+        setTimeout(() => {
+          if (document.body.contains(iframe)) {
+            document.body.removeChild(iframe)
+            window.removeEventListener('message', handleMessage)
+          }
+        }, 30000)
       }
+
+      return true
+    } catch (err) {
+      console.error("Error generating label:", err)
+      throw err
     }
-    
-    poll()
   }
 
-  const toggleBox = (boxNumber: number) => {
-    setSelectedBoxes(prev => 
-      prev.includes(boxNumber) 
-        ? prev.filter(x => x !== boxNumber) 
-        : [...prev, boxNumber]
+  const handlePrintBox = async (box: any) => {
+    try {
+      setPrintingBoxes(prev => new Set(prev).add(box.box_number))
+
+      console.log("Printing box:", box)
+
+      if (!data) {
+        alert("Error: No data available")
+        return
+      }
+
+      // Find the article for this box
+      const article = data.articles.find(a => a.item_description === box.article_description) || data.articles[0]
+      if (!article) {
+        throw new Error(`Article not found for box ${box.box_number}`)
+      }
+
+      // Generate and print the label using the new method
+      await generateAndPrintLabel(box, article)
+
+    } catch (error) {
+      console.error("Error processing box print:", error)
+      alert(`Error: ${error instanceof Error ? error.message : 'Failed to process box print'}`)
+    } finally {
+      setPrintingBoxes(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(box.box_number)
+        return newSet
+      })
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 p-2 sm:p-4 lg:p-6 max-w-7xl mx-auto space-y-4 sm:space-y-6 w-full">
+        <Card>
+          <CardContent className="text-center py-12">
+            <Loader2 className="mx-auto h-8 w-8 animate-spin" />
+            <p className="text-muted-foreground mt-4">Loading inward record...</p>
+          </CardContent>
+        </Card>
+      </div>
     )
   }
 
-  const selectAll = () => setSelectedBoxes(boxes.map(b => b.box_number))
-  const selectNone = () => setSelectedBoxes([])
-
-  // Group boxes by article
-  const articleGroups = useMemo((): ArticleGroup[] => {
-    const groups: Record<string, BoxData[]> = {}
-    boxes.forEach((box) => {
-      const article = box.article || box.article_description || "Unknown Article"
-      if (!groups[article]) groups[article] = []
-      groups[article].push(box)
-    })
-    return Object.entries(groups).map(([article, boxes]) => ({ article, boxes }))
-  }, [boxes])
-
-  const getConnectionIcon = (type: string) => {
-    switch (type) {
-      case "WiFi": return <Wifi className="h-4 w-4" />
-      case "USB": return <Usb className="h-4 w-4" />
-      case "Bluetooth": return <Bluetooth className="h-4 w-4" />
-      default: return <Monitor className="h-4 w-4" />
-    }
-  }
-
-  if (!record) {
+  if (error || !data) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading transaction data...</p>
+      <div className="min-h-screen bg-gray-50 p-2 sm:p-4 lg:p-6 max-w-7xl mx-auto space-y-4 sm:space-y-6 w-full">
+        <div className="text-center py-12">
+          {error && (
+            <Alert variant="destructive" className="mb-6">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+          <h1 className="text-2xl font-bold text-gray-900 mb-4">Record Not Found</h1>
+          <p className="text-gray-600 mb-6">The requested inward record with ID "{id}" could not be found.</p>
+          <Button asChild>
+            <Link href={`/${company}/inward`}>
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back to Inward List
+            </Link>
+          </Button>
         </div>
       </div>
     )
   }
+
+  const { transaction, articles, boxes } = data
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 p-2 sm:p-4 lg:p-6 max-w-7xl mx-auto space-y-4 sm:space-y-6 w-full">
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-6 py-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Link href={`/${company}/inward/${transaction_no}`}>
-              <Button variant="outline" size="sm" className="flex items-center gap-2">
-                <ArrowLeft className="h-4 w-4" />
-                Back to Details
-              </Button>
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex items-center space-x-4">
+          <Button variant="ghost" size="sm" asChild>
+            <Link href={`/${company}/inward`}>
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              <span className="hidden sm:inline">Back to List</span>
+              <span className="sm:hidden">Back</span>
             </Link>
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-blue-600 rounded-lg">
-                <Printer className="h-6 w-6 text-white" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">Print QR Labels</h1>
-                <p className="text-gray-600">Transaction {record.transaction_id} • {record.company}</p>
-              </div>
-            </div>
+          </Button>
+          <div>
+            <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold tracking-tight">Inward Record Details</h1>
+            <p className="text-sm sm:text-base text-muted-foreground">View inward transaction details</p>
           </div>
         </div>
-
-        {/* Status Messages */}
-        {error && (
-          <Alert variant="destructive" className="mt-4">
-            <AlertCircle className="h-4 w-4" />
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
-
-        {success && (
-          <Alert className="mt-4 border-green-300 bg-green-50">
-            <CheckCircle className="h-4 w-4 text-green-600" />
-            <AlertDescription className="text-green-800">{success}</AlertDescription>
-          </Alert>
-        )}
-
-        {/* Print Progress */}
-        {printJobId && printProgress > 0 && printProgress < 100 && (
-          <Alert className="mt-4 border-blue-300 bg-blue-50">
-            <Printer className="h-4 w-4 text-blue-600" />
-            <AlertDescription className="text-blue-800">
-              Printing in progress... {printProgress}% complete
-              <div className="w-full bg-blue-200 rounded-full h-2 mt-2">
-                <div 
-                  className="bg-blue-600 h-2 rounded-full transition-all duration-300" 
-                  style={{ width: `${printProgress}%` }}
-                ></div>
-              </div>
-            </AlertDescription>
-          </Alert>
-        )}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-2">
+          <Link href={`/${company}/inward/${id}/edit`}>
+            <Button variant="outline" className="flex-1 sm:flex-none">
+              <Edit className="mr-2 h-4 w-4" />
+              <span className="hidden sm:inline">Edit Record</span>
+              <span className="sm:hidden">Edit</span>
+            </Button>
+          </Link>
+          <Button variant="outline" className="flex-1 sm:flex-none">
+            <Download className="mr-2 h-4 w-4" />
+            <span className="hidden sm:inline">Download</span>
+            <span className="sm:hidden">Download</span>
+          </Button>
+        </div>
       </div>
 
-      {/* Main Content */}
-      <div className="max-w-6xl mx-auto p-6">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          
-          {/* Left Column: Box Selection */}
-          <Card>
+      <div className="grid gap-4 sm:gap-6 xl:grid-cols-3">
+        {/* Main Details */}
+        <div className="xl:col-span-2 space-y-4 sm:space-y-6">
+          {/* System Information */}
+          <Card className="w-full">
             <CardHeader>
-              <CardTitle className="flex items-center gap-3">
-                <Package className="h-5 w-5" />
-                Select Boxes
-              </CardTitle>
-              <div className="flex items-center gap-4">
-                <Button variant="outline" size="sm" onClick={selectAll}>
-                  Select All ({boxes.length})
-                </Button>
-                <Button variant="outline" size="sm" onClick={selectNone}>
-                  Clear Selection
-                </Button>
-                <Badge variant="secondary">
-                  {selectedBoxes.length} selected
-                </Badge>
-              </div>
+              <CardTitle>System Information</CardTitle>
             </CardHeader>
-            <CardContent className="max-h-96 overflow-y-auto">
-              <div className="space-y-4">
-                {articleGroups.map((group) => (
-                  <div key={group.article} className="border rounded-lg p-4">
-                    <h4 className="font-semibold mb-3 flex items-center justify-between">
-                      <span>{group.article}</span>
-                      <Badge variant="outline">{group.boxes.length} boxes</Badge>
-                    </h4>
-                    <div className="grid grid-cols-2 gap-2">
-                      {group.boxes.map((box) => (
-                        <div
-                          key={box.box_number}
-                          className={`flex items-center space-x-2 p-2 rounded cursor-pointer transition-colors ${
-                            selectedBoxes.includes(box.box_number)
-                              ? "bg-blue-50 border border-blue-300"
-                              : "bg-gray-50 hover:bg-gray-100"
-                          }`}
-                          onClick={() => toggleBox(box.box_number)}
-                        >
-                          <Checkbox
-                            checked={selectedBoxes.includes(box.box_number)}
-                            onChange={() => toggleBox(box.box_number)}
-                          />
-                          <span className="text-sm font-medium">Box #{box.box_number}</span>
-                          {box.net_weight && (
-                            <span className="text-xs text-gray-500">{box.net_weight}kg</span>
-                          )}
-                        </div>
-                      ))}
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Company</p>
+                  <p className="bg-muted p-2 rounded">{data.company}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Transaction Number</p>
+                  <p className="bg-muted p-2 rounded font-mono">{transaction.transaction_no}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Entry Date</p>
+                  <p className="bg-muted p-2 rounded">
+                    {transaction.entry_date ? format(new Date(transaction.entry_date), "MMM dd, yyyy") : "-"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">System GRN Date</p>
+                  <p className="bg-muted p-2 rounded">{transaction.system_grn_date || "-"}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Transport Information */}
+          <Card className="w-full">
+            <CardHeader>
+              <CardTitle>Transport Information</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Vehicle Number *</p>
+                  <p className="bg-muted p-2 rounded font-mono">{transaction.vehicle_number || "-"}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Transporter Name *</p>
+                  <p className="bg-muted p-2 rounded">{transaction.transporter_name || "-"}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">LR Number</p>
+                  <p className="bg-muted p-2 rounded font-mono">{transaction.lr_number || "-"}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Source Location</p>
+                  <p className="bg-muted p-2 rounded">{transaction.source_location || "-"}</p>
+                </div>
+                <div className="col-span-1 md:col-span-2">
+                  <p className="text-sm font-medium text-muted-foreground">Destination Location</p>
+                  <p className="bg-muted p-2 rounded">{transaction.destination_location || "-"}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Party Information */}
+          <Card className="w-full">
+            <CardHeader>
+              <CardTitle>Party Information</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Vendor/Supplier Name *</p>
+                  <p className="bg-muted p-2 rounded">{transaction.vendor_supplier_name || "-"}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Customer/Party Name *</p>
+                  <p className="bg-muted p-2 rounded">{transaction.customer_party_name || "-"}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Purchase By *</p>
+                  <p className="bg-muted p-2 rounded">{transaction.purchase_by || "-"}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Approval Authority *</p>
+                  <p className="bg-muted p-2 rounded">{transaction.approval_authority || "-"}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Document Information */}
+          <Card className="w-full">
+            <CardHeader>
+              <CardTitle>Document Information</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Challan Number</p>
+                  <p className="bg-muted p-2 rounded font-mono">{transaction.challan_number || "-"}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Invoice Number</p>
+                  <p className="bg-muted p-2 rounded font-mono">{transaction.invoice_number || "-"}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">PO Number</p>
+                  <p className="bg-muted p-2 rounded font-mono">{transaction.po_number || "-"}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">GRN Number</p>
+                  <p className="bg-muted p-2 rounded font-mono">{transaction.grn_number || "-"}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">GRN Quantity</p>
+                  <p className="bg-muted p-2 rounded">{transaction.grn_quantity || "-"}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Received Quantity</p>
+                  <p className="bg-muted p-2 rounded">{transaction.received_quantity || "-"}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Delivery Note Number</p>
+                  <p className="bg-muted p-2 rounded font-mono">{transaction.dn_number || "-"}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Service Invoice Number</p>
+                  <p className="bg-muted p-2 rounded font-mono">{transaction.service_invoice_number || "-"}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Remarks Section */}
+          <Card className="w-full">
+            <CardHeader>
+              <CardTitle>Remarks</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">General Remarks</p>
+                <p className="bg-muted p-2 rounded min-h-[100px]">{transaction.remark || "-"}</p>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Articles Section - Now supports multiple articles */}
+          <Card className="w-full">
+            <CardHeader>
+              <CardTitle>Articles ({articles.length})</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {articles.map((article, index) => (
+                <div key={article.id || index} className="border rounded-lg p-4 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-medium">Article {index + 1}</h4>
+                    {article.sku_id && (
+                      <Badge variant="outline" className="text-xs">
+                        SKU: {article.sku_id}
+                      </Badge>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Item Category *</p>
+                      <p className="bg-muted p-2 rounded">{article.item_category || "-"}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Sub Category *</p>
+                      <p className="bg-muted p-2 rounded">{article.sub_category || "-"}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Item Description *</p>
+                      <p className="bg-muted p-2 rounded">{article.item_description || "-"}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Quantity Units *</p>
+                      <p className="bg-muted p-2 rounded">{article.quantity_units || "-"}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Pack size ( weights )</p>
+                      <p className="bg-muted p-2 rounded">{article.packaging_type || "-"}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">UOM *</p>
+                      <p className="bg-muted p-2 rounded">{article.uom || "-"}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Net Weight *</p>
+                      <p className="bg-muted p-2 rounded">{article.net_weight ? `${article.net_weight} kg` : "-"}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Gross Weight *</p>
+                      <p className="bg-muted p-2 rounded">{article.total_weight ? `${article.total_weight} kg` : "-"}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Batch Number</p>
+                      <p className="bg-muted p-2 rounded font-mono">{article.batch_number || "-"}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Lot Number</p>
+                      <p className="bg-muted p-2 rounded font-mono">{article.lot_number || "-"}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Manufacturing Date</p>
+                      <p className="bg-muted p-2 rounded">{article.manufacturing_date || "-"}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Expiry Date</p>
+                      <p className="bg-muted p-2 rounded">{article.expiry_date || "-"}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Import Date</p>
+                      <p className="bg-muted p-2 rounded">{article.import_date || "-"}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Unit Rate</p>
+                      <p className="bg-muted p-2 rounded">₹{article.unit_rate?.toLocaleString() || "-"}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Total Amount</p>
+                      <p className="bg-muted p-2 rounded">₹{article.total_amount?.toLocaleString() || "-"}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Tax Amount</p>
+                      <p className="bg-muted p-2 rounded">₹{article.tax_amount?.toLocaleString() || "-"}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Discount Amount</p>
+                      <p className="bg-muted p-2 rounded">₹{article.discount_amount?.toLocaleString() || "-"}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Currency</p>
+                      <p className="bg-muted p-2 rounded">{article.currency || "-"}</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {articles.length === 0 && (
+                <div className="text-center py-8 text-gray-500">
+                  <p>No articles found for this transaction.</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Box Management - Now properly grouped by articles */}
+          <Card className="w-full">
+            <CardHeader>
+              <CardTitle>Box Management ({boxes.length} boxes)</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {boxes && boxes.length > 0 ? (
+                <div className="space-y-4">
+                  <div className="space-y-3">
+                    <h4 className="font-medium text-lg">Per-Article Summary</h4>
+                    <div className="grid gap-4">
+                      {articles.map((article, index) => {
+                        const articleBoxes = boxes.filter(box => box.article_description === article.item_description)
+                        return (
+                          <div key={article.id || index} className="p-4 border rounded-lg bg-gray-50">
+                            <div className="flex items-center justify-between mb-3">
+                              <h5 className="font-medium text-sm">{article.item_description || `Article ${index + 1}`}</h5>
+                              <Badge variant="outline">{articleBoxes.length} boxes</Badge>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                              <div>
+                                <span className="text-gray-600">Total Net Weight:</span>
+                                <span className="ml-2 font-medium">
+                                  {articleBoxes.reduce((sum, box) => sum + (box.net_weight || 0), 0).toFixed(2)} kg
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-gray-600">Total Gross Weight:</span>
+                                <span className="ml-2 font-medium">
+                                  {articleBoxes.reduce((sum, box) => sum + (box.gross_weight || 0), 0).toFixed(2)} kg
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto -mx-2 sm:mx-0">
+                    <div className="min-w-[600px] px-2 sm:px-0">
+                      <table className="w-full border-collapse border border-gray-300">
+        <thead>
+          <tr className="bg-gray-50">
+            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Box Number</th>
+            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Article Name</th>
+            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Lot Number</th>
+            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Net Weight (kg)</th>
+            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Gross Weight (kg)</th>
+            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Actions</th>
+          </tr>
+        </thead>
+                        <tbody>
+                          {boxes.map((box, index) => (
+                            <tr key={`${box.transaction_no}-${box.article_description}-${box.box_number}`} className="hover:bg-gray-50">
+                              <td className="border border-gray-300 px-4 py-2">
+                                <div className="flex items-center justify-center w-10 h-10 rounded-full bg-primary/10">
+                                  <span className="font-medium text-sm">{box.box_number}</span>
+                                </div>
+                              </td>
+                              <td className="border border-gray-300 px-4 py-2">
+                                <span className="text-sm font-medium">{box.article_description}</span>
+                              </td>
+                              <td className="border border-gray-300 px-4 py-2">
+                                <span className="text-sm">{box.lot_number || "-"}</span>
+                              </td>
+                              <td className="border border-gray-300 px-4 py-2">
+                                <span className="text-sm">{box.net_weight?.toFixed(2) || "-"}</span>
+                              </td>
+                              <td className="border border-gray-300 px-4 py-2">
+                                <span className="text-sm">{box.gross_weight?.toFixed(2) || "-"}</span>
+                              </td>
+                              <td className="border border-gray-300 px-4 py-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handlePrintBox(box)}
+                                  disabled={printingBoxes.has(box.box_number)}
+                                  className="flex items-center gap-2"
+                                >
+                                  {printingBoxes.has(box.box_number) ? (
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                  ) : (
+                                    <Printer className="w-4 h-4" />
+                                  )}
+                                  Print
+                                </Button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                    <div className="text-center">
+                      <p className="text-sm text-blue-700 font-medium">Total Boxes</p>
+                      <p className="text-2xl font-bold text-blue-900">{boxes.length}</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-sm text-blue-700 font-medium">Total Net Weight</p>
+                      <p className="text-2xl font-bold text-blue-900">
+                        {boxes.reduce((sum, box) => sum + (box.net_weight || 0), 0).toFixed(2)} kg
+                      </p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-sm text-blue-700 font-medium">Total Gross Weight</p>
+                      <p className="text-2xl font-bold text-blue-900">
+                        {boxes.reduce((sum, box) => sum + (box.gross_weight || 0), 0).toFixed(2)} kg
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-8 text-gray-500">
+                  <p>No boxes available for this record.</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Sidebar */}
+        <div className="space-y-4 sm:space-y-6">
+          <Card className="w-full">
+            <CardHeader>
+              <CardTitle>Quick Box Preview</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {boxes && boxes.slice(0, 5).map((box, index) => (
+                  <div key={`${box.transaction_no}-${box.article_description}-${box.box_number}`} className="flex items-center justify-between p-2 border rounded text-sm">
+                    <div>
+                      <span className="font-medium">Box {box.box_number}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline">{box.net_weight || 0}kg</Badge>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handlePrintBox(box)}
+                        disabled={printingBoxes.has(box.box_number)}
+                        className="h-6 px-2"
+                      >
+                        {printingBoxes.has(box.box_number) ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Printer className="w-3 h-3" />
+                        )}
+                      </Button>
                     </div>
                   </div>
                 ))}
+                {boxes && boxes.length > 5 && (
+                  <p className="text-sm text-muted-foreground text-center">+{boxes.length - 5} more boxes</p>
+                )}
+                {(!boxes || boxes.length === 0) && (
+                  <p className="text-sm text-muted-foreground text-center">No boxes generated</p>
+                )}
               </div>
             </CardContent>
           </Card>
 
-          {/* Right Column: Printer Selection & Print */}
-          <Card>
+          <Card className="w-full">
             <CardHeader>
-              <CardTitle className="flex items-center gap-3">
-                <Printer className="h-5 w-5" />
-                Printer & Settings
-              </CardTitle>
+              <CardTitle>Summary</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-6">
-              
-              {/* Printer Selection */}
-              <div>
-                <label className="block text-sm font-medium mb-2">Select Printer</label>
-                <Select value={selectedPrinter} onValueChange={setSelectedPrinter}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Choose a printer..." className="truncate">
-                      {selectedPrinter && (
-                        <div className="flex items-center gap-2 truncate">
-                          {getConnectionIcon(printers.find(p => p.name === selectedPrinter)?.type || "Network")}
-                          <span className="truncate">{selectedPrinter}</span>
-                        </div>
-                      )}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent className="max-w-md">
-                    {printers.map((printer) => (
-                      <SelectItem key={printer.name} value={printer.name} className="max-w-md">
-                        <div className="flex items-center gap-3 w-full min-w-0">
-                          {getConnectionIcon(printer.type)}
-                          <div className="flex-1 min-w-0">
-                            <div className="font-medium truncate" title={printer.name}>
-                              {printer.name}
-                            </div>
-                            <div className="text-sm text-gray-500 truncate">
-                              {printer.type} • {printer.status}
-                            </div>
-                          </div>
-                          <Badge 
-                            variant={printer.status === "online" ? "default" : "secondary"}
-                            className={printer.status === "online" ? "bg-green-100 text-green-800 flex-shrink-0" : "flex-shrink-0"}
-                          >
-                            {printer.status}
-                          </Badge>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+            <CardContent className="space-y-3">
+              <div className="flex justify-between">
+                <span className="text-sm text-muted-foreground">Total Articles:</span>
+                <span className="font-medium">{articles.length}</span>
               </div>
-
-              {/* Label Settings */}
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <h4 className="font-medium mb-2">Label Specifications</h4>
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <span className="text-gray-600">Size:</span>
-                    <span className="ml-2 font-medium">4" × 2"</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">DPI:</span>
-                    <span className="ml-2 font-medium">203</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">Format:</span>
-                    <span className="ml-2 font-medium">QR + Text</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">Copies:</span>
-                    <span className="ml-2 font-medium">1 per box</span>
-                  </div>
-                </div>
+              <div className="flex justify-between">
+                <span className="text-sm text-muted-foreground">Total Quantity:</span>
+                <span className="font-medium">
+                  {articles.reduce((sum, article) => sum + (article.quantity_units || 0), 0)}
+                </span>
               </div>
-
-              {/* Print Summary */}
-              <div className="bg-blue-50 p-4 rounded-lg">
-                <h4 className="font-medium mb-2 text-blue-800">Print Summary</h4>
-                <div className="text-sm text-blue-700">
-                  <div>Selected Boxes: {selectedBoxes.length}</div>
-                  <div>Articles: {articleGroups.filter(g => g.boxes.some(b => selectedBoxes.includes(b.box_number))).length}</div>
-                  <div>Total Labels: {selectedBoxes.length}</div>
-                </div>
+              <div className="flex justify-between">
+                <span className="text-sm text-muted-foreground">Total Boxes:</span>
+                <span className="font-medium">{boxes?.length || 0}</span>
               </div>
+              <div className="flex justify-between">
+                <span className="text-sm text-muted-foreground">Total Amount:</span>
+                <span className="font-bold">
+                  ₹{(transaction.total_amount || articles.reduce((sum, article) => sum + (article.total_amount || 0), 0)).toFixed(2)}
+                </span>
+              </div>
+            </CardContent>
+          </Card>
 
-              {/* Print Button */}
-              <Button
-                onClick={handlePrint}
-                disabled={selectedBoxes.length === 0 || !selectedPrinter || loading}
-                className="w-full h-12 text-lg"
-                size="lg"
-              >
-                <Printer className="h-5 w-5 mr-2" />
-                {loading ? "Processing..." : `Print ${selectedBoxes.length} Labels`}
+          <Card className="w-full">
+            <CardHeader>
+              <CardTitle>Quick Actions</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <Button variant="outline" className="w-full">
+                <Download className="mr-2 h-4 w-4" />
+                Download Report
+              </Button>
+              <Button variant="outline" className="w-full" asChild>
+                <Link href={`/${company}/inward/${id}/edit`}>
+                  <Edit className="mr-2 h-4 w-4" />
+                  Edit Record
+                </Link>
               </Button>
             </CardContent>
           </Card>
         </div>
       </div>
+
     </div>
   )
 }
-  
