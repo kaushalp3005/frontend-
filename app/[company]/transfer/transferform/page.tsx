@@ -451,6 +451,23 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     sub_category: articles[0]?.sub_category || "" 
   })
 
+  // Debug: Log dropdown options when they change
+  useEffect(() => {
+    console.log('🔍 DROPDOWN OPTIONS DEBUG:')
+    console.log('📌 Article[0] State:', {
+      material_type: articles[0]?.material_type,
+      item_category: articles[0]?.item_category,
+      sub_category: articles[0]?.sub_category,
+      item_description: articles[0]?.item_description
+    })
+    console.log('📋 Category Options:', itemCategories.length, 'options')
+    console.log('📋 SubCategory Options:', subCategories.length, 'options', subCategories.map(o => o.value))
+    console.log('📋 Description Options:', itemDescriptions.length, 'options', itemDescriptions.map(o => o.value))
+    console.log('✅ Category Match:', itemCategories.find(o => o.value === articles[0]?.item_category))
+    console.log('✅ SubCategory Match:', subCategories.find(o => o.value === articles[0]?.sub_category))
+    console.log('✅ Description Match:', itemDescriptions.find(o => o.value === articles[0]?.item_description))
+  }, [articles[0]?.material_type, articles[0]?.item_category, articles[0]?.sub_category, articles[0]?.item_description, itemCategories, subCategories, itemDescriptions])
+
   // Fallback data when API is not available
   const fallbackCategories = [
     { value: "raw_materials", label: "Raw Materials" },
@@ -566,6 +583,19 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
             return trimmedValue
           }
           
+          // Convert to Title Case to match dropdown options
+          const toTitleCase = (str: string) => {
+            if (!str) return str
+            return str.toLowerCase().replace(/\b\w/g, (char) => char.toUpperCase())
+          }
+          
+          // Normalize case to match dropdown format
+          const normalizeForDropdown = (value: string) => {
+            if (!value) return value
+            // Convert to Title Case for category fields (they use Title Case in dropdown)
+            return toTitleCase(value)
+          }
+          
           // Convert uppercase to CamelCase to match dropdown options
           const toCamelCase = (str: string) => {
             return str.toLowerCase()
@@ -610,21 +640,20 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
               return {
                 ...art,
                 // Auto-fill all item classification fields
-                // IMPORTANT: Keep values in original case from API to match dropdown options
-                // Values are kept in original case throughout (no uppercase conversion)
-                material_type: normalizeCase(normalizeField(firstItem.material_type)),
-                item_category: normalizeCase(normalizeField(firstItem.item_category)),
-                sub_category: normalizeCase(normalizeField(firstItem.sub_category)),
-                item_description: normalizeCase(normalizeField(firstItem.item_description)),
+                // Keep values exactly as returned from API - DO NOT transform case
+                material_type: normalizeField(firstItem.material_type),
+                item_category: normalizeField(firstItem.item_category),
+                sub_category: normalizeField(firstItem.sub_category),
+                item_description: normalizeField(firstItem.item_description),
 
                 // Auto-fill quantity and measurement fields
                 quantity_units: parseInt(firstItem.quantity) || 0,
-                uom: normalizeCase(normalizeField(firstItem.uom)),
+                uom: normalizeField(firstItem.uom),
                 packaging_type: parseFloat(firstItem.pack_size) || 0,
                 net_weight: parseFloat(firstItem.net_weight) || 0,
 
-                // Auto-fill SKU ID if available
-                sku_id: firstItem.sku_id || null,
+                // Auto-fill SKU ID if available (convert string to number)
+                sku_id: firstItem.sku_id ? parseInt(firstItem.sku_id) : null,
 
                 // Auto-fill batch/lot if available
                 batch_number: normalizeField(firstItem.batch_number) || "",
@@ -641,6 +670,14 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
           console.log('   - item_category case:', updatedArticles[0]?.item_category, '(should match dropdown options exactly)')
           console.log('   - sub_category case:', updatedArticles[0]?.sub_category, '(should match dropdown options exactly)')
           console.log('   - item_description case:', updatedArticles[0]?.item_description, '(should match dropdown options exactly)')
+          
+          // Debug: Log raw API values for comparison
+          console.log('📊 RAW API VALUES from request.lines[0]:')
+          console.log('   - material_type (raw):', firstItem.material_type)
+          console.log('   - item_category (raw):', firstItem.item_category)
+          console.log('   - sub_category (raw):', firstItem.sub_category)
+          console.log('   - item_description (raw):', firstItem.item_description)
+          
           setArticles(updatedArticles)
           
           // Store all items for display and initialize scanned counters
@@ -1379,69 +1416,93 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     // Prepare payload
     console.log('📦 Step 2: Preparing payload...')
     
+    // Get driver name and approval authority
+    const driverName = transferInfo.driverName === "other" ? transferInfo.driverNameOther : transferInfo.driverName
+    const approvalAuthority = transferInfo.approvalAuthorityOther
+    
+    console.log('🔍 Transfer Info Debug:')
+    console.log('  - transferInfo.driverName:', transferInfo.driverName)
+    console.log('  - transferInfo.driverNameOther:', transferInfo.driverNameOther)
+    console.log('  - transferInfo.approvalAuthorityOther:', transferInfo.approvalAuthorityOther)
+    console.log('  - Final driverName:', driverName)
+    console.log('  - Final approvalAuthority:', approvalAuthority)
+    
     const payload = {
-      request_no: requestNo,
-      transfer_no: transferNo,
-      request_date: toISODate(formData.requestDate),
-      from_warehouse: formData.fromWarehouse,
-      to_warehouse: formData.toWarehouse,
-      reason_code: formData.reason,
-      reason_description: formData.reasonDescription,
-      items: articles.map((article, index) => ({
-        line_number: index + 1,
+      header: {
+        challan_no: transferNo,
+        stock_trf_date: toISODate(formData.requestDate),
+        from_warehouse: formData.fromWarehouse,
+        to_warehouse: formData.toWarehouse,
+        vehicle_no: transferInfo.vehicleNumber === "other" ? transferInfo.vehicleNumberOther : transferInfo.vehicleNumber,
+        driver_name: driverName || null,
+        approved_by: approvalAuthority && approvalAuthority.trim() !== "" ? approvalAuthority : null,
+        remark: formData.reasonDescription || formData.reason,
+        reason_code: formData.reason
+      },
+      lines: articles.map((article, index) => ({
         material_type: article.material_type,
         item_category: article.item_category,
         sub_category: article.sub_category,
         item_description: article.item_description,
-        sku_id: article.sku_id,
-        quantity: article.quantity_units,
+        quantity: String(article.quantity_units),
         uom: article.uom,
-        pack_size: article.packaging_type,
-        package_size: 0, // Not used in transfer form
-        net_weight: article.net_weight
+        pack_size: String(article.packaging_type),
+        package_size: article.material_type === "FG" ? "0" : null,
+        batch_number: null,
+        lot_number: null
       })),
-      scanned_boxes: scannedBoxes
-        .filter(box => box.skuId !== null && box.skuId !== undefined && box.skuId !== '') // Filter out invalid boxes
-        .map((box, index) => ({
-          box_id: box.id,
-          transaction_no: box.transactionNo,
-          sku_id: String(box.skuId), // Convert to string
-          box_number_in_array: index + 1,
-          box_number: box.boxNumber,
-          item_description: box.itemDescription,
-          net_weight: parseFloat(box.netWeight),
-          gross_weight: parseFloat(box.totalWeight),
-          qr_data: box.rawData
-        })),
-      transport_info: {
-        vehicle_number: transferInfo.vehicleNumber === "other" ? transferInfo.vehicleNumberOther : transferInfo.vehicleNumber,
-        vehicle_number_other: transferInfo.vehicleNumber === "other" ? transferInfo.vehicleNumberOther : null,
-        driver_name: transferInfo.driverName === "other" ? transferInfo.driverNameOther : transferInfo.driverName,
-        driver_name_other: transferInfo.driverName === "other" ? transferInfo.driverNameOther : null,
-        driver_phone: getDriverPhone(transferInfo.driverName),
-        approval_authority: transferInfo.approvalAuthority === "other" ? transferInfo.approvalAuthorityOther : transferInfo.approvalAuthority
-      }
+      boxes: scannedBoxes.map((box) => ({
+        box_number: box.boxNumber,
+        article: box.itemDescription || "Unknown Article",
+        lot_number: box.lotNumber || "",
+        batch_number: box.batchNumber || "",
+        transaction_no: box.transactionNo || "",
+        net_weight: parseFloat(box.netWeight) || 0,
+        gross_weight: parseFloat(box.totalWeight) || 0
+      })),
+      request_id: requestIdFromUrl ? parseInt(requestIdFromUrl) : null
     }
 
     console.log('📦 Payload prepared:')
-    console.log('  - Request No:', payload.request_no)
-    console.log('  - Transfer No:', payload.transfer_no)
-    console.log('  - From:', payload.from_warehouse, '→ To:', payload.to_warehouse)
-    console.log('  - Items Count:', payload.items.length)
-    console.log('  - Scanned Boxes Count:', payload.scanned_boxes.length)
-    console.log('  - Vehicle:', payload.transport_info.vehicle_number)
-    console.log('  - Driver:', payload.transport_info.driver_name)
+    console.log('  - Challan No:', payload.header.challan_no)
+    console.log('  - Transfer Date:', payload.header.stock_trf_date)
+    console.log('  - From:', payload.header.from_warehouse, '→ To:', payload.header.to_warehouse)
+    console.log('  - Lines Count:', payload.lines.length)
+    console.log('  - Boxes Count:', payload.boxes.length)
+    console.log('  - Vehicle:', payload.header.vehicle_no)
+    console.log('  - Driver Name:', payload.header.driver_name)
+    console.log('  - Approved By:', payload.header.approved_by)
+    console.log('  - Reason:', payload.header.reason_code)
+    console.log('  - Request ID:', payload.request_id)
     console.log('📄 Full Payload:', JSON.stringify(payload, null, 2))
+    
+    // Debug: Log scanned boxes details
+    if (payload.boxes.length > 0) {
+      console.log('📦 ========== SCANNED BOXES DETAILS ==========')
+      payload.boxes.forEach((box, index) => {
+        console.log(`Box ${index + 1}:`)
+        console.log(`  - Box Number: ${box.box_number}`)
+        console.log(`  - Article: ${box.article}`)
+        console.log(`  - Transaction No: ${box.transaction_no}`)
+        console.log(`  - Batch Number: ${box.batch_number}`)
+        console.log(`  - Lot Number: ${box.lot_number}`)
+        console.log(`  - Net Weight: ${box.net_weight} gm`)
+        console.log(`  - Gross Weight: ${box.gross_weight} gm`)
+      })
+      console.log('='.repeat(50))
+    } else {
+      console.log('⚠️ No boxes scanned for this transfer')
+    }
     
     // Debug: Log the actual article values being sent
     console.log('🔍 DEBUG: Article values being sent:')
-    payload.items.forEach((item, index) => {
-      console.log(`  Item ${index + 1}:`)
-      console.log(`    - material_type: "${item.material_type}"`)
-      console.log(`    - item_category: "${item.item_category}"`)
-      console.log(`    - sub_category: "${item.sub_category}"`)
-      console.log(`    - item_description: "${item.item_description}"`)
-      console.log(`    - uom: "${item.uom}"`)
+    payload.lines.forEach((line, index) => {
+      console.log(`  Line ${index + 1}:`)
+      console.log(`    - material_type: "${line.material_type}"`)
+      console.log(`    - item_category: "${line.item_category}"`)
+      console.log(`    - sub_category: "${line.sub_category}"`)
+      console.log(`    - item_description: "${line.item_description}"`)
+      console.log(`    - uom: "${line.uom}"`)
     })
 
     try {
@@ -1455,12 +1516,12 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       
       toast({
         title: "Transfer Submitted Successfully",
-        description: `Transfer ${transferNo} has been approved and created successfully`,
+        description: `Transfer ${payload.header.challan_no} has been created successfully`,
       })
       
       console.log('🎉 ========== TRANSFER FORM SUBMISSION COMPLETED ==========')
-      console.log('Transfer Status: Approved')
-      console.log('Boxes Scanned:', scannedBoxes.length)
+      console.log('Transfer Status: Created')
+      console.log('Lines Submitted:', payload.lines.length)
       
       // Redirect back to transfer list
       setTimeout(() => {
@@ -1859,6 +1920,9 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                     }}
                     company={company}
                   />
+                  {requestIdFromUrl && index === 0 && (
+                    <p className="text-xs text-gray-500 mt-1">🔒 Loaded from request</p>
+                  )}
                 </div>
 
                 {/* Item Category */}
@@ -1885,8 +1949,11 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                       setArticles(updatedArticles)
                     }}
                     company={company}
-                    disabled={!article.material_type}
+                    disabled={!article.material_type || !!(requestIdFromUrl && index === 0)}
                   />
+                  {requestIdFromUrl && index === 0 && (
+                    <p className="text-xs text-gray-500 mt-1">🔒 Loaded from request</p>
+                  )}
                 </div>
 
                 {/* Sub Category */}
@@ -1913,9 +1980,12 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                       setArticles(updatedArticles)
                     }}
                     company={company}
-                    disabled={!article.material_type || !article.item_category}
+                    disabled={!article.material_type || !article.item_category || !!(requestIdFromUrl && index === 0)}
                     materialType={article.material_type}
                   />
+                  {requestIdFromUrl && index === 0 && (
+                    <p className="text-xs text-gray-500 mt-1">🔒 Loaded from request</p>
+                  )}
                 </div>
 
                 {/* Item Description */}
@@ -1943,8 +2013,11 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                     }}
                     company={company}
                     updateArticle={updateArticle}
-                    disabled={!article.material_type || !article.item_category || !article.sub_category}
+                    disabled={!article.material_type || !article.item_category || !article.sub_category || !!(requestIdFromUrl && index === 0)}
                   />
+                  {requestIdFromUrl && index === 0 && (
+                    <p className="text-xs text-gray-500 mt-1">🔒 Loaded from request</p>
+                  )}
                 </div>
 
                 {/* Quantity Units */}

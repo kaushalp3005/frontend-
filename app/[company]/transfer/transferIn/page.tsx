@@ -7,9 +7,12 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Textarea } from "@/components/ui/textarea"
 import { Loader2, Package, Search, Camera, ArrowLeft } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { InterunitApiService } from "@/lib/interunitApiService"
+import { secureApiClient } from "@/lib/auth/secureApiClient"
 import HighPerformanceQRScanner from "@/components/transfer/high-performance-qr-scanner"
 import type { Company } from "@/types/auth"
 
@@ -30,6 +33,8 @@ export default function TransferInPage({ params }: TransferInPageProps) {
   const [showScanner, setShowScanner] = useState(false)
   const [showBoxScanner, setShowBoxScanner] = useState(false)
   const [boxesMatchMap, setBoxesMatchMap] = useState<Record<string, boolean>>({})
+  const [boxCondition, setBoxCondition] = useState("Good")
+  const [conditionRemarks, setConditionRemarks] = useState("")
 
   // Load transfer details by transfer number
   const loadTransferDetails = async (transferNo: string) => {
@@ -101,33 +106,67 @@ export default function TransferInPage({ params }: TransferInPageProps) {
     if (transferData && transferData.boxes) {
       console.log('🔍 Processing as box scan...')
       
-      // Try to extract batch/lot from QR text
+      // Try to extract batch/transaction from QR text
       let scannedBatch = ''
+      let scannedTransNo = ''
+      
       try {
         const parsed = JSON.parse(decodedText)
         console.log('📄 Parsed QR data:', parsed)
-        scannedBatch = parsed.batch_number || parsed.lot_number || parsed.batch || ''
+        
+        // Extract batch number (bn, batch_number, lot_number, batch)
+        scannedBatch = (
+          parsed.bn || 
+          parsed.batch_number || 
+          parsed.lot_number || 
+          parsed.batch || 
+          ''
+        ).toString().trim()
+        
+        // Extract transaction/consumption number (cn, transaction_no, trans_no, consumption_no, cons_no)
+        scannedTransNo = (
+          parsed.cn || 
+          parsed.transaction_no || 
+          parsed.trans_no || 
+          parsed.consumption_no || 
+          parsed.cons_no || 
+          ''
+        ).toString().trim()
+        
+        console.log('🏷️ Extracted from QR - Batch:', scannedBatch, '| Trans/Cons No:', scannedTransNo)
       } catch (e) {
         // not JSON, maybe plain text containing batch
         console.log('📝 Treating as plain text batch number')
         scannedBatch = decodedText.trim()
       }
 
-      console.log('🏷️ Scanned batch:', scannedBatch)
+      console.log('🏷️ Final scan data - Batch:', scannedBatch, '| Trans No:', scannedTransNo)
 
-      if (scannedBatch) {
-        // Mark matched boxes where lot_number or batch_number equals scannedBatch
+      if (scannedBatch || scannedTransNo) {
+        // Mark matched boxes where BOTH batch_number AND transaction_no match
         const newMap: Record<string, boolean> = { ...boxesMatchMap }
         let foundMatch = false
+        let matchedBoxes: string[] = []
         
         transferData.boxes.forEach((b: any) => {
           const boxBatch = (b.batch_number || b.lot_number || '').toString().trim()
-          console.log(`📦 Box ${b.box_number}: batch="${boxBatch}" vs scanned="${scannedBatch}"`)
+          const boxTransNo = (b.transaction_no || '').toString().trim()
           
-          if (boxBatch && boxBatch === scannedBatch.toString().trim()) {
+          console.log(`📦 Box ${b.box_number}:`)
+          console.log(`   - DB Batch: "${boxBatch}" vs Scanned: "${scannedBatch}"`)
+          console.log(`   - DB Trans: "${boxTransNo}" vs Scanned: "${scannedTransNo}"`)
+          
+          // Match logic: Both batch AND transaction_no must match
+          const batchMatch = scannedBatch && boxBatch && boxBatch === scannedBatch
+          const transMatch = scannedTransNo && boxTransNo && boxTransNo === scannedTransNo
+          
+          console.log(`   - Batch Match: ${batchMatch}, Trans Match: ${transMatch}`)
+          
+          if (batchMatch && transMatch) {
             newMap[b.box_number || b.id] = true
             foundMatch = true
-            console.log(`✅ Match found for box ${b.box_number}`)
+            matchedBoxes.push(b.box_number)
+            console.log(`✅ MATCH FOUND for box ${b.box_number}`)
           }
         })
         
@@ -135,13 +174,13 @@ export default function TransferInPage({ params }: TransferInPageProps) {
         
         if (foundMatch) {
           toast({ 
-            title: '✓ Matched', 
-            description: `Box with batch ${scannedBatch} matched successfully`,
+            title: '✓ Box Matched', 
+            description: `Matched boxes: ${matchedBoxes.join(', ')} (Batch: ${scannedBatch}, Trans: ${scannedTransNo})`,
           })
         } else {
           toast({ 
-            title: '✗ Unmatched', 
-            description: `No box found with batch number: ${scannedBatch}`,
+            title: '✗ No Match', 
+            description: `No box found with Batch: "${scannedBatch}" AND Trans No: "${scannedTransNo}"`,
             variant: "destructive"
           })
         }
@@ -190,26 +229,45 @@ export default function TransferInPage({ params }: TransferInPageProps) {
     try {
       setLoading(true)
       console.log('✅ Confirming transfer receipt:', transferData.id)
+      console.log('📦 Box Condition:', boxCondition)
+      console.log('📝 Remarks:', conditionRemarks)
       
-      // Call backend API to update transfer status to "Received"
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/interunit/transfers/${transferData.id}/confirm`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
+      // Prepare scanned boxes data
+      const scannedBoxes = (transferData.boxes || [])
+        .filter((b: any) => boxesMatchMap[b.box_number || b.id])
+        .map((b: any) => ({
+          box_number: String(b.box_number || b.id || ''),
+          article: b.article ? String(b.article) : null,
+          batch_number: b.batch_number ? String(b.batch_number) : null,
+          lot_number: b.lot_number ? String(b.lot_number) : null,
+          transaction_no: b.transaction_no ? String(b.transaction_no) : null,
+          net_weight: b.net_weight ? Number(b.net_weight) : null,
+          gross_weight: b.gross_weight ? Number(b.gross_weight) : null,
+          is_matched: true
+        }))
+      
+      console.log('📦 Scanned boxes to save:', scannedBoxes.length)
+      console.log('📦 First box data:', scannedBoxes[0])
+      
+      // Generate GRN number (you can customize this format)
+      const grnNumber = `GRN-${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, '0')}${String(new Date().getDate()).padStart(2, '0')}${String(new Date().getHours()).padStart(2, '0')}${String(new Date().getMinutes()).padStart(2, '0')}${String(new Date().getSeconds()).padStart(2, '0')}`
+      
+      // Create Transfer IN via backend API with authentication
+      const data = await secureApiClient.post('/interunit/transfer-in', {
+        transfer_out_id: transferData.id,
+        grn_number: grnNumber,
+        receiving_warehouse: transferData.to_warehouse || transferData.to_site_code || 'UNKNOWN',
+        received_by: 'USER',  // You can get from auth context
+        box_condition: boxCondition,
+        condition_remarks: conditionRemarks.trim() || null,
+        scanned_boxes: scannedBoxes
       })
 
-      if (!response.ok) {
-        throw new Error('Failed to confirm transfer receipt')
-      }
-
-      const data = await response.json()
-      console.log('✅ Transfer confirmed:', data)
+      console.log('✅ Transfer IN created:', data)
       
       toast({
-        title: "Transfer Confirmed",
-        description: `Transfer ${transferData.challan_no} received successfully. All ${(transferData.boxes || []).length} boxes matched.`,
+        title: "Transfer IN Created",
+        description: `GRN ${grnNumber} created successfully with ${scannedBoxes.length} boxes.`,
       })
       
       // Redirect back to transfer page after 2 seconds
@@ -402,6 +460,42 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                     })}
                   </tbody>
                 </table>
+              </div>
+
+              {/* Box Condition and Remarks Section */}
+              <div className="mt-6 space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Box Condition Dropdown */}
+                  <div className="space-y-2">
+                    <Label htmlFor="boxCondition" className="text-sm font-medium text-gray-700">
+                      Box Condition
+                    </Label>
+                    <Select value={boxCondition} onValueChange={setBoxCondition}>
+                      <SelectTrigger id="boxCondition" className="h-10 bg-white">
+                        <SelectValue placeholder="Select condition" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Good">Good</SelectItem>
+                        <SelectItem value="Damaged">Damaged</SelectItem>
+                        <SelectItem value="Partial">Partial</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Remarks Textarea */}
+                  <div className="space-y-2">
+                    <Label htmlFor="conditionRemarks" className="text-sm font-medium text-gray-700">
+                      Remarks <span className="text-gray-400 font-normal">(Optional)</span>
+                    </Label>
+                    <Textarea
+                      id="conditionRemarks"
+                      value={conditionRemarks}
+                      onChange={(e) => setConditionRemarks(e.target.value)}
+                      placeholder="Enter any remarks about box condition..."
+                      className="h-10 resize-none bg-white"
+                    />
+                  </div>
+                </div>
               </div>
             </CardContent>
           </Card>

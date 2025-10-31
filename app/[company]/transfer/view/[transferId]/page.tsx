@@ -63,6 +63,8 @@ interface TransferDetail {
     box_number: number
     article: string
     lot_number: string
+    batch_number: string
+    transaction_no: string
     net_weight: number
     gross_weight: number
     created_at?: string
@@ -477,7 +479,7 @@ export default function TransferViewPage({ params }: TransferViewPageProps) {
                         <p className="text-sm font-semibold text-gray-900">{box.article}</p>
                       </div>
 
-                      {/* Box Details */}
+                      {/* Box Details - 2 columns */}
                       <div className="grid grid-cols-2 gap-2">
                         {/* Lot Number */}
                         <div className="space-y-1">
@@ -489,6 +491,18 @@ export default function TransferViewPage({ params }: TransferViewPageProps) {
                         <div className="space-y-1">
                           <p className="text-xs text-gray-600">Box ID</p>
                           <p className="text-sm font-medium text-gray-900">#{box.id}</p>
+                        </div>
+
+                        {/* Batch Number */}
+                        <div className="space-y-1">
+                          <p className="text-xs text-gray-600">Batch Number</p>
+                          <p className="text-sm font-medium text-gray-900">{box.batch_number || 'N/A'}</p>
+                        </div>
+
+                        {/* Transaction No */}
+                        <div className="space-y-1">
+                          <p className="text-xs text-gray-600">Transaction No</p>
+                          <p className="text-sm font-medium text-gray-900">{box.transaction_no || 'N/A'}</p>
                         </div>
                       </div>
 

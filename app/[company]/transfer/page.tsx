@@ -627,17 +627,6 @@ export default function TransferPage({ params }: TransferPageProps) {
                                   <FileText className="h-3 w-3 mr-1" />
                                   DC
                                 </Button>
-                                
-                                {/* Generate Transfer In Button */}
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => console.log('Transfer In:', transfer.transfer_no)}
-                                  className="h-7 px-2 bg-purple-50 border-purple-300 hover:bg-purple-100 text-purple-700 text-xs"
-                                >
-                                  <FileText className="h-3 w-3 mr-1" />
-                                  Transfer In
-                                </Button>
                               </div>
                             </td>
                           </tr>
