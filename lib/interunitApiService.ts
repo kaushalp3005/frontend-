@@ -123,6 +123,7 @@ export interface RequestLine {
   item_category: string
   sub_category: string
   item_description: string
+  sku_id?: string | null
   quantity: string
   uom: string
   pack_size: string
