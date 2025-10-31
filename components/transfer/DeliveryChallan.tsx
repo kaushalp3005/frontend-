@@ -73,13 +73,13 @@ export default function DeliveryChallan({
             }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '20px' }}>
                 <img 
-                  src="/candor-logo.jpeg" 
+                  src="/candor-logo.jpg" 
                   alt="Candor Foods Logo" 
-                  style={{ height: '60px', width: 'auto' }}
+                  style={{ height: '80px', width: 'auto' }}
                 />
                 <div>
-                  <div style={{ fontSize: '18px', fontWeight: 'bold' }}>CANDOR FOODS</div>
-                  <div style={{ fontSize: '14px', marginTop: '5px' }}>DELIVERY CHALLAN</div>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#8B4049' }}>CANDOR FOODS</div>
+                  <div style={{ fontSize: '16px', marginTop: '5px', color: '#333' }}>DELIVERY CHALLAN</div>
                 </div>
               </div>
             </td>
@@ -189,6 +189,160 @@ export default function DeliveryChallan({
               backgroundColor: '#f8f9fa'
             }}>
               This is a computer-generated delivery challan. No signature required.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      {/* Dotted separator line */}
+      <div style={{ 
+        margin: '30px 0', 
+        borderTop: '2px dashed #999',
+        position: 'relative'
+      }}>
+        <span style={{
+          position: 'absolute',
+          top: '-12px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          backgroundColor: 'white',
+          padding: '0 15px',
+          fontSize: '12px',
+          color: '#666',
+          fontWeight: 'bold'
+        }}>✂ CUT HERE</span>
+      </div>
+
+      {/* Gate Pass Section - Compact Version */}
+      <table style={{ 
+        width: '100%', 
+        borderCollapse: 'collapse', 
+        fontFamily: 'Arial, sans-serif',
+        fontSize: '9px',
+        marginTop: '15px',
+        pageBreakInside: 'avoid'
+      }}>
+        <thead>
+          <tr>
+            <td colSpan={4} style={{ 
+              textAlign: 'center', 
+              padding: '8px', 
+              borderBottom: '2px solid #000',
+              backgroundColor: '#f0f0f0'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
+                <img 
+                  src="/candor-logo.jpg" 
+                  alt="Candor Foods Logo" 
+                  style={{ height: '35px', width: 'auto' }}
+                />
+                <div>
+                  <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#8B4049' }}>CANDOR FOODS - GATE PASS</div>
+                </div>
+              </div>
+            </td>
+          </tr>
+        </thead>
+
+        <tbody>
+          {/* Compact Header Info - 2 rows */}
+          <tr>
+            <td style={{ padding: '5px', border: '1px solid #000', width: '25%' }}>
+              <strong>Transfer No:</strong> {dcNumber}
+            </td>
+            <td style={{ padding: '5px', border: '1px solid #000', width: '25%' }}>
+              <strong>Date:</strong> {requestDate}
+            </td>
+            <td style={{ padding: '5px', border: '1px solid #000', width: '25%' }}>
+              <strong>Vehicle:</strong> {vehicleNumber}
+            </td>
+            <td style={{ padding: '5px', border: '1px solid #000', width: '25%' }}>
+              <strong>Driver:</strong> {driverName}
+            </td>
+          </tr>
+
+          <tr>
+            <td colSpan={2} style={{ padding: '5px', border: '1px solid #000' }}>
+              <strong>From:</strong> {warehouseAddresses[fromWarehouse]?.name || fromWarehouse}
+            </td>
+            <td colSpan={2} style={{ padding: '5px', border: '1px solid #000' }}>
+              <strong>To:</strong> {warehouseAddresses[toWarehouse]?.name || toWarehouse}
+            </td>
+          </tr>
+
+          {/* Items Summary */}
+          <tr style={{ backgroundColor: '#f8f9fa' }}>
+            <td colSpan={4} style={{ padding: '5px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center' }}>
+              ITEMS SUMMARY
+            </td>
+          </tr>
+          <tr style={{ backgroundColor: '#f8f9fa' }}>
+            <td style={{ padding: '4px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center' }}>S.No</td>
+            <td style={{ padding: '4px', border: '1px solid #000', fontWeight: 'bold' }}>Item Description</td>
+            <td style={{ padding: '4px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center' }}>Qty</td>
+            <td style={{ padding: '4px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center' }}>UOM</td>
+          </tr>
+          {items.slice(0, 5).map((item, index) => (
+            <tr key={index}>
+              <td style={{ padding: '3px', border: '1px solid #000', textAlign: 'center' }}>{index + 1}</td>
+              <td style={{ padding: '3px', border: '1px solid #000' }}>
+                {item.item_desc_raw || item.item_description || 'N/A'}
+              </td>
+              <td style={{ padding: '3px', border: '1px solid #000', textAlign: 'center', fontWeight: 'bold' }}>
+                {item.qty || item.quantity || 0}
+              </td>
+              <td style={{ padding: '3px', border: '1px solid #000', textAlign: 'center' }}>
+                {item.uom || 'N/A'}
+              </td>
+            </tr>
+          ))}
+          {items.length > 5 && (
+            <tr>
+              <td colSpan={4} style={{ padding: '3px', border: '1px solid #000', textAlign: 'center', fontStyle: 'italic', color: '#666' }}>
+                ... and {items.length - 5} more items (See Delivery Challan above for full details)
+              </td>
+            </tr>
+          )}
+
+          {/* Summary Totals */}
+          <tr style={{ backgroundColor: '#f8f9fa' }}>
+            <td style={{ padding: '4px', border: '1px solid #000', fontWeight: 'bold' }}>Total Items: {items.length}</td>
+            <td style={{ padding: '4px', border: '1px solid #000', fontWeight: 'bold' }}>Total Qty: {totalQtyRequired}</td>
+            <td style={{ padding: '4px', border: '1px solid #000', fontWeight: 'bold' }}>Boxes: {boxesProvided}</td>
+            <td style={{ padding: '4px', border: '1px solid #000', textAlign: 'center' }}>
+              <span style={{ 
+                color: boxesPending > 0 ? '#dc2626' : '#16a34a', 
+                fontWeight: 'bold' 
+              }}>
+                {boxesPending > 0 ? 'PARTIAL' : 'COMPLETE'}
+              </span>
+            </td>
+          </tr>
+
+          {/* Compact Signatures Section */}
+          <tr>
+            <td colSpan={2} style={{ padding: '20px 5px 5px 5px', border: '1px solid #000', textAlign: 'center' }}>
+              <div style={{ borderTop: '1px solid #000', paddingTop: '3px', marginTop: '25px' }}>
+                <strong>Security Sign</strong>
+              </div>
+            </td>
+            <td colSpan={2} style={{ padding: '20px 5px 5px 5px', border: '1px solid #000', textAlign: 'center' }}>
+              <div style={{ borderTop: '1px solid #000', paddingTop: '3px', marginTop: '25px' }}>
+                <strong>Driver Sign</strong>
+              </div>
+            </td>
+          </tr>
+
+          <tr>
+            <td colSpan={4} style={{ 
+              padding: '5px', 
+              border: '1px solid #000',
+              textAlign: 'center',
+              fontSize: '8px',
+              fontStyle: 'italic',
+              backgroundColor: '#f8f9fa'
+            }}>
+              Present this gate pass at security gate • Authorized by: {approvalAuthority}
             </td>
           </tr>
         </tbody>

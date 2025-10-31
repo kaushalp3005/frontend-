@@ -48,7 +48,7 @@ export function SearchableSelect({
   const [open, setOpen] = React.useState(false)
   const [searchQuery, setSearchQuery] = React.useState("")
 
-  const selectedOption = options.find((option) => option.value === value)
+  const selectedOption = options.find((option) => option.value.toLowerCase() === value.toLowerCase())
 
   // Use options directly from parent (no local filtering)
   // The parent component handles the filtering via API calls
@@ -133,7 +133,7 @@ export function SearchableSelect({
                         <Check
                           className={cn(
                             "h-4 w-4 flex-shrink-0",
-                            value === option.value ? "opacity-100" : "opacity-0"
+                            value.toLowerCase() === option.value.toLowerCase() ? "opacity-100" : "opacity-0"
                           )}
                         />
                         <span className="truncate block overflow-hidden text-ellipsis whitespace-nowrap flex-1 min-w-0">
