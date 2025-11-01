@@ -920,6 +920,18 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       // Try to parse JSON from QR code
       const qrData = JSON.parse(decodedText)
       
+      console.log('📱 QR Data Received:', qrData)
+      console.log('🔍 Checking item_description fields:', {
+        item_description: qrData.item_description,
+        id: qrData.id,
+        it: qrData.it,
+        description: qrData.description,
+        article: qrData.article,
+        article_name: qrData.article_name,
+        item: qrData.item,
+        itemDescription: qrData.itemDescription
+      })
+      
       // Check if this is a BOX QR code (has transaction_no, cn, tx, or bt key)
       const boxId = qrData.transaction_no || qrData.cn || qrData.tx || qrData.bt || null
       const hasBoxData = qrData.transaction_no || qrData.cn || qrData.tx || qrData.batch_number || qrData.bt || qrData.box_number || qrData.bx ||
@@ -1039,8 +1051,8 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
             if (matchingBox || matchingArticle) {
               boxData = {
                 ...qrData,
-                // Basic identifiers
-                item_description: matchingArticle?.item_description || matchingBox?.article_description || qrData.item_description || qrData.id || qrData.it || qrData.description,
+                // Basic identifiers - Enhanced item_description extraction
+                item_description: matchingArticle?.item_description || matchingBox?.article_description || matchingBox?.article || matchingBox?.article_name || qrData.item_description || qrData.id || qrData.it || qrData.description || qrData.article || qrData.article_name || qrData.item || qrData.itemDescription,
                 sku_id: matchingArticle?.sku_id || matchingBox?.sku_id || qrData.sku_id || qrData.sk || skuId,
 
                 // Category information
@@ -1088,8 +1100,8 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
           boxNumber: uniqueId, // Display number (also unique)
           boxId: boxId || boxData.batch_number || boxData.bn || boxData.bt || 'N/A',
 
-          // Basic identification
-          itemDescription: boxData.item_description || boxData.id || boxData.it || boxData.description || 'N/A',
+          // Basic identification - Enhanced item_description with multiple fallbacks
+          itemDescription: boxData.item_description || boxData.id || boxData.it || boxData.description || boxData.article || boxData.article_name || boxData.item || boxData.itemDescription || 'N/A',
           skuId: boxData.sku_id || boxData.sk || skuId,
           transactionNo: transactionNo,
           boxNumberInArray: boxNumber,
@@ -1099,9 +1111,31 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
           itemCategory: boxData.item_category || boxData.ic || 'N/A',
           subCategory: boxData.sub_category || boxData.sc || 'N/A',
 
-          // Weight information
-          netWeight: String(boxData.net_weight || boxData.nw || boxData.netWeight || '0'),
-          totalWeight: String(boxData.total_weight || boxData.gw || boxData.tw || boxData.wt || boxData.totalWeight || boxData.gross_weight || '0'),
+          // Weight information - Convert GM to KG for FINISHED GOODS
+          netWeight: (() => {
+            const materialType = boxData.material_type || boxData.mt || ''
+            const netWeightGm = parseFloat(boxData.net_weight || boxData.nw || boxData.netWeight || '0')
+            
+            // Convert to KG if FINISHED GOODS
+            if (materialType.toUpperCase().includes('FINISH')) {
+              const netWeightKg = (netWeightGm / 1000).toFixed(3)
+              console.log(`🔄 Weight Conversion (Net): ${netWeightGm} GM → ${netWeightKg} KG`)
+              return String(netWeightKg)
+            }
+            return String(netWeightGm)
+          })(),
+          totalWeight: (() => {
+            const materialType = boxData.material_type || boxData.mt || ''
+            const totalWeightGm = parseFloat(boxData.total_weight || boxData.gw || boxData.tw || boxData.wt || boxData.totalWeight || boxData.gross_weight || '0')
+            
+            // Convert to KG if FINISHED GOODS
+            if (materialType.toUpperCase().includes('FINISH')) {
+              const totalWeightKg = (totalWeightGm / 1000).toFixed(3)
+              console.log(`🔄 Weight Conversion (Total): ${totalWeightGm} GM → ${totalWeightKg} KG`)
+              return String(totalWeightKg)
+            }
+            return String(totalWeightGm)
+          })(),
 
           // Batch and lot information
           batchNumber: boxData.batch_number || boxData.bn || boxData.bt || 'N/A',
@@ -1132,8 +1166,8 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         console.log('  - Material Type:', newBox.materialType)
         console.log('  - Category:', newBox.itemCategory)
         console.log('  - Sub-Category:', newBox.subCategory)
-        console.log('  - Net Weight:', newBox.netWeight)
-        console.log('  - Total Weight:', newBox.totalWeight)
+        console.log('  - Net Weight:', newBox.netWeight, newBox.materialType.toUpperCase().includes('FINISH') ? 'KG' : 'GM')
+        console.log('  - Total Weight:', newBox.totalWeight, newBox.materialType.toUpperCase().includes('FINISH') ? 'KG' : 'GM')
         console.log('  - Batch Number:', newBox.batchNumber)
         console.log('  - Lot Number:', newBox.lotNumber)
         console.log('  - Manufacturing Date:', newBox.manufacturingDate)
@@ -1853,15 +1887,15 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       {/* Article Management Section */}
       <div className="space-y-4">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-0">
           <div className="flex items-center space-x-2">
-            <div className="h-6 w-6 rounded bg-gray-200 flex items-center justify-center">
-              <div className="h-3 w-3 bg-gray-400 rounded-sm"></div>
+            <div className="h-5 sm:h-6 w-5 sm:w-6 rounded bg-gray-200 flex items-center justify-center">
+              <div className="h-2.5 sm:h-3 w-2.5 sm:w-3 bg-gray-400 rounded-sm"></div>
             </div>
-            <h2 className="text-lg font-semibold text-gray-700">Article Management</h2>
+            <h2 className="text-base sm:text-lg font-semibold text-gray-700">Article Management</h2>
           </div>
-          <Button onClick={addArticle} size="sm" className="w-full sm:w-auto">
-            <Plus className="mr-2 h-4 w-4" />
+          <Button onClick={addArticle} size="sm" className="w-full sm:w-auto h-8 sm:h-9 text-xs sm:text-sm">
+            <Plus className="mr-1 sm:mr-2 h-3 sm:h-4 w-3 sm:w-4" />
             Add Article
           </Button>
         </div>
@@ -2212,38 +2246,36 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
 
         {/* Scanned Boxes Section */}
         <Card className="w-full bg-white border-gray-200">
-          <CardHeader className="pb-3 bg-gray-50">
-            <div className="flex items-center justify-between">
+          <CardHeader className="pb-3 bg-gray-50 px-3 sm:px-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex-1">
-                <div className="flex items-center gap-3">
-                  <CardTitle className="text-base font-semibold text-gray-800 flex items-center">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+                  <CardTitle className="text-sm sm:text-base font-semibold text-gray-800 flex items-center">
                     <Package className="h-4 w-4 mr-2" />
                     Scanned Boxes ({scannedBoxes.length})
                   </CardTitle>
                   {(articles[0]?.quantity_units || 0) > 0 && (
-                    <div className="flex items-center gap-2">
-                      <div className="h-5 w-px bg-gray-300"></div>
-                      <div className="flex items-center gap-2 text-sm">
-                        <span className="text-gray-600">Request Qty:</span>
-                        <span className="font-semibold text-gray-800">{articles[0]?.quantity_units}</span>
-                        <span className="text-gray-400">|</span>
-                        <span className="text-gray-600">Pending:</span>
-                        <span className={`font-bold ${
-                          (articles[0]?.quantity_units || 0) - scannedBoxes.length > 0 
-                            ? 'text-orange-600' 
-                            : 'text-green-600'
-                        }`}>
-                          {(articles[0]?.quantity_units || 0) - scannedBoxes.length}
-                        </span>
-                        {articles[0]?.item_description && (
-                          <>
-                            <span className="text-gray-400">•</span>
-                            <span className="text-gray-700 font-medium truncate max-w-[300px]" title={articles[0]?.item_description}>
-                              {articles[0]?.item_description}
-                            </span>
-                          </>
-                        )}
-                      </div>
+                    <div className="flex flex-wrap items-center gap-2 text-xs sm:text-sm">
+                      <div className="hidden sm:block h-5 w-px bg-gray-300"></div>
+                      <span className="text-gray-600">Qty:</span>
+                      <span className="font-semibold text-gray-800">{articles[0]?.quantity_units}</span>
+                      <span className="text-gray-400">|</span>
+                      <span className="text-gray-600">Pending:</span>
+                      <span className={`font-bold ${
+                        (articles[0]?.quantity_units || 0) - scannedBoxes.length > 0 
+                          ? 'text-orange-600' 
+                          : 'text-green-600'
+                      }`}>
+                        {(articles[0]?.quantity_units || 0) - scannedBoxes.length}
+                      </span>
+                      {articles[0]?.item_description && (
+                        <>
+                          <span className="hidden sm:inline text-gray-400">•</span>
+                          <span className="text-gray-700 font-medium truncate max-w-[200px] sm:max-w-[300px]" title={articles[0]?.item_description}>
+                            {articles[0]?.item_description}
+                          </span>
+                        </>
+                      )}
                     </div>
                   )}
                 </div>
@@ -2257,14 +2289,14 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                   variant="outline"
                   size="sm"
                   onClick={() => setScannedBoxes([])}
-                  className="h-7 px-3 text-xs"
+                  className="h-7 px-3 text-xs w-full sm:w-auto"
                 >
                   Clear All
                 </Button>
               )}
             </div>
           </CardHeader>
-          <CardContent className="pt-0 bg-white">
+          <CardContent className="pt-0 bg-white px-3 sm:px-6">
             {scannedBoxes.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-8 text-center">
                 <Package className="h-12 w-12 text-gray-300 mb-3" />
@@ -2274,106 +2306,176 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                 </p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-200 bg-gray-50">
-                      <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Box No</th>
-                      <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Item Description</th>
-                      <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Material Type</th>
-                      <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Category</th>
-                      <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Net Wt</th>
-                      <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Total Wt</th>
-                      <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Batch No</th>
-                      <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Lot No</th>
-                      <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Mfg Date</th>
-                      <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Exp Date</th>
-                      <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Transaction No</th>
-                      <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Time</th>
-                      <th className="text-center py-2 px-2 text-xs font-medium text-gray-700">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {scannedBoxes.map((box) => (
-                      <tr key={box.id} className="border-b border-gray-100 hover:bg-gray-50">
-                        <td className="py-2 px-2 text-xs text-gray-800 font-medium">
-                          #{box.boxNumber}
-                        </td>
-                        <td className="py-2 px-2 text-xs text-gray-700">
-                          <div className="max-w-[200px] truncate" title={box.itemDescription}>
-                            {box.itemDescription}
+              <>
+                {/* Mobile Card View */}
+                <div className="md:hidden space-y-3">
+                  {scannedBoxes.map((box) => (
+                    <div key={box.id} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-blue-600 bg-blue-100 px-2 py-1 rounded">
+                            Box #{box.boxNumber}
+                          </span>
+                          <span className="text-xs font-medium text-gray-600 bg-gray-200 px-2 py-1 rounded">
+                            {box.materialType !== 'N/A' ? box.materialType : '-'}
+                          </span>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleRemoveBox(box.id)}
+                          className="h-6 w-6 p-0"
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
+                      
+                      <div className="space-y-1.5 text-xs">
+                        <div>
+                          <span className="text-gray-500">Item:</span>
+                          <span className="ml-2 text-gray-800 font-medium">{box.itemDescription}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">Category:</span>
+                          <span className="ml-2 text-gray-700">{box.itemCategory !== 'N/A' ? box.itemCategory : '-'}</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 pt-1">
+                          <div>
+                            <span className="text-gray-500">Net Wt:</span>
+                            <span className="ml-1 text-gray-800 font-medium">
+                              {box.netWeight} {box.materialType.toUpperCase().includes('FINISH') ? 'kg' : 'g'}
+                            </span>
                           </div>
-                        </td>
-                        <td className="py-2 px-2 text-xs text-gray-600">
-                          {box.materialType !== 'N/A' ? box.materialType : '-'}
-                        </td>
-                        <td className="py-2 px-2 text-xs text-gray-600">
-                          <div className="max-w-[120px] truncate" title={box.itemCategory}>
-                            {box.itemCategory !== 'N/A' ? box.itemCategory : '-'}
+                          <div>
+                            <span className="text-gray-500">Total Wt:</span>
+                            <span className="ml-1 text-gray-800 font-medium">
+                              {box.totalWeight} {box.materialType.toUpperCase().includes('FINISH') ? 'kg' : 'g'}
+                            </span>
                           </div>
-                        </td>
-                        <td className="py-2 px-2 text-xs text-gray-700">
-                          {box.netWeight} {box.transactionNo?.startsWith('CONS') ? 'g' : 'kg'}
-                        </td>
-                        <td className="py-2 px-2 text-xs text-gray-700">
-                          {box.totalWeight} {box.transactionNo?.startsWith('CONS') ? 'g' : 'kg'}
-                        </td>
-                        <td className="py-2 px-2 text-xs">
-                          <span className="font-mono text-gray-700">
-                            {box.batchNumber !== 'N/A' ? box.batchNumber : '-'}
-                          </span>
-                        </td>
-                        <td className="py-2 px-2 text-xs">
-                          <span className="font-mono text-gray-700">
-                            {box.lotNumber !== 'N/A' ? box.lotNumber : '-'}
-                          </span>
-                        </td>
-                        <td className="py-2 px-2 text-xs text-gray-600">
-                          {box.manufacturingDate !== 'N/A' ? box.manufacturingDate : '-'}
-                        </td>
-                        <td className="py-2 px-2 text-xs text-gray-600">
-                          {box.expiryDate !== 'N/A' ? box.expiryDate : '-'}
-                        </td>
-                        <td className="py-2 px-2 text-xs">
-                          <span className="font-mono text-gray-800 font-medium">
-                            {box.transactionNo || 'N/A'}
-                          </span>
-                        </td>
-                        <td className="py-2 px-2 text-xs text-gray-500">
-                          {box.scannedAt}
-                        </td>
-                        <td className="py-2 px-2 text-center">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleRemoveBox(box.id)}
-                            className="h-6 w-6 p-0"
-                          >
-                            <X className="h-3 w-3" />
-                          </Button>
-                        </td>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <span className="text-gray-500">Batch:</span>
+                            <span className="ml-1 text-gray-700 font-mono">{box.batchNumber !== 'N/A' ? box.batchNumber : '-'}</span>
+                          </div>
+                          <div>
+                            <span className="text-gray-500">Lot:</span>
+                            <span className="ml-1 text-gray-700 font-mono">{box.lotNumber !== 'N/A' ? box.lotNumber : '-'}</span>
+                          </div>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">Transaction:</span>
+                          <span className="ml-1 text-gray-800 font-mono font-medium">{box.transactionNo || 'N/A'}</span>
+                        </div>
+                        <div className="text-gray-400 text-[10px] pt-1">{box.scannedAt}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Desktop Table View */}
+                <div className="hidden md:block overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-200 bg-gray-50">
+                        <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Box No</th>
+                        <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Item Description</th>
+                        <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Material Type</th>
+                        <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Category</th>
+                        <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Net Wt</th>
+                        <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Total Wt</th>
+                        <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Batch No</th>
+                        <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Lot No</th>
+                        <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Mfg Date</th>
+                        <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Exp Date</th>
+                        <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Transaction No</th>
+                        <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Time</th>
+                        <th className="text-center py-2 px-2 text-xs font-medium text-gray-700">Action</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {scannedBoxes.map((box) => (
+                        <tr key={box.id} className="border-b border-gray-100 hover:bg-gray-50">
+                          <td className="py-2 px-2 text-xs text-gray-800 font-medium">
+                            #{box.boxNumber}
+                          </td>
+                          <td className="py-2 px-2 text-xs text-gray-700">
+                            <div className="max-w-[200px] truncate" title={box.itemDescription}>
+                              {box.itemDescription}
+                            </div>
+                          </td>
+                          <td className="py-2 px-2 text-xs text-gray-600">
+                            {box.materialType !== 'N/A' ? box.materialType : '-'}
+                          </td>
+                          <td className="py-2 px-2 text-xs text-gray-600">
+                            <div className="max-w-[120px] truncate" title={box.itemCategory}>
+                              {box.itemCategory !== 'N/A' ? box.itemCategory : '-'}
+                            </div>
+                          </td>
+                          <td className="py-2 px-2 text-xs text-gray-700">
+                            {box.netWeight} {box.materialType.toUpperCase().includes('FINISH') ? 'kg' : 'g'}
+                          </td>
+                          <td className="py-2 px-2 text-xs text-gray-700">
+                            {box.totalWeight} {box.materialType.toUpperCase().includes('FINISH') ? 'kg' : 'g'}
+                          </td>
+                          <td className="py-2 px-2 text-xs">
+                            <span className="font-mono text-gray-700">
+                              {box.batchNumber !== 'N/A' ? box.batchNumber : '-'}
+                            </span>
+                          </td>
+                          <td className="py-2 px-2 text-xs">
+                            <span className="font-mono text-gray-700">
+                              {box.lotNumber !== 'N/A' ? box.lotNumber : '-'}
+                            </span>
+                          </td>
+                          <td className="py-2 px-2 text-xs text-gray-600">
+                            {box.manufacturingDate !== 'N/A' ? box.manufacturingDate : '-'}
+                          </td>
+                          <td className="py-2 px-2 text-xs text-gray-600">
+                            {box.expiryDate !== 'N/A' ? box.expiryDate : '-'}
+                          </td>
+                          <td className="py-2 px-2 text-xs">
+                            <span className="font-mono text-gray-800 font-medium">
+                              {box.transactionNo || 'N/A'}
+                            </span>
+                          </td>
+                          <td className="py-2 px-2 text-xs text-gray-500">
+                            {box.scannedAt}
+                          </td>
+                          <td className="py-2 px-2 text-center">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleRemoveBox(box.id)}
+                              className="h-6 w-6 p-0"
+                            >
+                              <X className="h-3 w-3" />
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
                 
                 {/* Summary */}
                 <div className="mt-3 p-3 bg-gray-50 rounded border border-gray-200">
-                  <div className="grid grid-cols-5 gap-4 text-center">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4 text-center">
                     <div>
                       <p className="text-xs text-gray-600 mb-1">Total Boxes</p>
-                      <p className="text-lg font-bold text-gray-800">{scannedBoxes.length}</p>
+                      <p className="text-base sm:text-lg font-bold text-gray-800">{scannedBoxes.length}</p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-600 mb-1">Request Qty</p>
-                      <p className="text-lg font-bold text-blue-600">
+                      <p className="text-base sm:text-lg font-bold text-blue-600">
                         {articles[0]?.quantity_units || 0}
                       </p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-600 mb-1">Remaining</p>
-                      <p className={`text-lg font-bold ${
+                      <p className={`text-base sm:text-lg font-bold ${
                         (articles[0]?.quantity_units || 0) - scannedBoxes.length > 0 
                           ? 'text-orange-600' 
                           : 'text-green-600'
@@ -2382,20 +2484,26 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                       </p>
                     </div>
                     <div>
-                      <p className="text-xs text-gray-600 mb-1">Total Net Weight</p>
-                      <p className="text-lg font-bold text-gray-800">
-                        {scannedBoxes.reduce((sum, box) => sum + parseFloat(box.netWeight || '0'), 0).toFixed(2)} kg
+                      <p className="text-xs text-gray-600 mb-1">Total Net Wt</p>
+                      <p className="text-base sm:text-lg font-bold text-gray-800">
+                        {scannedBoxes.reduce((sum, box) => {
+                          const weight = parseFloat(box.netWeight || '0')
+                          return sum + (box.materialType.toUpperCase().includes('FINISH') ? weight : weight / 1000)
+                        }, 0).toFixed(3)} kg
                       </p>
                     </div>
                     <div>
-                      <p className="text-xs text-gray-600 mb-1">Total Weight</p>
-                      <p className="text-lg font-bold text-gray-800">
-                        {scannedBoxes.reduce((sum, box) => sum + parseFloat(box.totalWeight || '0'), 0).toFixed(2)} kg
+                      <p className="text-xs text-gray-600 mb-1">Total Wt</p>
+                      <p className="text-base sm:text-lg font-bold text-gray-800">
+                        {scannedBoxes.reduce((sum, box) => {
+                          const weight = parseFloat(box.totalWeight || '0')
+                          return sum + (box.materialType.toUpperCase().includes('FINISH') ? weight : weight / 1000)
+                        }, 0).toFixed(3)} kg
                       </p>
                     </div>
                   </div>
                 </div>
-              </div>
+              </>
             )}
           </CardContent>
         </Card>
@@ -2429,24 +2537,24 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
 
         {/* Submit Section */}
         <Card className="w-full bg-gray-50 border-gray-200">
-          <CardContent className="pt-4 bg-gray-50">
-            <div className="flex items-center justify-between">
-              <p className="text-sm text-gray-600">
+          <CardContent className="pt-3 sm:pt-4 bg-gray-50 px-3 sm:px-6">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0">
+              <p className="text-xs sm:text-sm text-gray-600">
                 Transfer will be submitted with <span className="font-semibold text-green-700">Approved</span> status
               </p>
-              <div className="flex space-x-2">
+              <div className="flex w-full sm:w-auto space-x-2">
                 <Button 
                   type="button" 
                   variant="outline" 
                   onClick={() => router.back()}
-                  className="h-8 px-3 text-xs bg-white border-gray-300 text-gray-700 hover:bg-gray-100"
-                > Cancel
-                </Button>
+                  className="flex-1 sm:flex-none h-8 sm:h-9 px-3 sm:px-4 text-xs sm:text-sm bg-white border-gray-300 text-gray-700 hover:bg-gray-100"
+                >Cancel</Button>
                 <Button 
                   type="submit"
-                  className="bg-black hover:bg-gray-800 text-white h-8 px-3 text-xs">
-                  <Send className="mr-2 h-3 w-3" />
-                  Submit Transfer
+                  className="flex-1 sm:flex-none bg-black hover:bg-gray-800 text-white h-8 sm:h-9 px-3 sm:px-4 text-xs sm:text-sm">
+                  <Send className="mr-1 sm:mr-2 h-3 w-3" />
+                  <span className="hidden sm:inline">Submit Transfer</span>
+                  <span className="sm:hidden">Submit</span>
                 </Button>
               </div>
             </div>

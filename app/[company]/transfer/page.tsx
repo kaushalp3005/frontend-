@@ -282,45 +282,45 @@ export default function TransferPage({ params }: TransferPageProps) {
   }
 
   return (
-    <div className="p-3 sm:p-4 lg:p-6 space-y-4 sm:space-y-6 bg-gray-100 min-h-screen">
+    <div className="p-3 sm:p-4 lg:p-6 space-y-3 sm:space-y-4 lg:space-y-6 bg-gray-50 min-h-screen">
       {/* Header */}
-      <div className="space-y-2">
-        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Inter-Unit Transfer</h1>
-        <p className="text-sm sm:text-base text-muted-foreground">
+      <div className="space-y-1 sm:space-y-2">
+        <h1 className="text-lg sm:text-2xl lg:text-3xl font-bold tracking-tight">Inter-Unit Transfer</h1>
+        <p className="text-xs sm:text-sm lg:text-base text-muted-foreground">
           Manage stock transfers between sites
         </p>
       </div>
 
-      {/* Tabs */}
+      {/* Tabs - Mobile 2x2 Grid, Desktop 4 columns */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-4">
-          <TabsTrigger value="request">Request</TabsTrigger>
-          <TabsTrigger value="transferout">Transfer Out</TabsTrigger>
-          <TabsTrigger value="transferin">Transfer In</TabsTrigger>
-          <TabsTrigger value="details">All Transfers</TabsTrigger>
+        <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 gap-1 h-auto p-1">
+          <TabsTrigger value="request" className="text-xs sm:text-sm py-2.5 px-2">Request</TabsTrigger>
+          <TabsTrigger value="transferout" className="text-xs sm:text-sm py-2.5 px-2">Transfer Out</TabsTrigger>
+          <TabsTrigger value="transferin" className="text-xs sm:text-sm py-2.5 px-2">Transfer In</TabsTrigger>
+          <TabsTrigger value="details" className="text-xs sm:text-sm py-2.5 px-2">All Transfers</TabsTrigger>
         </TabsList>
 
         {/* Request Tab */}
-        <TabsContent value="request" className="space-y-4">
+        <TabsContent value="request" className="space-y-3 sm:space-y-4">
           <Card className="w-full bg-gray-50 border-gray-200">
-            <CardHeader className="pb-4 bg-gray-100">
-              <CardTitle className="text-lg font-semibold text-gray-700">
+            <CardHeader className="pb-3 sm:pb-4 bg-gray-100 px-3 sm:px-6">
+              <CardTitle className="text-sm sm:text-base lg:text-lg font-semibold text-gray-700">
                 Create New Transfer Request
               </CardTitle>
-              <p className="text-sm text-gray-500">
+              <p className="text-xs sm:text-sm text-gray-500 mt-1">
                 Submit a request to receive stock from another warehouse
               </p>
             </CardHeader>
-            <CardContent className="pt-0 bg-gray-50">
-              <div className="space-y-4">
-                <p className="text-sm text-gray-600">
+            <CardContent className="pt-3 sm:pt-4 bg-gray-50 px-3 sm:px-6">
+              <div className="space-y-3 sm:space-y-4">
+                <p className="text-xs sm:text-sm text-gray-600">
                   Use the form below to create a new transfer request with article details.
                 </p>
                 <Button 
-                  className="w-full sm:w-auto bg-black hover:bg-gray-800 text-white"
+                  className="w-full sm:w-auto bg-black hover:bg-gray-800 text-white text-xs sm:text-sm h-9 sm:h-10"
                   onClick={() => router.push(`/${company}/transfer/request`)}
                 >
-                  <Plus className="mr-2 h-4 w-4" />
+                  <Plus className="mr-1 sm:mr-2 h-3 sm:h-4 w-3 sm:w-4" />
                   Create New Request
                 </Button>
               </div>
@@ -329,26 +329,26 @@ export default function TransferPage({ params }: TransferPageProps) {
 
           {/* Request Records Table */}
           <Card className="w-full bg-white border border-gray-300 shadow-sm">
-            <CardHeader className="pb-3 bg-white border-b border-gray-300">
-              <div className="flex items-center justify-between">
+            <CardHeader className="pb-2 sm:pb-3 bg-white border-b border-gray-300 px-3 sm:px-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3">
                 <div>
-                  <CardTitle className="text-lg font-semibold text-gray-900">
+                  <CardTitle className="text-sm sm:text-base lg:text-lg font-semibold text-gray-900">
                     Request Records
                   </CardTitle>
-                  <p className="text-xs text-gray-600 mt-1">
+                  <p className="text-xs text-gray-600 mt-0.5 sm:mt-1">
                     {totalRecords} total records
                   </p>
                 </div>
-                <div className="flex items-center space-x-2">
+                <div className="flex items-center justify-between sm:justify-end gap-2">
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => loadRequests(currentPage)}
                     disabled={loading}
-                    className="h-8 px-3 text-xs bg-white border-gray-300 hover:bg-gray-50"
+                    className="h-7 sm:h-8 px-2 sm:px-3 text-xs bg-white border-gray-300 hover:bg-gray-50"
                   >
-                    <RefreshCw className={`h-3 w-3 mr-1 ${loading ? 'animate-spin' : ''}`} />
-                    Refresh
+                    <RefreshCw className={`h-3 w-3 ${loading ? 'animate-spin' : ''} sm:mr-1`} />
+                    <span className="hidden sm:inline">Refresh</span>
                   </Button>
                   <div className="text-xs text-gray-700 bg-gray-50 px-2 py-1 rounded border border-gray-300">
                     Page {currentPage} of {totalPages}
@@ -442,10 +442,10 @@ export default function TransferPage({ params }: TransferPageProps) {
                                   size="sm"
                                   onClick={() => handleApproveRequest(request.id)}
                                   disabled={request.status.toLowerCase() !== 'pending'}
-                                  className="h-7 px-2 bg-green-50 border-green-300 hover:bg-green-100 text-green-700 text-xs"
+                                  className="h-6 sm:h-7 px-1.5 sm:px-2 bg-green-50 border-green-300 hover:bg-green-100 text-green-700 text-xs"
                                 >
-                                  <CheckCircle className="h-3 w-3 mr-1" />
-                                  Accept
+                                  <CheckCircle className="h-3 w-3 sm:mr-1" />
+                                  <span className="hidden sm:inline">Accept</span>
                                 </Button>
 
                                 {/* Delete Button */}
@@ -454,7 +454,7 @@ export default function TransferPage({ params }: TransferPageProps) {
                                   size="sm"
                                   onClick={() => handleDeleteRequest(request.id)}
                                   disabled={request.status.toLowerCase() !== 'pending'}
-                                  className="h-7 w-7 p-0 bg-white border-gray-300 hover:bg-gray-100"
+                                  className="h-6 sm:h-7 w-6 sm:w-7 p-0 bg-white border-gray-300 hover:bg-gray-100"
                                 >
                                   <Trash2 className="h-3 w-3 text-red-600" />
                                 </Button>
@@ -470,7 +470,7 @@ export default function TransferPage({ params }: TransferPageProps) {
 
               {/* Pagination */}
               {totalPages > 1 && (
-                <div className="flex items-center justify-between px-4 py-3 border-t border-gray-300 bg-gray-50">
+                <div className="flex flex-col sm:flex-row items-center justify-between px-3 sm:px-4 py-3 border-t border-gray-300 bg-gray-50 gap-2">
                   <div className="text-xs text-gray-600">
                     Showing {((currentPage - 1) * perPage) + 1} to {Math.min(currentPage * perPage, totalRecords)} of {totalRecords} results
                   </div>
@@ -480,9 +480,10 @@ export default function TransferPage({ params }: TransferPageProps) {
                       size="sm"
                       onClick={() => handlePageChange(currentPage - 1)}
                       disabled={currentPage === 1}
-                      className="h-7 px-3 text-xs bg-white border-gray-300"
+                      className="h-7 px-2 sm:px-3 text-xs bg-white border-gray-300"
                     >
-                      Previous
+                      <span className="hidden sm:inline">Previous</span>
+                      <span className="sm:hidden">Prev</span>
                     </Button>
                     <span className="text-xs text-gray-700 bg-white px-2 py-1 rounded border border-gray-300">
                       {currentPage} / {totalPages}
@@ -492,7 +493,7 @@ export default function TransferPage({ params }: TransferPageProps) {
                       size="sm"
                       onClick={() => handlePageChange(currentPage + 1)}
                       disabled={currentPage === totalPages}
-                      className="h-7 px-3 text-xs bg-white border-gray-300"
+                      className="h-7 px-2 sm:px-3 text-xs bg-white border-gray-300"
                     >
                       Next
                     </Button>
@@ -507,26 +508,26 @@ export default function TransferPage({ params }: TransferPageProps) {
         <TabsContent value="transferout" className="space-y-4">
           {/* Transfer Out Records Table */}
           <Card className="w-full bg-white border border-gray-300 shadow-sm">
-            <CardHeader className="pb-3 bg-white border-b border-gray-300">
-              <div className="flex items-center justify-between">
+            <CardHeader className="pb-3 bg-white border-b border-gray-300 px-3 sm:px-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3">
                 <div>
-                  <CardTitle className="text-lg font-semibold text-gray-900">
+                  <CardTitle className="text-sm sm:text-base lg:text-lg font-semibold text-gray-900">
                     Transfer Out Records
                   </CardTitle>
                   <p className="text-xs text-gray-600 mt-1">
                     {transfersTotalRecords} total transfer records
                   </p>
                 </div>
-                <div className="flex items-center space-x-2">
+                <div className="flex items-center justify-between sm:justify-end gap-2">
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => loadTransfers(transfersPage)}
                     disabled={transfersLoading}
-                    className="h-8 px-3 text-xs bg-white border-gray-300 hover:bg-gray-50"
+                    className="h-7 sm:h-8 px-2 sm:px-3 text-xs bg-white border-gray-300 hover:bg-gray-50"
                   >
-                    <RefreshCw className={`h-3 w-3 mr-1 ${transfersLoading ? 'animate-spin' : ''}`} />
-                    Refresh
+                    <RefreshCw className={`h-3 w-3 ${transfersLoading ? 'animate-spin' : ''} sm:mr-1`} />
+                    <span className="hidden sm:inline">Refresh</span>
                   </Button>
                   <div className="text-xs text-gray-700 bg-gray-50 px-2 py-1 rounded border border-gray-300">
                     Page {transfersPage} of {transfersTotalPages}
@@ -610,7 +611,7 @@ export default function TransferPage({ params }: TransferPageProps) {
                                   variant="outline"
                                   size="sm"
                                   onClick={() => router.push(`/${company}/transfer/view/${transfer.id}`)}
-                                  className="h-7 w-7 p-0 bg-white border-gray-300 hover:bg-gray-100"
+                                  className="h-6 sm:h-7 w-6 sm:w-7 p-0 bg-white border-gray-300 hover:bg-gray-100"
                                   title="View Transfer Details"
                                 >
                                   <Eye className="h-3 w-3 text-gray-600" />
@@ -621,11 +622,11 @@ export default function TransferPage({ params }: TransferPageProps) {
                                   variant="outline"
                                   size="sm"
                                   onClick={() => router.push(`/${company}/transfer/dc/${transfer.id}`)}
-                                  className="h-7 px-2 bg-green-50 border-green-300 hover:bg-green-100 text-green-700 text-xs"
+                                  className="h-6 sm:h-7 px-1.5 sm:px-2 bg-green-50 border-green-300 hover:bg-green-100 text-green-700 text-xs"
                                   title="Download Delivery Challan"
                                 >
-                                  <FileText className="h-3 w-3 mr-1" />
-                                  DC
+                                  <FileText className="h-3 w-3 sm:mr-1" />
+                                  <span className="hidden sm:inline">DC</span>
                                 </Button>
                               </div>
                             </td>
@@ -639,7 +640,7 @@ export default function TransferPage({ params }: TransferPageProps) {
 
               {/* Pagination */}
               {transfersTotalPages > 1 && (
-                <div className="flex items-center justify-between px-4 py-3 border-t border-gray-300 bg-gray-50">
+                <div className="flex flex-col sm:flex-row items-center justify-between px-3 sm:px-4 py-3 border-t border-gray-300 bg-gray-50 gap-2">
                   <div className="text-xs text-gray-600">
                     Showing {((transfersPage - 1) * transfersPerPage) + 1} to {Math.min(transfersPage * transfersPerPage, transfersTotalRecords)} of {transfersTotalRecords} results
                   </div>
@@ -649,9 +650,10 @@ export default function TransferPage({ params }: TransferPageProps) {
                       size="sm"
                       onClick={() => handleTransfersPageChange(transfersPage - 1)}
                       disabled={transfersPage === 1}
-                      className="h-7 px-3 text-xs bg-white border-gray-300"
+                      className="h-7 px-2 sm:px-3 text-xs bg-white border-gray-300"
                     >
-                      Previous
+                      <span className="hidden sm:inline">Previous</span>
+                      <span className="sm:hidden">Prev</span>
                     </Button>
                     <span className="text-xs text-gray-700 bg-white px-2 py-1 rounded border border-gray-300">
                       {transfersPage} / {transfersTotalPages}
@@ -661,7 +663,7 @@ export default function TransferPage({ params }: TransferPageProps) {
                       size="sm"
                       onClick={() => handleTransfersPageChange(transfersPage + 1)}
                       disabled={transfersPage === transfersTotalPages}
-                      className="h-7 px-3 text-xs bg-white border-gray-300"
+                      className="h-7 px-2 sm:px-3 text-xs bg-white border-gray-300"
                     >
                       Next
                     </Button>
@@ -675,29 +677,29 @@ export default function TransferPage({ params }: TransferPageProps) {
         {/* Transfer IN Tab */}
         <TabsContent value="transferin" className="space-y-4">
           <Card className="w-full bg-gray-50 border-gray-200">
-            <CardHeader className="pb-4 bg-gray-100">
-              <CardTitle className="text-lg font-semibold text-gray-700">
+            <CardHeader className="pb-3 sm:pb-4 bg-gray-100 px-3 sm:px-6">
+              <CardTitle className="text-sm sm:text-base lg:text-lg font-semibold text-gray-700">
                 Process Transfer IN
               </CardTitle>
-              <p className="text-sm text-gray-500">
+              <p className="text-xs sm:text-sm text-gray-500 mt-1">
                 Receive and verify incoming stock transfers from other warehouses
               </p>
             </CardHeader>
-            <CardContent className="pt-4 bg-gray-50">
-              <div className="flex flex-col items-center justify-center py-12 space-y-4">
-                <div className="bg-white p-6 rounded-lg border-2 border-dashed border-gray-300 text-center max-w-md">
-                  <CheckCircle className="h-12 w-12 mx-auto mb-4 text-blue-500" />
-                  <h3 className="text-lg font-semibold text-gray-800 mb-2">
+            <CardContent className="pt-3 sm:pt-4 bg-gray-50 px-3 sm:px-6">
+              <div className="flex flex-col items-center justify-center py-8 sm:py-12 space-y-3 sm:space-y-4">
+                <div className="bg-white p-4 sm:p-6 rounded-lg border-2 border-dashed border-gray-300 text-center max-w-md w-full">
+                  <CheckCircle className="h-10 sm:h-12 w-10 sm:w-12 mx-auto mb-3 sm:mb-4 text-blue-500" />
+                  <h3 className="text-base sm:text-lg font-semibold text-gray-800 mb-2">
                     Ready to Process Transfer IN
                   </h3>
-                  <p className="text-sm text-gray-600 mb-4">
+                  <p className="text-xs sm:text-sm text-gray-600 mb-3 sm:mb-4">
                     Click the button below to start receiving and verifying incoming transfers
                   </p>
                   <Button
                     onClick={() => router.push(`/${company}/transfer/transferIn`)}
-                    className="bg-blue-600 hover:bg-blue-700 text-white h-10 px-6"
+                    className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white h-9 sm:h-10 px-4 sm:px-6 text-xs sm:text-sm"
                   >
-                    <Plus className="mr-2 h-4 w-4" />
+                    <Plus className="mr-1 sm:mr-2 h-3 sm:h-4 w-3 sm:w-4" />
                     Process Transfer IN
                   </Button>
                 </div>
@@ -709,26 +711,26 @@ export default function TransferPage({ params }: TransferPageProps) {
         {/* All Transfers Tab */}
         <TabsContent value="details" className="space-y-4">
           <Card className="w-full bg-white border border-gray-300 shadow-sm">
-            <CardHeader className="pb-3 bg-white border-b border-gray-300">
-              <div className="flex items-center justify-between">
+            <CardHeader className="pb-3 bg-white border-b border-gray-300 px-3 sm:px-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3">
                 <div>
-                  <CardTitle className="text-lg font-semibold text-gray-900">
+                  <CardTitle className="text-sm sm:text-base lg:text-lg font-semibold text-gray-900">
                     All Transfers
                   </CardTitle>
                   <p className="text-xs text-gray-600 mt-1">
                     {transfersTotalRecords} total transfer records
                   </p>
                 </div>
-                <div className="flex items-center space-x-2">
+                <div className="flex items-center justify-between sm:justify-end gap-2">
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => loadTransfers(transfersPage)}
                     disabled={transfersLoading}
-                    className="h-8 px-3 text-xs bg-white border-gray-300 hover:bg-gray-50"
+                    className="h-7 sm:h-8 px-2 sm:px-3 text-xs bg-white border-gray-300 hover:bg-gray-50"
                   >
-                    <RefreshCw className={`h-3 w-3 mr-1 ${transfersLoading ? 'animate-spin' : ''}`} />
-                    Refresh
+                    <RefreshCw className={`h-3 w-3 ${transfersLoading ? 'animate-spin' : ''} sm:mr-1`} />
+                    <span className="hidden sm:inline">Refresh</span>
                   </Button>
                   <div className="text-xs text-gray-700 bg-gray-50 px-2 py-1 rounded border border-gray-300">
                     Page {transfersPage} of {transfersTotalPages}
