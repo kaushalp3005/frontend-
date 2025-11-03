@@ -234,6 +234,44 @@ export default function TransferPage({ params }: TransferPageProps) {
     }
   }
 
+  // Handle delete transfer
+  const handleDeleteTransfer = async (transferId: number) => {
+    if (confirm("Are you sure you want to delete this transfer? This will also delete all related boxes and lines.")) {
+      try {
+        console.log('🗑️ Deleting transfer:', transferId)
+        const response = await InterunitApiService.deleteTransfer(transferId)
+        console.log('✅ Delete transfer response:', response)
+
+        toast({
+          title: "Success",
+          description: response.message || "Transfer deleted successfully!",
+        })
+
+        // Reload the current page
+        loadTransfers(transfersPage)
+      } catch (error: any) {
+        console.error('❌ Failed to delete transfer:', error)
+
+        let errorMessage = "Failed to delete transfer. Please try again."
+        if (error.response?.data) {
+          if (typeof error.response.data === 'string') {
+            errorMessage = error.response.data
+          } else if (error.response.data.detail) {
+            errorMessage = String(error.response.data.detail)
+          } else if (error.response.data.message) {
+            errorMessage = String(error.response.data.message)
+          }
+        }
+
+        toast({
+          title: "Error",
+          description: errorMessage,
+          variant: "destructive",
+        })
+      }
+    }
+  }
+
   // Get status badge color
   const getStatusBadge = (status: string) => {
     switch (status.toLowerCase()) {
@@ -615,6 +653,17 @@ export default function TransferPage({ params }: TransferPageProps) {
                                   title="View Transfer Details"
                                 >
                                   <Eye className="h-3 w-3 text-gray-600" />
+                                </Button>
+                                
+                                {/* Delete Button */}
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleDeleteTransfer(transfer.id)}
+                                  className="h-6 sm:h-7 w-6 sm:w-7 p-0 bg-red-50 border-red-300 hover:bg-red-100"
+                                  title="Delete Transfer"
+                                >
+                                  <Trash2 className="h-3 w-3 text-red-600" />
                                 </Button>
                                 
                                 {/* Download DC Button */}
