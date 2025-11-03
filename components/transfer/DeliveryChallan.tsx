@@ -57,12 +57,13 @@ export default function DeliveryChallan({
   }, [])
 
   return (
-    <div className="w-full p-8 bg-white dc-print-content" style={{ minHeight: '100vh' }}>
+    <div className="w-full p-8 bg-white dc-print-content">
       <table style={{ 
         width: '100%', 
         borderCollapse: 'collapse', 
         fontFamily: 'Arial, sans-serif',
-        fontSize: '12px'
+        fontSize: '12px',
+        pageBreakInside: 'auto'
       }}>
         <thead>
           <tr>
@@ -198,7 +199,8 @@ export default function DeliveryChallan({
       <div style={{ 
         margin: '30px 0', 
         borderTop: '2px dashed #999',
-        position: 'relative'
+        position: 'relative',
+        pageBreakAfter: 'auto'
       }}>
         <span style={{
           position: 'absolute',
@@ -220,6 +222,7 @@ export default function DeliveryChallan({
         fontFamily: 'Arial, sans-serif',
         fontSize: '9px',
         marginTop: '15px',
+        pageBreakBefore: 'auto',
         pageBreakInside: 'avoid'
       }}>
         <thead>
@@ -372,6 +375,31 @@ export default function DeliveryChallan({
             left: 0;
             top: 0;
             width: 100%;
+            max-height: none;
+            min-height: auto;
+          }
+          
+          /* Prevent page breaks inside important sections */
+          .dc-print-content > table:first-of-type {
+            page-break-after: auto;
+          }
+          
+          .dc-print-content > table:last-of-type {
+            page-break-before: auto;
+          }
+          
+          /* Avoid breaking table rows */
+          .dc-print-content table tr {
+            page-break-inside: avoid;
+          }
+          
+          /* Prevent orphans and widows */
+          .dc-print-content table thead {
+            display: table-header-group;
+          }
+          
+          .dc-print-content table tfoot {
+            display: table-footer-group;
           }
           
           body { 
@@ -384,6 +412,22 @@ export default function DeliveryChallan({
           * {
             print-color-adjust: exact !important;
             -webkit-print-color-adjust: exact !important;
+          }
+          
+          /* Prevent empty pages */
+          @page :blank {
+            display: none;
+          }
+          
+          /* Ensure content doesn't overflow unnecessarily */
+          html, body {
+            height: auto !important;
+            overflow: visible !important;
+          }
+          
+          /* Prevent page break if content fits on one page */
+          .dc-print-content {
+            height: auto !important;
           }
         }
         

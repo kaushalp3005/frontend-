@@ -1,4 +1,4 @@
-// Transfer module types
+// Transfer module types ho gaya 
 export interface TransferRequest {
   id: string
   request_no: string

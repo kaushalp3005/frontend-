@@ -1955,7 +1955,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                     company={company}
                   />
                   {requestIdFromUrl && index === 0 && (
-                    <p className="text-xs text-gray-500 mt-1">ℹ️ Loaded from request</p>
+                    <p className="text-xs text-gray-500 mt-1">🔒 Loaded from request</p>
                   )}
                 </div>
 
@@ -1983,10 +1983,10 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                       setArticles(updatedArticles)
                     }}
                     company={company}
-                    disabled={!article.material_type}
+                    disabled={!article.material_type || !!(requestIdFromUrl && index === 0)}
                   />
                   {requestIdFromUrl && index === 0 && (
-                    <p className="text-xs text-gray-500 mt-1">ℹ️ Loaded from request</p>
+                    <p className="text-xs text-gray-500 mt-1">🔒 Loaded from request</p>
                   )}
                 </div>
 
@@ -2014,11 +2014,11 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                       setArticles(updatedArticles)
                     }}
                     company={company}
-                    disabled={!article.material_type || !article.item_category}
+                    disabled={!article.material_type || !article.item_category || !!(requestIdFromUrl && index === 0)}
                     materialType={article.material_type}
                   />
                   {requestIdFromUrl && index === 0 && (
-                    <p className="text-xs text-gray-500 mt-1">ℹ️ Loaded from request</p>
+                    <p className="text-xs text-gray-500 mt-1">🔒 Loaded from request</p>
                   )}
                 </div>
 
@@ -2047,10 +2047,10 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                     }}
                     company={company}
                     updateArticle={updateArticle}
-                    disabled={!article.material_type || !article.item_category || !article.sub_category}
+                    disabled={!article.material_type || !article.item_category || !article.sub_category || !!(requestIdFromUrl && index === 0)}
                   />
                   {requestIdFromUrl && index === 0 && (
-                    <p className="text-xs text-gray-500 mt-1">ℹ️ Loaded from request</p>
+                    <p className="text-xs text-gray-500 mt-1">🔒 Loaded from request</p>
                   )}
                 </div>
 

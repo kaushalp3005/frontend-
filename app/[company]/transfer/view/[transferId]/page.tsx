@@ -131,6 +131,10 @@ export default function TransferViewPage({ params }: TransferViewPageProps) {
         return <Badge className="bg-green-100 text-green-800 border-green-300">Approved</Badge>
       case 'in transit':
         return <Badge className="bg-blue-100 text-blue-800 border-blue-300">In Transit</Badge>
+      case 'partially transferred':
+      case 'partiallytransferred':
+      case 'partial':
+        return <Badge className="bg-orange-100 text-orange-800 border-orange-300">Partially Transferred</Badge>
       case 'completed':
         return <Badge className="bg-gray-100 text-gray-800 border-gray-300">Completed</Badge>
       default:
