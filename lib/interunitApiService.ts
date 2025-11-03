@@ -287,6 +287,19 @@ export class InterunitApiService {
     return response
   }
 
+  // Transfer management
+  static async deleteTransfer(transferId: number): Promise<{ success: boolean; message: string }> {
+    console.log('🌐 InterunitApiService.deleteTransfer called')
+    console.log('🔗 Transfer ID:', transferId)
+
+    const response = await fetchJSON(`${API_BASE_URL}/interunit/transfers/${transferId}`, {
+      method: 'DELETE'
+    })
+
+    console.log('📥 Delete transfer response:', response)
+    return response
+  }
+
   // Utility endpoints
   static async generateRequestNumber(): Promise<{ request_no: string }> {
     return await fetchJSON(`${API_BASE_URL}/interunit/utils/generate-request-number`)
