@@ -550,7 +550,6 @@ export default function EditInwardPage() {
     if (!formData.customer_party_name.trim()) newErrors.customer_party_name = "Customer/Party name is required"
     if (!formData.purchase_by.trim()) newErrors.purchase_by = "Purchase By is required"
     if (!formData.approval_authority.trim()) newErrors.approval_authority = "Approval Authority is required"
-    if (!formData.po_number.trim()) newErrors.po_number = "PO number is required"
     
     // Validate custom vendor fields when "Other" is selected
     if (formData.vendor_supplier_name === "Other") {
@@ -1884,15 +1883,13 @@ export default function EditInwardPage() {
                   />
                 </div>
                 <div>
-                  <Label htmlFor="po_number">PO Number *</Label>
+                  <Label htmlFor="po_number">PO Number</Label>
                   <Input 
                     id="po_number" 
                     value={formData.po_number} 
                     onChange={(e) => setFormData(prev => ({ ...prev, po_number: e.target.value }))} 
                     placeholder="PO001"
-                    className={errors.po_number ? "border-red-500" : ""}
                   />
-                  {errors.po_number && <p className="text-sm text-red-500 mt-1">{errors.po_number}</p>}
                 </div>
                 <div>
                   <Label htmlFor="grn_number">GRN Number</Label>
