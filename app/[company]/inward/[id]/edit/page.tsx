@@ -1,7 +1,5 @@
 "use client"
 
-// pushed bro
-
 import React, { useState, useEffect, useCallback, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -468,7 +466,7 @@ export default function EditInwardPage() {
     return `BT-${year}${month}${day}${hour}${minute}${second}-001`
   }
 
-  const generateBoxes = (articlesToUse?: Article[], forceRecalculate: boolean = false) => {
+  const generateBoxes = (articlesToUse?: Article[], forceRecalculate: boolean = false, articleId?: string) => {
     const articlesForGeneration = articlesToUse || articles
     const newBoxes: Box[] = []
     let boxCounter = 1
@@ -477,7 +475,26 @@ export default function EditInwardPage() {
       (today.getMonth() + 1).toString().padStart(2, '0') +
       today.getDate().toString().padStart(2, '0')
 
+    // If articleId is specified, preserve boxes for other articles
+    const targetArticle = articleId ? articlesForGeneration.find(a => a.id === articleId) : null
+    
+    // First, preserve boxes for articles that are NOT being regenerated
+    if (articleId && targetArticle) {
+      // Keep boxes for all articles except the one being regenerated
+      const preservedBoxes = boxes.filter(b => b.article !== targetArticle.item_description)
+      newBoxes.push(...preservedBoxes)
+      // Update boxCounter to be after the highest box number in preserved boxes
+      if (preservedBoxes.length > 0) {
+        boxCounter = Math.max(...preservedBoxes.map(b => b.box_number)) + 1
+      }
+    }
+
     articlesForGeneration.forEach((article) => {
+      // If articleId is specified, only process that article
+      if (articleId && article.id !== articleId) {
+        return
+      }
+
       // Generate boxes if UOM is BOX or CARTON (even if quantity is 0)
       if (article.uom === "BOX" || article.uom === "CARTON") {
         const cleanItemDescription = (article.item_description || `Article${article.id}`)
@@ -533,6 +550,7 @@ export default function EditInwardPage() {
     if (!formData.customer_party_name.trim()) newErrors.customer_party_name = "Customer/Party name is required"
     if (!formData.purchase_by.trim()) newErrors.purchase_by = "Purchase By is required"
     if (!formData.approval_authority.trim()) newErrors.approval_authority = "Approval Authority is required"
+    if (!formData.po_number.trim()) newErrors.po_number = "PO number is required"
     
     // Validate custom vendor fields when "Other" is selected
     if (formData.vendor_supplier_name === "Other") {
@@ -605,13 +623,20 @@ export default function EditInwardPage() {
     }
     const updatedArticles = [...articles, newArticle]
     setArticles(updatedArticles)
-    generateBoxes(updatedArticles)
+    // Don't regenerate boxes when adding a new article - let useEffect handle it
+    // generateBoxes(updatedArticles)
   }
 
   const removeArticle = (id: string) => {
     if (articles.length > 1) {
+      const articleToRemove = articles.find(a => a.id === id)
       const updatedArticles = articles.filter((article) => article.id !== id)
       setArticles(updatedArticles)
+      // Remove boxes for the deleted article, preserve others
+      if (articleToRemove) {
+        setBoxes(boxes.filter(box => box.article !== articleToRemove.item_description))
+      }
+      // Regenerate boxes for remaining articles to ensure proper numbering
       generateBoxes(updatedArticles)
     }
   }
@@ -666,7 +691,7 @@ export default function EditInwardPage() {
 
     if (field === "item_description" || field === "lot_number") {
       if (field === "item_description") {
-        generateBoxes(updatedArticles, true) // Force recalculate when item changes
+        generateBoxes(updatedArticles, true, id) // Force recalculate when item changes, only for this article
       } else {
         setBoxes((currentBoxes) =>
           currentBoxes.map((box) => {
@@ -682,14 +707,14 @@ export default function EditInwardPage() {
       // When quantity changes to 0, don't regenerate boxes - preserve existing ones
       // Only regenerate boxes if quantity is greater than 0
       if (Number(value) > 0) {
-        generateBoxes(updatedArticles, false)
+        generateBoxes(updatedArticles, false, id) // Only regenerate boxes for this article
       }
       // If quantity is 0, we do nothing - existing boxes are preserved
     } else if (field === "net_weight" || field === "total_weight") {
       // Don't recalculate box weights when article weights change
       // User wants to manually set each box weight independently
     } else if (field === "uom") {
-      generateBoxes(updatedArticles, true) // Force recalculate when UOM changes
+      generateBoxes(updatedArticles, true, id) // Force recalculate when UOM changes, only for this article
     }
   }
 
@@ -1263,30 +1288,54 @@ export default function EditInwardPage() {
   useEffect(() => {
     // Check if only weights changed (to prevent infinite loop with weight update effect)
     const prevArticles = prevArticlesRef.current
-    const onlyWeightsChanged = articles.length === prevArticles.length &&
-      articles.every((article, index) => {
-        const prev = prevArticles[index]
-        if (!prev) return false
+    
+    // Find which articles changed (excluding weight-only changes)
+    const changedArticles: string[] = []
+    
+    articles.forEach((article, index) => {
+      const prev = prevArticles[index]
+      if (!prev) {
+        // New article added
+        changedArticles.push(article.id)
+        return
+      }
 
-        // Check if all fields except weights are the same
-        return (
-          article.id === prev.id &&
-          article.item_description === prev.item_description &&
-          article.quantity_units === prev.quantity_units &&
-          article.uom === prev.uom &&
-          // Only net_weight and total_weight can be different
-          article.material_type === prev.material_type &&
-          article.item_category === prev.item_category &&
-          article.sub_category === prev.sub_category
-        )
-      })
+      // Check if this article changed (excluding weight changes)
+      const hasNonWeightChanges = (
+        article.id !== prev.id ||
+        article.item_description !== prev.item_description ||
+        article.quantity_units !== prev.quantity_units ||
+        article.uom !== prev.uom ||
+        article.material_type !== prev.material_type ||
+        article.item_category !== prev.item_category ||
+        article.sub_category !== prev.sub_category
+      )
+      
+      if (hasNonWeightChanges) {
+        changedArticles.push(article.id)
+      }
+    })
+    
+    // Check for removed articles
+    if (prevArticles.length > articles.length) {
+      // Article was removed, regenerate all boxes
+      prevArticlesRef.current = articles
+      generateBoxes()
+      return
+    }
 
     // Update the ref for next comparison
     prevArticlesRef.current = articles
 
-    // Only regenerate boxes if something other than weights changed
-    if (!onlyWeightsChanged) {
-      generateBoxes()
+    // Only regenerate boxes for changed articles
+    if (changedArticles.length > 0) {
+      // If multiple articles changed or article order changed, regenerate all
+      if (changedArticles.length > 1 || articles.length !== prevArticles.length) {
+        generateBoxes()
+      } else {
+        // Only one article changed, regenerate boxes only for that article
+        generateBoxes(articles, false, changedArticles[0])
+      }
     }
   }, [articles, articles.length])
 
@@ -1835,13 +1884,15 @@ export default function EditInwardPage() {
                   />
                 </div>
                 <div>
-                  <Label htmlFor="po_number">PO Number</Label>
+                  <Label htmlFor="po_number">PO Number *</Label>
                   <Input 
                     id="po_number" 
                     value={formData.po_number} 
                     onChange={(e) => setFormData(prev => ({ ...prev, po_number: e.target.value }))} 
-                    placeholder="PO001" 
+                    placeholder="PO001"
+                    className={errors.po_number ? "border-red-500" : ""}
                   />
+                  {errors.po_number && <p className="text-sm text-red-500 mt-1">{errors.po_number}</p>}
                 </div>
                 <div>
                   <Label htmlFor="grn_number">GRN Number</Label>
