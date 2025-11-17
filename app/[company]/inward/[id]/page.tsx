@@ -60,6 +60,7 @@ export default function InwardDetailPage({ params }: InwardDetailPageProps) {
         net_weight: box.net_weight || 0,
         total_weight: box.gross_weight || 0,
         batch_number: article.batch_number || '',
+        lot_number: box.lot_number || article.lot_number || '',
         box_number: box.box_number,
         manufacturing_date: article.manufacturing_date,
         expiry_date: article.expiry_date,
@@ -322,8 +323,13 @@ export default function InwardDetailPage({ params }: InwardDetailPageProps) {
                         <span>Exp: ${formatDate(qrPayload.expiry_date)}</span>
                       </div>
                       ` : ''}
-                      ${qrPayload.batch_number ? `
-                      <div class="batch-info">Batch: ${qrPayload.batch_number.length > 20 ? qrPayload.batch_number.substring(0, 20) + '...' : qrPayload.batch_number}</div>
+                      ${qrPayload.lot_number ? `
+                      <div class="batch-info">Lot: ${qrPayload.lot_number.length > 20 ? qrPayload.lot_number.substring(0, 20) + '...' : qrPayload.lot_number}</div>
+                      ` : ''}
+                      ${qrPayload.customer_name ? `
+                      <div class="details-row">
+                        <span>Cust: ${qrPayload.customer_name.length > 20 ? qrPayload.customer_name.substring(0, 20) + '...' : qrPayload.customer_name}</span>
+                      </div>
                       ` : ''}
                     </div>
                   </div>
@@ -483,24 +489,24 @@ export default function InwardDetailPage({ params }: InwardDetailPageProps) {
               <CardTitle>System Information</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Company</p>
-                  <p className="bg-muted p-2 rounded">{data.company}</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                <div className="min-w-0">
+                  <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">Company</p>
+                  <p className="bg-muted p-2 rounded text-sm">{data.company}</p>
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Transaction Number</p>
-                  <p className="bg-muted p-2 rounded font-mono">{transaction.transaction_no}</p>
+                <div className="min-w-0">
+                  <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">Transaction Number</p>
+                  <p className="bg-muted p-2 rounded font-mono text-sm truncate">{transaction.transaction_no}</p>
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Entry Date</p>
-                  <p className="bg-muted p-2 rounded">
+                <div className="min-w-0">
+                  <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">Entry Date</p>
+                  <p className="bg-muted p-2 rounded text-sm">
                     {transaction.entry_date ? format(new Date(transaction.entry_date), "MMM dd, yyyy") : "-"}
                   </p>
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">System GRN Date</p>
-                  <p className="bg-muted p-2 rounded">{transaction.system_grn_date || "-"}</p>
+                <div className="min-w-0">
+                  <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">System GRN Date</p>
+                  <p className="bg-muted p-2 rounded text-sm">{transaction.system_grn_date || "-"}</p>
                 </div>
               </div>
             </CardContent>
@@ -512,26 +518,26 @@ export default function InwardDetailPage({ params }: InwardDetailPageProps) {
               <CardTitle>Transport Information</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Vehicle Number *</p>
-                  <p className="bg-muted p-2 rounded font-mono">{transaction.vehicle_number || "-"}</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                <div className="min-w-0">
+                  <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">Vehicle Number *</p>
+                  <p className="bg-muted p-2 rounded font-mono text-sm truncate">{transaction.vehicle_number || "-"}</p>
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Transporter Name *</p>
-                  <p className="bg-muted p-2 rounded">{transaction.transporter_name || "-"}</p>
+                <div className="min-w-0">
+                  <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">Transporter Name *</p>
+                  <p className="bg-muted p-2 rounded text-sm truncate">{transaction.transporter_name || "-"}</p>
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">LR Number</p>
-                  <p className="bg-muted p-2 rounded font-mono">{transaction.lr_number || "-"}</p>
+                <div className="min-w-0">
+                  <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">LR Number</p>
+                  <p className="bg-muted p-2 rounded font-mono text-sm truncate">{transaction.lr_number || "-"}</p>
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Source Location</p>
-                  <p className="bg-muted p-2 rounded">{transaction.source_location || "-"}</p>
+                <div className="min-w-0">
+                  <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">Source Location</p>
+                  <p className="bg-muted p-2 rounded text-sm truncate">{transaction.source_location || "-"}</p>
                 </div>
-                <div className="col-span-1 md:col-span-2">
-                  <p className="text-sm font-medium text-muted-foreground">Destination Location</p>
-                  <p className="bg-muted p-2 rounded">{transaction.destination_location || "-"}</p>
+                <div className="min-w-0 col-span-1 sm:col-span-2">
+                  <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">Destination Location</p>
+                  <p className="bg-muted p-2 rounded text-sm">{transaction.destination_location || "-"}</p>
                 </div>
               </div>
             </CardContent>
@@ -543,22 +549,22 @@ export default function InwardDetailPage({ params }: InwardDetailPageProps) {
               <CardTitle>Party Information</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Vendor/Supplier Name *</p>
-                  <p className="bg-muted p-2 rounded">{transaction.vendor_supplier_name || "-"}</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                <div className="min-w-0">
+                  <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">Vendor/Supplier Name *</p>
+                  <p className="bg-muted p-2 rounded text-sm break-words">{transaction.vendor_supplier_name || "-"}</p>
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Customer/Party Name *</p>
-                  <p className="bg-muted p-2 rounded">{transaction.customer_party_name || "-"}</p>
+                <div className="min-w-0">
+                  <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">Customer/Party Name *</p>
+                  <p className="bg-muted p-2 rounded text-sm break-words">{transaction.customer_party_name || "-"}</p>
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Purchase By *</p>
-                  <p className="bg-muted p-2 rounded">{transaction.purchase_by || "-"}</p>
+                <div className="min-w-0">
+                  <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">Purchase By *</p>
+                  <p className="bg-muted p-2 rounded text-sm truncate">{transaction.purchase_by || "-"}</p>
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Approval Authority *</p>
-                  <p className="bg-muted p-2 rounded">{transaction.approval_authority || "-"}</p>
+                <div className="min-w-0">
+                  <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">Approval Authority *</p>
+                  <p className="bg-muted p-2 rounded text-sm truncate">{transaction.approval_authority || "-"}</p>
                 </div>
               </div>
             </CardContent>
@@ -570,26 +576,26 @@ export default function InwardDetailPage({ params }: InwardDetailPageProps) {
               <CardTitle>Document Information</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Challan Number</p>
-                  <p className="bg-muted p-2 rounded font-mono">{transaction.challan_number || "-"}</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+                <div className="min-w-0">
+                  <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">Challan Number</p>
+                  <p className="bg-muted p-2 rounded font-mono text-sm truncate">{transaction.challan_number || "-"}</p>
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Invoice Number</p>
-                  <p className="bg-muted p-2 rounded font-mono">{transaction.invoice_number || "-"}</p>
+                <div className="min-w-0">
+                  <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">Invoice Number</p>
+                  <p className="bg-muted p-2 rounded font-mono text-sm truncate">{transaction.invoice_number || "-"}</p>
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">PO Number</p>
-                  <p className="bg-muted p-2 rounded font-mono">{transaction.po_number || "-"}</p>
+                <div className="min-w-0">
+                  <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">PO Number</p>
+                  <p className="bg-muted p-2 rounded font-mono text-sm truncate">{transaction.po_number || "-"}</p>
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">GRN Number</p>
-                  <p className="bg-muted p-2 rounded font-mono">{transaction.grn_number || "-"}</p>
+                <div className="min-w-0">
+                  <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">GRN Number</p>
+                  <p className="bg-muted p-2 rounded font-mono text-sm truncate">{transaction.grn_number || "-"}</p>
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">GRN Quantity</p>
-                  <p className="bg-muted p-2 rounded">{transaction.grn_quantity || "-"}</p>
+                <div className="min-w-0">
+                  <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">GRN Quantity</p>
+                  <p className="bg-muted p-2 rounded text-sm">{transaction.grn_quantity || "-"}</p>
                 </div>
                 <div>
                   <p className="text-sm font-medium text-muted-foreground">Received Quantity</p>
@@ -637,78 +643,74 @@ export default function InwardDetailPage({ params }: InwardDetailPageProps) {
                     )}
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground">Item Category *</p>
-                      <p className="bg-muted p-2 rounded">{article.item_category || "-"}</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+                    <div className="min-w-0">
+                      <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">Item Category *</p>
+                      <p className="bg-muted p-2 rounded text-sm truncate">{article.item_category || "-"}</p>
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground">Sub Category *</p>
-                      <p className="bg-muted p-2 rounded">{article.sub_category || "-"}</p>
+                    <div className="min-w-0">
+                      <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">Sub Category *</p>
+                      <p className="bg-muted p-2 rounded text-sm truncate">{article.sub_category || "-"}</p>
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground">Item Description *</p>
-                      <p className="bg-muted p-2 rounded">{article.item_description || "-"}</p>
+                    <div className="min-w-0 sm:col-span-2 lg:col-span-1">
+                      <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">Item Description *</p>
+                      <p className="bg-muted p-2 rounded text-sm break-words">{article.item_description || "-"}</p>
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground">Quantity Units *</p>
-                      <p className="bg-muted p-2 rounded">{article.quantity_units || "-"}</p>
+                    <div className="min-w-0">
+                      <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">Quantity Units *</p>
+                      <p className="bg-muted p-2 rounded text-sm">{article.quantity_units || "-"}</p>
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground">Pack size ( weights )</p>
-                      <p className="bg-muted p-2 rounded">{article.packaging_type || "-"}</p>
+                    <div className="min-w-0">
+                      <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">Pack size ( weights )</p>
+                      <p className="bg-muted p-2 rounded text-sm">{article.packaging_type || "-"}</p>
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground">UOM *</p>
-                      <p className="bg-muted p-2 rounded">{article.uom || "-"}</p>
+                    <div className="min-w-0">
+                      <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">UOM *</p>
+                      <p className="bg-muted p-2 rounded text-sm">{article.uom || "-"}</p>
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground">Net Weight *</p>
-                      <p className="bg-muted p-2 rounded">{article.net_weight ? `${article.net_weight} kg` : "-"}</p>
+                    <div className="min-w-0">
+                      <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">Net Weight *</p>
+                      <p className="bg-muted p-2 rounded text-sm">{article.net_weight ? `${article.net_weight} kg` : "-"}</p>
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground">Gross Weight *</p>
-                      <p className="bg-muted p-2 rounded">{article.total_weight ? `${article.total_weight} kg` : "-"}</p>
+                    <div className="min-w-0">
+                      <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">Gross Weight *</p>
+                      <p className="bg-muted p-2 rounded text-sm">{article.total_weight ? `${article.total_weight} kg` : "-"}</p>
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground">Batch Number</p>
-                      <p className="bg-muted p-2 rounded font-mono">{article.batch_number || "-"}</p>
+                    <div className="min-w-0">
+                      <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">Lot Number</p>
+                      <p className="bg-muted p-2 rounded font-mono text-sm truncate">{article.lot_number || "-"}</p>
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground">Lot Number</p>
-                      <p className="bg-muted p-2 rounded font-mono">{article.lot_number || "-"}</p>
+                    <div className="min-w-0">
+                      <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">Manufacturing Date</p>
+                      <p className="bg-muted p-2 rounded text-sm">{article.manufacturing_date || "-"}</p>
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground">Manufacturing Date</p>
-                      <p className="bg-muted p-2 rounded">{article.manufacturing_date || "-"}</p>
+                    <div className="min-w-0">
+                      <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">Expiry Date</p>
+                      <p className="bg-muted p-2 rounded text-sm">{article.expiry_date || "-"}</p>
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground">Expiry Date</p>
-                      <p className="bg-muted p-2 rounded">{article.expiry_date || "-"}</p>
+                    <div className="min-w-0">
+                      <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">Import Date</p>
+                      <p className="bg-muted p-2 rounded text-sm">{article.import_date || "-"}</p>
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground">Import Date</p>
-                      <p className="bg-muted p-2 rounded">{article.import_date || "-"}</p>
+                    <div className="min-w-0">
+                      <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">Unit Rate</p>
+                      <p className="bg-muted p-2 rounded text-sm truncate">₹{article.unit_rate?.toLocaleString() || "-"}</p>
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground">Unit Rate</p>
-                      <p className="bg-muted p-2 rounded">₹{article.unit_rate?.toLocaleString() || "-"}</p>
+                    <div className="min-w-0">
+                      <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">Total Amount</p>
+                      <p className="bg-muted p-2 rounded text-sm truncate">₹{article.total_amount?.toLocaleString() || "-"}</p>
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground">Total Amount</p>
-                      <p className="bg-muted p-2 rounded">₹{article.total_amount?.toLocaleString() || "-"}</p>
+                    <div className="min-w-0">
+                      <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">Tax Amount</p>
+                      <p className="bg-muted p-2 rounded text-sm truncate">₹{article.tax_amount?.toLocaleString() || "-"}</p>
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground">Tax Amount</p>
-                      <p className="bg-muted p-2 rounded">₹{article.tax_amount?.toLocaleString() || "-"}</p>
+                    <div className="min-w-0">
+                      <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">Discount Amount</p>
+                      <p className="bg-muted p-2 rounded text-sm truncate">₹{article.discount_amount?.toLocaleString() || "-"}</p>
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground">Discount Amount</p>
-                      <p className="bg-muted p-2 rounded">₹{article.discount_amount?.toLocaleString() || "-"}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground">Currency</p>
-                      <p className="bg-muted p-2 rounded">{article.currency || "-"}</p>
+                    <div className="min-w-0">
+                      <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">Currency</p>
+                      <p className="bg-muted p-2 rounded text-sm">{article.currency || "-"}</p>
                     </div>
                   </div>
                 </div>
@@ -760,53 +762,53 @@ export default function InwardDetailPage({ params }: InwardDetailPageProps) {
                     </div>
                   </div>
 
-                  <div className="overflow-x-auto -mx-2 sm:mx-0">
-                    <div className="min-w-[600px] px-2 sm:px-0">
-                      <table className="w-full border-collapse border border-gray-300">
+                  <div className="overflow-x-auto -mx-2 sm:mx-0 rounded-lg border border-gray-200">
+                    <div className="min-w-[600px]">
+                      <table className="w-full border-collapse">
         <thead>
-          <tr className="bg-gray-50">
-            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Box Number</th>
-            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Article Name</th>
-            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Lot Number</th>
-            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Net Weight (kg)</th>
-            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Gross Weight (kg)</th>
-            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Actions</th>
+          <tr className="bg-gray-50 border-b border-gray-200">
+            <th className="px-3 sm:px-4 py-2 sm:py-3 text-left text-xs sm:text-sm font-medium text-gray-700">Box Number</th>
+            <th className="px-3 sm:px-4 py-2 sm:py-3 text-left text-xs sm:text-sm font-medium text-gray-700">Article Name</th>
+            <th className="px-3 sm:px-4 py-2 sm:py-3 text-left text-xs sm:text-sm font-medium text-gray-700">Lot Number</th>
+            <th className="px-3 sm:px-4 py-2 sm:py-3 text-left text-xs sm:text-sm font-medium text-gray-700">Net Weight (kg)</th>
+            <th className="px-3 sm:px-4 py-2 sm:py-3 text-left text-xs sm:text-sm font-medium text-gray-700">Gross Weight (kg)</th>
+            <th className="px-3 sm:px-4 py-2 sm:py-3 text-left text-xs sm:text-sm font-medium text-gray-700">Actions</th>
           </tr>
         </thead>
                         <tbody>
                           {boxes.map((box, index) => (
-                            <tr key={`${box.transaction_no}-${box.article_description}-${box.box_number}`} className="hover:bg-gray-50">
-                              <td className="border border-gray-300 px-4 py-2">
-                                <div className="flex items-center justify-center w-10 h-10 rounded-full bg-primary/10">
-                                  <span className="font-medium text-sm">{box.box_number}</span>
+                            <tr key={`${box.transaction_no}-${box.article_description}-${box.box_number}`} className="hover:bg-gray-50 border-b border-gray-200 last:border-b-0">
+                              <td className="px-3 sm:px-4 py-2 sm:py-3">
+                                <div className="flex items-center justify-center w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-primary/10">
+                                  <span className="font-medium text-xs sm:text-sm">{box.box_number}</span>
                                 </div>
                               </td>
-                              <td className="border border-gray-300 px-4 py-2">
-                                <span className="text-sm font-medium">{box.article_description}</span>
+                              <td className="px-3 sm:px-4 py-2 sm:py-3">
+                                <span className="text-xs sm:text-sm font-medium truncate block max-w-[150px] sm:max-w-none">{box.article_description}</span>
                               </td>
-                              <td className="border border-gray-300 px-4 py-2">
-                                <span className="text-sm">{box.lot_number || "-"}</span>
+                              <td className="px-3 sm:px-4 py-2 sm:py-3">
+                                <span className="text-xs sm:text-sm font-mono truncate block">{box.lot_number || "-"}</span>
                               </td>
-                              <td className="border border-gray-300 px-4 py-2">
-                                <span className="text-sm">{box.net_weight?.toFixed(2) || "-"}</span>
+                              <td className="px-3 sm:px-4 py-2 sm:py-3">
+                                <span className="text-xs sm:text-sm">{box.net_weight?.toFixed(2) || "-"}</span>
                               </td>
-                              <td className="border border-gray-300 px-4 py-2">
-                                <span className="text-sm">{box.gross_weight?.toFixed(2) || "-"}</span>
+                              <td className="px-3 sm:px-4 py-2 sm:py-3">
+                                <span className="text-xs sm:text-sm">{box.gross_weight?.toFixed(2) || "-"}</span>
                               </td>
-                              <td className="border border-gray-300 px-4 py-2">
+                              <td className="px-3 sm:px-4 py-2 sm:py-3">
                                 <Button
                                   variant="outline"
                                   size="sm"
                                   onClick={() => handlePrintBox(box)}
                                   disabled={printingBoxes.has(box.box_number)}
-                                  className="flex items-center gap-2"
+                                  className="h-8 text-xs whitespace-nowrap flex items-center gap-1 sm:gap-2"
                                 >
                                   {printingBoxes.has(box.box_number) ? (
-                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                    <Loader2 className="w-3 h-3 sm:w-4 sm:h-4 animate-spin" />
                                   ) : (
-                                    <Printer className="w-4 h-4" />
+                                    <Printer className="w-3 h-3 sm:w-4 sm:h-4" />
                                   )}
-                                  Print
+                                  <span className="hidden sm:inline">Print</span>
                                 </Button>
                               </td>
                             </tr>
