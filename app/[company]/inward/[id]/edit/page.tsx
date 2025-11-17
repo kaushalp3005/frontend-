@@ -773,6 +773,7 @@ export default function EditInwardPage() {
         net_weight: box.net_weight,
         total_weight: box.gross_weight,
         batch_number: associatedArticle.batch_number || '',
+        lot_number: box.lot_number || associatedArticle.lot_number || '',
         box_number: box.box_number,
         manufacturing_date: associatedArticle.manufacturing_date,
         expiry_date: associatedArticle.expiry_date,
@@ -1026,8 +1027,13 @@ export default function EditInwardPage() {
                         <span>Exp: ${formatDate(qrPayload.expiry_date)}</span>
                       </div>
                       ` : ''}
-                      ${qrPayload.batch_number ? `
-                      <div class="batch-info">Batch: ${qrPayload.batch_number.length > 20 ? qrPayload.batch_number.substring(0, 20) + '...' : qrPayload.batch_number}</div>
+                      ${qrPayload.lot_number ? `
+                      <div class="batch-info">Lot: ${qrPayload.lot_number.length > 20 ? qrPayload.lot_number.substring(0, 20) + '...' : qrPayload.lot_number}</div>
+                      ` : ''}
+                      ${qrPayload.customer_name ? `
+                      <div class="details-row">
+                        <span>Cust: ${qrPayload.customer_name.length > 20 ? qrPayload.customer_name.substring(0, 20) + '...' : qrPayload.customer_name}</span>
+                      </div>
                       ` : ''}
                     </div>
                   </div>
@@ -2242,17 +2248,6 @@ export default function EditInwardPage() {
                       )}
                     </div>
 
-                    {/* Batch Number */}
-                    <div>
-                      <Label htmlFor={`batch_number_${article.id}`}>Batch Number</Label>
-                      <Input 
-                        id={`batch_number_${article.id}`} 
-                        value={article.batch_number} 
-                        readOnly 
-                        className="bg-muted" 
-                      />
-                    </div>
-
                     {/* Lot Number */}
                     <div>
                       <Label htmlFor={`lot_number_${article.id}`}>Lot Number</Label>
@@ -2484,14 +2479,14 @@ export default function EditInwardPage() {
                     <div className="min-w-[600px] px-2 sm:px-0">
                       <table className="w-full border-collapse border border-gray-300">
                         <thead>
-                          <tr className="bg-gray-50">
-                            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Box Number</th>
-                            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Article Name</th>
-                            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Lot Number</th>
-                            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Net Weight (kg)</th>
-                            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Gross Weight (kg)</th>
-                            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Actions</th>
-                          </tr>
+          <tr className="bg-gray-50">
+            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Box Number</th>
+            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Article Name</th>
+            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Lot Number</th>
+            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Net Weight (kg)</th>
+            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Gross Weight (kg)</th>
+            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Actions</th>
+          </tr>
                         </thead>
                         <tbody>
                           {boxes.map((box) => (
