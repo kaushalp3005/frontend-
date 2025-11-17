@@ -929,9 +929,144 @@ export default function InwardFormPage({ params }: InwardFormPageProps) {
 
     try {
       console.log("Printing box:", box)
-      
+
+      // Step 1: Validate form before saving
+      const isValid = validateForm()
+      if (!isValid) {
+        alert("Please fix validation errors before printing")
+        return
+      }
+
+      // Step 2: Save or update the entry in the database
+      console.log("Saving/updating entry before printing...")
+
+      // Resolve all missing SKU IDs
+      const resolvedArticles = await Promise.all(
+        articles.map(async (a) => {
+          const sku = await resolveSkuId(a)
+          return { ...a, sku_id: sku }
+        })
+      )
+
+      // Prepare submission data
+      const submissionData = {
+        company: company,
+        transaction: {
+          transaction_no: formData.transaction_no,
+          entry_date: formData.entry_date,
+          vehicle_number: formData.vehicle_number,
+          transporter_name: formData.transporter_name,
+          lr_number: formData.lr_number,
+          vendor_supplier_name: formData.vendor_supplier_name,
+          customer_party_name: formData.customer_party_name,
+          source_location: formData.source_location,
+          destination_location: formData.destination_location,
+          challan_number: formData.challan_number,
+          invoice_number: formData.invoice_number,
+          po_number: formData.po_number,
+          grn_number: formData.grn_number,
+          grn_quantity: formData.grn_quantity,
+          system_grn_date: formData.system_grn_date,
+          purchase_by: formData.purchase_by,
+          service_invoice_number: formData.service_invoice_number,
+          dn_number: formData.dn_number,
+          approval_authority: formData.approval_authority,
+          total_amount: resolvedArticles.reduce((sum, article) => sum + article.total_amount, 0),
+          tax_amount: resolvedArticles.reduce((sum, article) => sum + article.tax_amount, 0),
+          discount_amount: resolvedArticles.reduce((sum, article) => sum + article.discount_amount, 0),
+          received_quantity: formData.received_quantity,
+          remark: formData.remark,
+          currency: "INR"
+        },
+        articles: resolvedArticles.map(article => ({
+          transaction_no: formData.transaction_no,
+          sku_id: Number(article.sku_id),
+          material_type: article.material_type,
+          item_description: article.item_description,
+          item_category: article.item_category,
+          sub_category: article.sub_category,
+          uom: article.uom,
+          packaging_type: article.packaging_type,
+          quantity_units: article.quantity_units,
+          net_weight: article.net_weight,
+          total_weight: article.total_weight,
+          batch_number: article.batch_number,
+          lot_number: article.lot_number,
+          manufacturing_date: article.manufacturing_date,
+          expiry_date: article.expiry_date,
+          import_date: article.import_date,
+          unit_rate: article.unit_rate,
+          total_amount: article.total_amount,
+          tax_amount: article.tax_amount,
+          discount_amount: article.discount_amount,
+          currency: article.currency,
+          issuance_date: article.issuance_date,
+          job_card_no: article.job_card_no,
+          issuance_quantity: article.issuance_quantity
+        })),
+        boxes: boxes.map(b => ({
+          transaction_no: formData.transaction_no,
+          article_description: b.article,
+          box_number: b.box_number,
+          net_weight: b.net_weight,
+          gross_weight: b.gross_weight,
+          lot_number: b.lot_number
+        }))
+      }
+
+      // Check if entry exists
+      const checkUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/inward/${company}/${encodeURIComponent(formData.transaction_no)}`
+
+      let saveResponse
+      try {
+        const checkResponse = await fetch(checkUrl, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json'
+          }
+        })
+
+        if (checkResponse.ok) {
+          // Entry exists, update it
+          console.log("Entry exists, updating...")
+          saveResponse = await fetch(checkUrl, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json'
+            },
+            body: JSON.stringify(submissionData)
+          })
+        } else if (checkResponse.status === 404) {
+          // Entry doesn't exist, create new one
+          console.log("Entry doesn't exist, creating new...")
+          saveResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/inward`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json'
+            },
+            body: JSON.stringify(submissionData)
+          })
+        } else {
+          throw new Error(`Failed to check entry existence: ${checkResponse.statusText}`)
+        }
+
+        if (!saveResponse.ok) {
+          const errorData = await saveResponse.json().catch(() => ({}))
+          throw new Error(`Failed to save entry: ${errorData.message || saveResponse.statusText}`)
+        }
+
+        console.log("Entry saved/updated successfully")
+      } catch (saveError) {
+        console.error("Error saving entry:", saveError)
+        alert(`Failed to save entry before printing: ${saveError instanceof Error ? saveError.message : 'Unknown error'}`)
+        return
+      }
+
+      // Step 3: Proceed with printing
       // Find the article associated with this box
-      const associatedArticle = articles.find(art => art.item_description === box.article)
+      const associatedArticle = resolvedArticles.find(art => art.item_description === box.article)
       if (!associatedArticle) {
         alert("Error: Could not find associated article for this box")
         return
@@ -951,6 +1086,7 @@ export default function InwardFormPage({ params }: InwardFormPageProps) {
         net_weight: box.net_weight,
         total_weight: box.gross_weight,
         batch_number: associatedArticle.batch_number || '',
+        lot_number: box.lot_number || associatedArticle.lot_number || '',
         box_number: box.box_number,
         manufacturing_date: associatedArticle.manufacturing_date,
         expiry_date: associatedArticle.expiry_date,
@@ -1204,8 +1340,13 @@ export default function InwardFormPage({ params }: InwardFormPageProps) {
                         <span>Exp: ${formatDate(qrPayload.expiry_date)}</span>
                       </div>
                       ` : ''}
-                      ${qrPayload.batch_number ? `
-                      <div class="batch-info">Batch: ${qrPayload.batch_number.length > 20 ? qrPayload.batch_number.substring(0, 20) + '...' : qrPayload.batch_number}</div>
+                      ${qrPayload.lot_number ? `
+                      <div class="batch-info">Lot: ${qrPayload.lot_number.length > 20 ? qrPayload.lot_number.substring(0, 20) + '...' : qrPayload.lot_number}</div>
+                      ` : ''}
+                      ${qrPayload.customer_name ? `
+                      <div class="details-row">
+                        <span>Cust: ${qrPayload.customer_name.length > 20 ? qrPayload.customer_name.substring(0, 20) + '...' : qrPayload.customer_name}</span>
+                      </div>
                       ` : ''}
                     </div>
                   </div>
@@ -2455,12 +2596,6 @@ export default function InwardFormPage({ params }: InwardFormPageProps) {
                       )}
                     </div>
 
-                    {/* Batch Number */}
-                    <div>
-                      <Label htmlFor={`batch_number_${article.id}`}>Batch Number</Label>
-                      <Input id={`batch_number_${article.id}`} value={article.batch_number} readOnly className="bg-muted" />
-                    </div>
-
                     {/* Lot Number */}
                     <div>
                       <Label htmlFor={`lot_number_${article.id}`}>Lot Number</Label>
@@ -2702,14 +2837,14 @@ export default function InwardFormPage({ params }: InwardFormPageProps) {
                     <div className="min-w-[600px] px-2 sm:px-0">
                       <table className="w-full border-collapse border border-gray-300">
                         <thead>
-                          <tr className="bg-gray-50">
-                            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Box Number</th>
-                            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Article Name</th>
-                            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Lot Number</th>
-                            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Net Weight (kg)</th>
-                            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Gross Weight (kg)</th>
-                            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Actions</th>
-                          </tr>
+          <tr className="bg-gray-50">
+            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Box Number</th>
+            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Article Name</th>
+            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Lot Number</th>
+            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Net Weight (kg)</th>
+            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Gross Weight (kg)</th>
+            <th className="border border-gray-300 px-4 py-2 text-left font-medium">Actions</th>
+          </tr>
                         </thead>
                         <tbody>
                           {boxes.map((box) => (
