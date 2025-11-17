@@ -546,9 +546,9 @@ export default function InwardListPage({ params }: InwardListPageProps) {
                           <h3 className="font-semibold text-lg">
                             {record.transaction_id}
                           </h3>
-                          {record.batch_number && (
+                          {record.lot_number && (
                             <Badge variant="outline" className="w-fit">
-                              Batch: {record.batch_number}
+                              Lot: {record.lot_number}
                             </Badge>
                           )}
                         </div>
