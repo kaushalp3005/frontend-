@@ -38,6 +38,7 @@ export function generateQRPayloadFromDetail(
     net_weight: netWeight,
     total_weight: totalWeight,
     batch_number: article.batch_number || '',
+    lot_number: box.lot_number || article.lot_number || '',
     box_number: boxNumber,
     manufacturing_date: article.manufacturing_date,
     expiry_date: article.expiry_date,
@@ -73,6 +74,7 @@ export function generateQRPayload(
     net_weight: netWeight,
     total_weight: totalWeight,
     batch_number: article.batch_number || '',
+    lot_number: box?.lot_number || article.lot_number || '',
     box_number: boxNumber,
     manufacturing_date: article.manufacturing_date,
     expiry_date: article.expiry_date,
@@ -91,20 +93,21 @@ export function generateSimplifiedQRData(payload: QRPayload): string {
     tx: payload.transaction_no,
     bx: payload.box_number,
     sk: payload.sku_id,
-    
+
     // Product info
     it: payload.item_description,
     nw: payload.net_weight,
     tw: payload.total_weight,
-    
+
     // Dates (shortened format)
     ed: payload.entry_date,
     md: payload.manufacturing_date,
     ex: payload.expiry_date,
-    
+
     // Batch info
     bt: payload.batch_number,
-    
+    lt: payload.lot_number,
+
     // Parties (shortened)
     vd: payload.vendor_name,
     cs: payload.customer_name
@@ -139,6 +142,7 @@ export function parseSimplifiedQRData(qrDataString: string): Partial<QRPayload> 
       manufacturing_date: data.md,
       expiry_date: data.ex,
       batch_number: data.bt,
+      lot_number: data.lt,
       vendor_name: data.vd,
       customer_name: data.cs
     }
