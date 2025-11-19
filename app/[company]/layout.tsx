@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import { useAuthStore, type Company } from "@/lib/stores/auth";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -9,6 +9,7 @@ export default function CompanyLayout({ children }: { children: React.ReactNode 
   const router = useRouter();
   const params = useParams() as { company?: string };
   const pathname = usePathname();
+  const [companyError, setCompanyError] = useState<string | null>(null);
 
   const company = (params?.company || "").toUpperCase();
   const {
@@ -30,7 +31,11 @@ export default function CompanyLayout({ children }: { children: React.ReactNode 
 
     if (needFetch) {
       console.log("[LAYOUT] setCurrentCompany →", company);
-      setCurrentCompany(company as Company);
+      setCompanyError(null); // Clear previous errors
+      setCurrentCompany(company as Company).catch((error) => {
+        console.error("[LAYOUT] Failed to set company:", error);
+        setCompanyError(error.message || `Failed to access ${company}. Please try again.`);
+      });
     }
   }, [company, user, currentCompany, currentCompanyAccess, setCurrentCompany]);
 
@@ -39,6 +44,11 @@ export default function CompanyLayout({ children }: { children: React.ReactNode 
     if (!user) return { state: "auth-wait" as const, reason: "No user yet" };
     if (isLoading) return { state: "loading" as const, reason: "Store loading" };
     if (!company) return { state: "error" as const, reason: "No company in route" };
+    
+    // Check for company loading errors
+    if (companyError) {
+      return { state: "error" as const, reason: companyError };
+    }
 
     // If we're currently switching companies or loading permissions, show loading state
     if (currentCompany !== company) {
@@ -61,7 +71,7 @@ export default function CompanyLayout({ children }: { children: React.ReactNode 
     }
 
     return { state: "ok" as const, reason: "Ready" };
-  }, [user, isLoading, company, currentCompany, currentCompanyAccess]);
+  }, [user, isLoading, company, currentCompany, currentCompanyAccess, companyError]);
 
   if (gate.state === "loading" || gate.state === "auth-wait") {
     return (
@@ -81,18 +91,39 @@ export default function CompanyLayout({ children }: { children: React.ReactNode 
       currentCompanyAccess,
       pathname,
     });
+    
+    const handleRetry = async () => {
+      if (company && user) {
+        setCompanyError(null);
+        try {
+          await setCurrentCompany(company as Company);
+        } catch (error: any) {
+          console.error("[LAYOUT] Retry failed:", error);
+          setCompanyError(error.message || `Failed to access ${company}. Please try again.`);
+        }
+      }
+    };
+    
     return (
       <div className="w-full h-screen flex items-center justify-center p-4">
         <div className="max-w-sm sm:max-w-md w-full rounded-xl border p-4 sm:p-6 space-y-3">
           <h2 className="text-base sm:text-lg font-semibold">Can't load this company</h2>
           <p className="text-xs sm:text-sm text-muted-foreground">
-            {gate.reason}. Check the console (F12 → Console) for details. If you just applied the backend
-            fix, hit refresh once.
+            {gate.reason}
           </p>
-          <div className="pt-2">
+          <p className="text-xs text-muted-foreground/80">
+            Check the console (F12 → Console) for details. If you just applied a backend fix, try refreshing or retrying.
+          </p>
+          <div className="pt-2 flex gap-2">
+            <button
+              onClick={handleRetry}
+              className="inline-flex items-center rounded-md border px-3 py-1.5 text-xs sm:text-sm hover:bg-accent"
+            >
+              Retry
+            </button>
             <button
               onClick={() => router.push("/")}
-              className="inline-flex items-center rounded-md border px-3 py-1.5 text-xs sm:text-sm"
+              className="inline-flex items-center rounded-md border px-3 py-1.5 text-xs sm:text-sm hover:bg-accent"
             >
               Go Home
             </button>
