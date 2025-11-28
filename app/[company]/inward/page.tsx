@@ -369,135 +369,147 @@ export default function InwardListPage({ params }: InwardListPageProps) {
   return (
     <div className="min-h-screen bg-gray-50 p-2 sm:p-4 lg:p-6 max-w-7xl mx-auto space-y-4 sm:space-y-6 w-full">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold tracking-tight">
-            Inward Records - {company}
-          </h1>
-          <p className="text-sm sm:text-base text-muted-foreground">
-            {data ? `${data.total} total records` : "Loading records..."}
-          </p>
-        </div>
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-          <PermissionGuard module="inward" action="view">
-            <Button 
-              variant="outline" 
-              onClick={handleDownloadAll}
-              disabled={downloading}
-              className="flex-1 sm:flex-none"
-            >
-              {downloading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Exporting...
-                </>
-              ) : (
-                <>
-                  <FileSpreadsheet className="mr-2 h-4 w-4" />
-                  Download All
-                </>
-              )}
-            </Button>
-          </PermissionGuard>
-          <PermissionGuard module="inward" action="create">
-            <Link href={`/${company}/inward/new`}>
-              <Button className="flex-1 sm:flex-none">
-                Create New Record
+      <div className="flex flex-col gap-3 sm:gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4">
+          <div className="flex-1 min-w-0">
+            <h1 className="text-lg sm:text-xl md:text-2xl lg:text-3xl font-bold tracking-tight break-words">
+              Inward Records - {company}
+            </h1>
+            <p className="text-xs sm:text-sm md:text-base text-muted-foreground mt-1">
+              {data ? `${data.total} total records` : "Loading records..."}
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
+            <PermissionGuard module="inward" action="view">
+              <Button 
+                variant="outline" 
+                onClick={handleDownloadAll}
+                disabled={downloading}
+                className="w-full sm:w-auto text-xs sm:text-sm"
+                size="sm"
+              >
+                {downloading ? (
+                  <>
+                    <Loader2 className="mr-2 h-3 w-3 sm:h-4 sm:w-4 animate-spin" />
+                    <span className="hidden sm:inline">Exporting...</span>
+                    <span className="sm:hidden">Exporting</span>
+                  </>
+                ) : (
+                  <>
+                    <FileSpreadsheet className="mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                    <span className="hidden sm:inline">Download All</span>
+                    <span className="sm:hidden">Download</span>
+                  </>
+                )}
               </Button>
-            </Link>
-          </PermissionGuard>
+            </PermissionGuard>
+            <PermissionGuard module="inward" action="create">
+              <Link href={`/${company}/inward/new`} className="w-full sm:w-auto">
+                <Button className="w-full sm:w-auto text-xs sm:text-sm" size="sm">
+                  <span className="hidden sm:inline">Create New Record</span>
+                  <span className="sm:hidden">New Record</span>
+                </Button>
+              </Link>
+            </PermissionGuard>
+          </div>
         </div>
       </div>
 
       {/* Search and Filter Section */}
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Search className="h-5 w-5" />
-            Search & Filters
+        <CardHeader className="pb-3 sm:pb-6">
+          <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+            <Search className="h-4 w-4 sm:h-5 sm:w-5" />
+            <span>Search & Filters</span>
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <CardContent className="space-y-3 sm:space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
             {/* Search Input */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-muted-foreground">
+            <div className="space-y-1.5 sm:space-y-2">
+              <label className="text-xs sm:text-sm font-medium text-muted-foreground">
                 Search Records
               </label>
               <div className="relative">
-                <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                <Search className="absolute left-2.5 sm:left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground" />
                 <Input
                   placeholder="Transaction no, batch, invoice..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-9"
+                  className="pl-8 sm:pl-9 text-sm sm:text-base h-9 sm:h-10"
                 />
               </div>
             </div>
 
             {/* From Date */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-muted-foreground">
+            <div className="space-y-1.5 sm:space-y-2">
+              <label className="text-xs sm:text-sm font-medium text-muted-foreground">
                 From Date
               </label>
               <div className="relative">
-                <Calendar className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                <Calendar className="absolute left-2.5 sm:left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground pointer-events-none" />
                 <Input
                   type="date"
                   value={fromDate}
                   onChange={(e) => setFromDate(e.target.value)}
-                  className="pl-9"
+                  className="pl-8 sm:pl-9 text-sm sm:text-base h-9 sm:h-10"
                 />
               </div>
             </div>
 
             {/* To Date */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-muted-foreground">
+            <div className="space-y-1.5 sm:space-y-2">
+              <label className="text-xs sm:text-sm font-medium text-muted-foreground">
                 To Date
               </label>
               <div className="relative">
-                <Calendar className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                <Calendar className="absolute left-2.5 sm:left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground pointer-events-none" />
                 <Input
                   type="date"
                   value={toDate}
                   onChange={(e) => setToDate(e.target.value)}
-                  className="pl-9"
+                  className="pl-8 sm:pl-9 text-sm sm:text-base h-9 sm:h-10"
                 />
               </div>
             </div>
 
             {/* Clear Filters Button */}
-            <div className="flex items-end">
+            <div className="flex items-end sm:items-end">
               <Button 
                 variant="outline" 
                 onClick={clearFilters}
                 disabled={!hasFilters}
-                className="w-full"
+                className="w-full h-9 sm:h-10 text-xs sm:text-sm"
+                size="sm"
               >
-                <X className="mr-2 h-4 w-4" />
-                Clear Filters
+                <X className="mr-1.5 sm:mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                <span className="hidden sm:inline">Clear Filters</span>
+                <span className="sm:hidden">Clear</span>
               </Button>
             </div>
           </div>
 
           {/* Filter Status */}
           {hasFilters && (
-            <div className="flex flex-wrap gap-2 pt-2 border-t">
-              <span className="text-sm text-muted-foreground">Active filters:</span>
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 pt-2 sm:pt-3 border-t">
+              <span className="text-xs sm:text-sm text-muted-foreground">Active filters:</span>
               {searchQuery && (
-                <Badge variant="secondary">
-                  Search: "{searchQuery}"
+                <Badge variant="secondary" className="text-xs px-2 py-0.5">
+                  <span className="hidden sm:inline">Search: </span>"{searchQuery.length > 15 ? `${searchQuery.substring(0, 15)}...` : searchQuery}"
                 </Badge>
               )}
               {fromDate && (
-                <Badge variant="secondary">
-                  From: {format(new Date(fromDate), "MMM dd, yyyy")}
+                <Badge variant="secondary" className="text-xs px-2 py-0.5">
+                  <span className="hidden sm:inline">From: </span>
+                  <span className="sm:hidden">From </span>
+                  {format(new Date(fromDate), "MMM dd, yyyy")}
                 </Badge>
               )}
               {toDate && (
-                <Badge variant="secondary">
-                  To: {format(new Date(toDate), "MMM dd, yyyy")}
+                <Badge variant="secondary" className="text-xs px-2 py-0.5">
+                  <span className="hidden sm:inline">To: </span>
+                  <span className="sm:hidden">To </span>
+                  {format(new Date(toDate), "MMM dd, yyyy")}
                 </Badge>
               )}
             </div>
@@ -507,9 +519,9 @@ export default function InwardListPage({ params }: InwardListPageProps) {
 
       {/* Loading Overlay for Search */}
       {isSearching && (
-        <div className="flex items-center justify-center p-4">
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
+        <div className="flex items-center justify-center p-3 sm:p-4">
+          <div className="flex items-center gap-2 text-muted-foreground text-sm sm:text-base">
+            <Loader2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 animate-spin" />
             <span>Searching...</span>
           </div>
         </div>
@@ -517,62 +529,66 @@ export default function InwardListPage({ params }: InwardListPageProps) {
 
       {/* Results Section */}
       <Card>
-        <CardHeader>
-          <div className="flex justify-between items-center">
-            <CardTitle>
+        <CardHeader className="pb-3 sm:pb-6">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 sm:gap-0">
+            <CardTitle className="text-base sm:text-lg">
               Records {hasFilters ? "(Filtered)" : ""}
             </CardTitle>
             {data && (
-              <Badge variant="outline">
-                Page {currentPage} of {totalPages} ({data.total} total)
+              <Badge variant="outline" className="w-fit text-xs sm:text-sm">
+                <span className="hidden sm:inline">Page {currentPage} of {totalPages} ({data.total} total)</span>
+                <span className="sm:hidden">{currentPage}/{totalPages} ({data.total})</span>
               </Badge>
             )}
           </div>
         </CardHeader>
         <CardContent>
           {data && data.records.length > 0 ? (
-            <div className="space-y-4">
+            <div className="space-y-3 sm:space-y-4">
               {/* Records List */}
-              <div className="space-y-3">
+              <div className="space-y-2 sm:space-y-3">
                 {data.records.map((record) => (
                   <div
                     key={record.transaction_id}
-                    className="border rounded-lg p-4 hover:bg-gray-50 transition-colors"
+                    className="border rounded-lg p-3 sm:p-4 hover:bg-gray-50 transition-colors"
                   >
-                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                      <div className="flex-1 space-y-2">
+                    <div className="flex flex-col gap-3 sm:gap-4">
+                      {/* Main Content */}
+                      <div className="flex-1 space-y-2 sm:space-y-3 min-w-0">
                         {/* Transaction Info */}
-                        <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
-                          <h3 className="font-semibold text-lg">
-                            {record.transaction_id}
-                          </h3>
+                        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <h3 className="font-semibold text-base sm:text-lg break-words">
+                              {record.transaction_id}
+                            </h3>
+                          </div>
                           {record.lot_number && (
-                            <Badge variant="outline" className="w-fit">
+                            <Badge variant="outline" className="w-fit text-xs shrink-0">
                               Lot: {record.lot_number}
                             </Badge>
                           )}
                         </div>
 
                         {/* Details Row */}
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                          <div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3 sm:gap-4 text-xs sm:text-sm">
+                          <div className="flex flex-col sm:flex-row gap-0.5 sm:gap-2">
                             <span className="text-muted-foreground">Entry Date:</span>
-                            <span className="ml-2 font-medium">
+                            <span className="font-medium">
                               {format(new Date(record.entry_date), "MMM dd, yyyy")}
                             </span>
                           </div>
                           {record.invoice_number && (
-                            <div>
+                            <div className="flex flex-col sm:flex-row gap-0.5 sm:gap-2">
                               <span className="text-muted-foreground">Invoice:</span>
-                              <span className="ml-2 font-medium">
+                              <span className="font-medium truncate">
                                 {record.invoice_number}
                               </span>
                             </div>
                           )}
                           {record.po_number && (
-                            <div>
+                            <div className="flex flex-col sm:flex-row gap-0.5 sm:gap-2">
                               <span className="text-muted-foreground">PO:</span>
-                              <span className="ml-2 font-medium">
+                              <span className="font-medium truncate">
                                 {record.po_number}
                               </span>
                             </div>
@@ -581,19 +597,19 @@ export default function InwardListPage({ params }: InwardListPageProps) {
 
                         {/* Items */}
                         {record.item_descriptions.length > 0 && (
-                          <div className="space-y-1">
-                            <span className="text-sm text-muted-foreground">Items:</span>
-                            <div className="flex flex-wrap gap-2">
+                          <div className="space-y-1.5">
+                            <span className="text-xs sm:text-sm text-muted-foreground">Items:</span>
+                            <div className="flex flex-wrap gap-1.5 sm:gap-2">
                               {record.item_descriptions.slice(0, 3).map((item, index) => (
-                                <Badge key={index} variant="secondary" className="text-xs">
-                                  {item}
+                                <Badge key={index} variant="secondary" className="text-xs px-2 py-0.5">
+                                  <span className="truncate max-w-[120px] sm:max-w-none">{item}</span>
                                   {record.quantities_and_uoms[index] && 
                                     ` (${record.quantities_and_uoms[index]})`
                                   }
                                 </Badge>
                               ))}
                               {record.item_descriptions.length > 3 && (
-                                <Badge variant="outline" className="text-xs">
+                                <Badge variant="outline" className="text-xs px-2 py-0.5">
                                   +{record.item_descriptions.length - 3} more
                                 </Badge>
                               )}
@@ -603,23 +619,25 @@ export default function InwardListPage({ params }: InwardListPageProps) {
                       </div>
 
                       {/* Actions */}
-                      <div className="flex flex-row lg:flex-col gap-2">
+                      <div className="flex flex-row sm:flex-row lg:flex-row gap-2 pt-2 border-t sm:border-t-0 lg:border-t">
                         <Link 
                           href={`/${company}/inward/${record.transaction_id}`}
-                          className="flex-1"
+                          className="flex-1 sm:flex-initial"
                         >
-                          <Button variant="outline" size="sm" className="w-full">
-                            View Details
+                          <Button variant="outline" size="sm" className="w-full sm:w-auto text-xs sm:text-sm h-8 sm:h-9">
+                            <span className="hidden sm:inline">View Details</span>
+                            <span className="sm:hidden">View</span>
                           </Button>
                         </Link>
                         <PermissionGuard module="inward" action="edit">
                           <Link 
                             href={`/${company}/inward/${record.transaction_id}/edit`}
-                            className="flex-1"
+                            className="flex-1 sm:flex-initial"
                           >
-                            <Button variant="outline" size="sm" className="w-full">
-                              <Edit className="mr-1 h-3 w-3" />
-                              Edit
+                            <Button variant="outline" size="sm" className="w-full sm:w-auto text-xs sm:text-sm h-8 sm:h-9">
+                              <Edit className="mr-1 h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                              <span className="hidden sm:inline">Edit</span>
+                              <span className="sm:hidden">Edit</span>
                             </Button>
                           </Link>
                         </PermissionGuard>
@@ -629,7 +647,7 @@ export default function InwardListPage({ params }: InwardListPageProps) {
                               <Button 
                                 variant="outline" 
                                 size="sm" 
-                                className="flex-1 w-full"
+                                className="flex-1 sm:flex-initial w-full sm:w-auto text-xs sm:text-sm h-8 sm:h-9"
                                 disabled={deletingId === record.transaction_id}
                               >
                                 {deletingId === record.transaction_id ? (
@@ -637,27 +655,28 @@ export default function InwardListPage({ params }: InwardListPageProps) {
                                 ) : (
                                   <Trash2 className="mr-1 h-3 w-3" />
                                 )}
-                                Delete
+                                <span className="hidden sm:inline">Delete</span>
+                                <span className="sm:hidden">Del</span>
                               </Button>
                             </AlertDialogTrigger>
-                          <AlertDialogContent>
+                          <AlertDialogContent className="max-w-[90vw] sm:max-w-md">
                             <AlertDialogHeader>
-                              <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                              <AlertDialogDescription>
+                              <AlertDialogTitle className="text-base sm:text-lg">Are you sure?</AlertDialogTitle>
+                              <AlertDialogDescription className="text-sm">
                                 This action cannot be undone. This will permanently delete the inward record
                                 <strong> {record.transaction_id}</strong> and remove all associated data.
                               </AlertDialogDescription>
                             </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogFooter className="flex-col sm:flex-row gap-2">
+                              <AlertDialogCancel className="w-full sm:w-auto text-xs sm:text-sm">Cancel</AlertDialogCancel>
                               <AlertDialogAction
                                 onClick={() => handleDelete(record.transaction_id)}
                                 disabled={deletingId === record.transaction_id}
-                                className="bg-red-600 hover:bg-red-700"
+                                className="bg-red-600 hover:bg-red-700 w-full sm:w-auto text-xs sm:text-sm"
                               >
                                 {deletingId === record.transaction_id ? (
                                   <>
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    <Loader2 className="mr-2 h-3 w-3 sm:h-4 sm:w-4 animate-spin" />
                                     Deleting...
                                   </>
                                 ) : (
@@ -676,23 +695,30 @@ export default function InwardListPage({ params }: InwardListPageProps) {
 
               {/* Pagination */}
               {totalPages > 1 && (
-                <div className="flex items-center justify-between pt-4 border-t">
-                  <div className="text-sm text-muted-foreground">
-                    Showing {((currentPage - 1) * itemsPerPage) + 1} to{" "}
-                    {Math.min(currentPage * itemsPerPage, data.total)} of {data.total} records
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-0 pt-3 sm:pt-4 border-t">
+                  <div className="text-xs sm:text-sm text-muted-foreground text-center sm:text-left">
+                    <span className="hidden sm:inline">
+                      Showing {((currentPage - 1) * itemsPerPage) + 1} to{" "}
+                      {Math.min(currentPage * itemsPerPage, data.total)} of {data.total} records
+                    </span>
+                    <span className="sm:hidden">
+                      {((currentPage - 1) * itemsPerPage) + 1}-{Math.min(currentPage * itemsPerPage, data.total)} of {data.total}
+                    </span>
                   </div>
                   
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 sm:gap-2 w-full sm:w-auto justify-center">
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => handlePageChange(currentPage - 1)}
                       disabled={currentPage <= 1 || isSearching}
+                      className="text-xs sm:text-sm h-8 sm:h-9 px-2 sm:px-3"
                     >
-                      Previous
+                      <span className="hidden sm:inline">Previous</span>
+                      <span className="sm:hidden">Prev</span>
                     </Button>
                     
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1 overflow-x-auto max-w-[200px] sm:max-w-none">
                       {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
                         const pageNum = Math.max(1, currentPage - 2) + i
                         if (pageNum > totalPages) return null
@@ -704,7 +730,7 @@ export default function InwardListPage({ params }: InwardListPageProps) {
                             size="sm"
                             onClick={() => handlePageChange(pageNum)}
                             disabled={isSearching}
-                            className="w-8 h-8 p-0"
+                            className="w-7 h-7 sm:w-8 sm:h-8 p-0 text-xs sm:text-sm min-w-[28px] sm:min-w-[32px]"
                           >
                             {pageNum}
                           </Button>
@@ -717,6 +743,7 @@ export default function InwardListPage({ params }: InwardListPageProps) {
                       size="sm"
                       onClick={() => handlePageChange(currentPage + 1)}
                       disabled={currentPage >= totalPages || isSearching}
+                      className="text-xs sm:text-sm h-8 sm:h-9 px-2 sm:px-3"
                     >
                       Next
                     </Button>
@@ -725,26 +752,28 @@ export default function InwardListPage({ params }: InwardListPageProps) {
               )}
             </div>
           ) : (
-            <div className="text-center py-12">
-              <div className="mx-auto w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mb-4">
-                <Search className="h-8 w-8 text-gray-400" />
+            <div className="text-center py-8 sm:py-12 px-4">
+              <div className="mx-auto w-16 h-16 sm:w-24 sm:h-24 bg-gray-100 rounded-full flex items-center justify-center mb-3 sm:mb-4">
+                <Search className="h-6 w-6 sm:h-8 sm:w-8 text-gray-400" />
               </div>
-              <h3 className="text-lg font-medium text-gray-900 mb-2">
+              <h3 className="text-base sm:text-lg font-medium text-gray-900 mb-1.5 sm:mb-2">
                 {hasFilters ? "No records found" : "No inward records"}
               </h3>
-              <p className="text-gray-500 mb-6">
+              <p className="text-sm sm:text-base text-gray-500 mb-4 sm:mb-6 max-w-md mx-auto">
                 {hasFilters 
                   ? "Try adjusting your search criteria or date range"
                   : "Get started by creating your first inward record"
                 }
               </p>
               {hasFilters ? (
-                <Button variant="outline" onClick={clearFilters}>
+                <Button variant="outline" onClick={clearFilters} size="sm" className="text-xs sm:text-sm">
                   Clear All Filters
                 </Button>
               ) : (
                 <Link href={`/${company}/inward/new`}>
-                  <Button>Create New Record</Button>
+                  <Button size="sm" className="text-xs sm:text-sm">
+                    Create New Record
+                  </Button>
                 </Link>
               )}
             </div>
