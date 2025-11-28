@@ -417,6 +417,7 @@ export default function EditInwardPage() {
   const prevArticlesRef = useRef<Article[]>(articles)
 
   // Update article net_weight and total_weight based on box management summary
+  // Debounced to prevent lag when typing in box fields
   useEffect(() => {
     if (boxes.length === 0) return
     if (isUpdatingArticles.current) return // Prevent infinite loop
@@ -425,34 +426,45 @@ export default function EditInwardPage() {
     const hasValidWeights = boxes.some(box => box.net_weight > 0 || box.gross_weight > 0)
     if (!hasValidWeights) return
     
-    isUpdatingArticles.current = true
-    
-    setArticles(prevArticles => {
-      const updatedArticles = prevArticles.map(article => {
-        // Find all boxes for this article
-        const articleBoxes = boxes.filter(box => box.article === article.item_description)
-        
-        if (articleBoxes.length > 0) {
-          const totalNetWeight = articleBoxes.reduce((sum, box) => sum + box.net_weight, 0)
-          const totalGrossWeight = articleBoxes.reduce((sum, box) => sum + box.gross_weight, 0)
+    // Debounce the calculation to avoid lag when typing
+    const timeoutId = setTimeout(() => {
+      if (isUpdatingArticles.current) return
+      
+      isUpdatingArticles.current = true
+      
+      setArticles(prevArticles => {
+        const updatedArticles = prevArticles.map(article => {
+          // Find all boxes for this article
+          const articleBoxes = boxes.filter(box => box.article === article.item_description)
           
-          // Only update if the values have actually changed to prevent infinite loops
-          if (Math.abs(article.net_weight - totalNetWeight) > 0.01 || 
-              Math.abs(article.total_weight - totalGrossWeight) > 0.01) {
-            return {
-              ...article,
-              net_weight: totalNetWeight,
-              total_weight: totalGrossWeight
+          if (articleBoxes.length > 0) {
+            const totalNetWeight = articleBoxes.reduce((sum, box) => sum + box.net_weight, 0)
+            const totalGrossWeight = articleBoxes.reduce((sum, box) => sum + box.gross_weight, 0)
+            
+            // Round to 3 decimal places
+            const roundedNetWeight = Math.round(totalNetWeight * 1000) / 1000
+            const roundedGrossWeight = Math.round(totalGrossWeight * 1000) / 1000
+            
+            // Only update if the values have actually changed to prevent infinite loops
+            if (Math.abs(article.net_weight - roundedNetWeight) > 0.001 || 
+                Math.abs(article.total_weight - roundedGrossWeight) > 0.001) {
+              return {
+                ...article,
+                net_weight: roundedNetWeight,
+                total_weight: roundedGrossWeight
+              }
             }
           }
-        }
+          
+          return article
+        })
         
-        return article
+        isUpdatingArticles.current = false
+        return updatedArticles
       })
-      
-      isUpdatingArticles.current = false
-      return updatedArticles
-    })
+    }, 300) // 300ms debounce delay
+    
+    return () => clearTimeout(timeoutId)
   }, [boxes])
 
   const generateBatchNumber = () => {
@@ -717,11 +729,12 @@ export default function EditInwardPage() {
     }
   }
 
-  const updateBox = (boxId: string, field: keyof Box, value: any) => {
+  const updateBox = useCallback((boxId: string, field: keyof Box, value: any) => {
     if (field === "net_weight" || field === "gross_weight") {
-      setBoxes(boxes.map((box) => (box.id === boxId ? { ...box, [field]: value } : box)))
+      // Use functional update to avoid stale closure issues
+      setBoxes(prevBoxes => prevBoxes.map((box) => (box.id === boxId ? { ...box, [field]: value } : box)))
     }
-  }
+  }, [])
 
   const getArticleBoxStats = () => {
     const stats: Record<string, { boxes: number; netWeight: number; grossWeight: number; articleName: string }> = {}
