@@ -1,0 +1,71 @@
+  {
+    "authorization_model": {
+      "type_definitions": [
+        {
+          "type": "company"
+        },
+        {
+          "type": "module"
+        },
+        {
+          "type": "component"
+        },
+        {
+          "type": "action"
+        },
+        {
+          "type": "resource"
+        },
+        {
+          "type": "user"
+        }
+      ],
+      "type_relations": {
+        "user": {
+          "relations": {
+            "member_of_companies": {
+              "relation": "company"
+            },
+            "can_access": "action_on_resource"
+          }
+        },
+        "company": {
+          "relations": {
+            "admin": {
+              "relation": "user"
+            },
+            "member": {
+              "relation": "user"
+            }
+          }
+        },
+        "module": {
+          "relations": {
+            "viewer": {
+              "relation": "user"
+            },
+            "editor": {
+              "relation": "user"
+            },
+            "admin": {
+              "relation": "user"
+            }
+          }
+        },
+        "component": {
+          "relations": {
+            "can_access": {
+              "relation": "user"
+            }
+          }
+        },
+        "resource": {
+          "relations": {
+            "owner": {
+              "relation": "user"
+            }
+          }
+        }
+      }
+    }
+  }
