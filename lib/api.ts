@@ -40,6 +40,24 @@ export interface DropdownResponse {
   }
 }
 
+function getAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Accept': 'application/json',
+    'Content-Type': 'application/json'
+  }
+  try {
+    const raw = localStorage.getItem('auth-storage')
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      const token = parsed?.state?.accessToken
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`
+      }
+    }
+  } catch (_) {}
+  return headers
+}
+
 async function fetchJSON(url: string) {
   const res = await fetch(url, { headers: { Accept: "application/json" } })
   if (!res.ok) throw new Error(`${url} -> ${res.status}`)
@@ -155,12 +173,9 @@ export const authApi = {
       
       const response = await fetch(apiUrl, {
         method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
-        }
+        headers: getAuthHeaders()
       })
-      
+
       if (!response.ok) {
         throw new Error(`Companies API call failed: ${response.status} ${response.statusText}`)
       }
@@ -194,12 +209,9 @@ export const authApi = {
       
       const response = await fetch(apiUrl, {
         method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
-        }
+        headers: getAuthHeaders()
       })
-      
+
       if (!response.ok) {
         throw new Error(`Dashboard Info API call failed: ${response.status} ${response.statusText}`)
       }
@@ -231,10 +243,7 @@ export const authApi = {
 
       const response = await fetch(apiUrl, {
         method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
-        }
+        headers: getAuthHeaders()
       })
 
       if (!response.ok) {
@@ -292,12 +301,9 @@ export const authApi = {
       
       const response = await fetch(apiUrl, {
         method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
-        }
+        headers: getAuthHeaders()
       })
-      
+
       if (!response.ok) {
         throw new Error(`Recent Inward API call failed: ${response.status} ${response.statusText}`)
       }
@@ -337,10 +343,7 @@ export const authApi = {
 
       const response = await fetch(apiUrl, {
         method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
-        }
+        headers: getAuthHeaders()
       })
 
       if (!response.ok) {
@@ -374,15 +377,12 @@ export const authApi = {
   async fetchTodayInwardSummary(companyCode: string): Promise<{ count: number; total: number }> {
     try {
       const today = new Date().toISOString().split('T')[0] // Format: YYYY-MM-DD
-      const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/inward/${companyCode}?from_date=${today}&to_date=${today}&per_page=1000&page=1`
+      const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/inward/${companyCode}?from_date=${today}&to_date=${today}&per_page=1&page=1`
       console.log("Today's Inward Summary API URL:", apiUrl)
 
       const response = await fetch(apiUrl, {
         method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
-        }
+        headers: getAuthHeaders()
       })
 
       if (!response.ok) {
@@ -405,15 +405,12 @@ export const authApi = {
   async fetchTodayOutwardSummary(companyCode: string): Promise<{ count: number; total: number }> {
     try {
       const today = new Date().toISOString().split('T')[0] // Format: YYYY-MM-DD
-      const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/outward/${companyCode}?from_date=${today}&to_date=${today}&per_page=1000&page=1`
+      const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/outward/${companyCode}?from_date=${today}&to_date=${today}&per_page=1&page=1`
       console.log("Today's Outward Summary API URL:", apiUrl)
 
       const response = await fetch(apiUrl, {
         method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
-        }
+        headers: getAuthHeaders()
       })
 
       if (!response.ok) {
@@ -440,15 +437,12 @@ export const authApi = {
   async fetchTodayTransferSummary(companyCode: string): Promise<{ count: number; total: number }> {
     try {
       const today = new Date().toISOString().split('T')[0] // Format: YYYY-MM-DD
-      const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/transfer/requests?from_date=${today}&to_date=${today}&per_page=1000&page=1`
+      const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/transfer/requests?from_date=${today}&to_date=${today}&per_page=1&page=1`
       console.log("Today's Transfer Summary API URL:", apiUrl)
 
       const response = await fetch(apiUrl, {
         method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
-        }
+        headers: getAuthHeaders()
       })
 
       if (!response.ok) {
@@ -480,10 +474,7 @@ export const authApi = {
 
       const response = await fetch(apiUrl, {
         method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
-        }
+        headers: getAuthHeaders()
       })
 
       if (!response.ok) {
@@ -507,10 +498,7 @@ export const authApi = {
 
       const response = await fetch(apiUrl, {
         method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
-        }
+        headers: getAuthHeaders()
       })
 
       if (!response.ok) {
@@ -538,10 +526,7 @@ export const authApi = {
 
       const response = await fetch(apiUrl, {
         method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
-        }
+        headers: getAuthHeaders()
       })
 
       if (!response.ok) {
@@ -585,30 +570,40 @@ export const dropdownApi = {
     if (limit) query.append('limit', limit.toString())
     if (offset) query.append('offset', offset.toString())
     
-    try {
-      console.log("=== CALLING REAL API ===")
-      const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/sku/dropdown?${query.toString()}`
-      console.log("API URL:", apiUrl)
-      
-      const response = await fetch(apiUrl, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
+    const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/sku/dropdown?${query.toString()}`
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        console.log(`=== CALLING REAL API (attempt ${attempt + 1}) ===`)
+        console.log("API URL:", apiUrl)
+
+        const response = await fetch(apiUrl, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json'
+          }
+        })
+
+        if (!response.ok) {
+          throw new Error(`API call failed: ${response.status} ${response.statusText}`)
         }
-      })
-      
-      if (!response.ok) {
-        throw new Error(`API call failed: ${response.status} ${response.statusText}`)
+
+        const data = await response.json()
+        console.log("API Response:", data)
+        console.log("=== END REAL API CALL ===")
+
+        return data
+      } catch (error) {
+        console.error(`Error fetching dropdown (attempt ${attempt + 1}):`, error)
+        if (attempt === 0) {
+          await new Promise(r => setTimeout(r, 500))
+          continue
+        }
       }
-      
-      const data = await response.json()
-      console.log("API Response:", data)
-      console.log("=== END REAL API CALL ===")
-      
-      return data
-    } catch (error) {
-      console.error("Error fetching dropdown:", error)
+    }
+
+    {
+      console.error("All dropdown fetch attempts failed")
       // Return empty response on error
       return {
         company,
@@ -657,11 +652,10 @@ export const dropdownApi = {
       const response = await fetch(apiUrl, {
         method: 'GET',
         headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
+          'Accept': 'application/json'
         }
       })
-      
+
       if (!response.ok) {
         throw new Error(`SKU ID API call failed: ${response.status} ${response.statusText}`)
       }
