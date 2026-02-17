@@ -270,7 +270,7 @@ export class InterunitApiService {
     }
   ): Promise<RequestResponse> {
     return await fetchJSON(`${API_BASE_URL}/interunit/requests/${requestId}`, {
-      method: 'PUT',
+      method: 'PATCH',
       body: JSON.stringify(updateData)
     })
   }

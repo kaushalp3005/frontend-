@@ -5,8 +5,9 @@ import * as React from 'react'
 
 import type { ToastActionElement, ToastProps } from '@/components/ui/toast'
 
-const TOAST_LIMIT = 1
-const TOAST_REMOVE_DELAY = 5000 // 5 seconds - reasonable duration for toast notifications
+const TOAST_LIMIT = 3
+const TOAST_AUTO_DISMISS = 4000  // auto-dismiss after 4s
+const TOAST_REMOVE_DELAY = 300   // remove from DOM 300ms after dismiss (exit animation time)
 
 type ToasterToast = ToastProps & {
   id: string
@@ -162,6 +163,9 @@ function toast({ ...props }: Toast) {
       },
     },
   })
+
+  // Auto-dismiss after timeout
+  setTimeout(dismiss, TOAST_AUTO_DISMISS)
 
   return {
     id: id,
