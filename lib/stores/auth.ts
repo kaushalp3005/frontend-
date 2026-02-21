@@ -285,26 +285,22 @@ export const useAuthStore = create<AuthState>()(
       hasPermission: (module: Module, action: Action): boolean => {
         const { user, currentCompanyAccess } = get()
 
-        // Developers always have full permissions
-        if (user?.isDeveloper) return true
-
-        if (!currentCompanyAccess) {
-          console.warn('[AUTH] No current company access for permission check')
+        if (!user || !currentCompanyAccess) {
           return false
         }
 
-        // Admin/developer role on the company also gets full access
+        // All modules except settings are open to everyone with a company role
+        if (module !== 'settings') {
+          return true
+        }
+
+        // Settings: only developers and admins
+        if (user.isDeveloper) return true
         if (currentCompanyAccess.role === 'developer' || currentCompanyAccess.role === 'admin') {
           return true
         }
 
-        const modulePermission = currentCompanyAccess.modules.find(m => m.moduleCode === module)
-        if (!modulePermission) {
-          console.warn('[AUTH] Module not found for permission check:', module)
-          return false
-        }
-
-        return modulePermission.permissions[action] || false
+        return false
       },
 
       hasCompanyAccess: (company: Company): boolean => {
