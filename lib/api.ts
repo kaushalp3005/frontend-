@@ -591,7 +591,7 @@ export const dropdownApi = {
     
     try {
       console.log("=== CALLING REAL API ===")
-      const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/sku/dropdown?${query.toString()}`
+      const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/inward/sku-dropdown?${query.toString()}`
       console.log("API URL:", apiUrl)
       
       const response = await fetch(apiUrl, {
@@ -655,7 +655,7 @@ export const dropdownApi = {
       if (sub_category) query.append('sub_category', sub_category)
       if (material_type) query.append('material_type', material_type)
       
-      const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/sku/id?${query.toString()}`
+      const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/inward/sku-id?${query.toString()}`
       console.log("SKU ID API URL:", apiUrl)
       
       const response = await fetch(apiUrl, {
@@ -744,7 +744,7 @@ export const dropdownApi = {
     if (sub_category) query.append('sub_category', sub_category)
     if (search) query.append('search', search)
 
-    const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/sku/dropdown?${query.toString()}`
+    const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/inward/sku-dropdown?${query.toString()}`
 
     const response = await fetch(apiUrl, {
       method: 'GET',
