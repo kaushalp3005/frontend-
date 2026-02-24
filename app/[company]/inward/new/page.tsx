@@ -17,6 +17,7 @@ import {
   type Company,
   type POExtractResponse,
   type MultiPOExtractResponse,
+  type PageExtractResponse,
   type CreateInwardPayload,
 } from "@/types/inward"
 import { PermissionGuard } from "@/components/auth/permission-gate"
@@ -24,6 +25,61 @@ import { dropdownApi } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { useToast } from "@/hooks/use-toast"
 import { ArticleEditor, type ArticleFields } from "@/components/modules/inward/ArticleEditor"
+
+/**
+ * Merge per-page extraction results into a unified MultiPOExtractResponse.
+ * Same PO number across pages → merge articles.
+ * No PO number → append articles to the previous PO.
+ * Empty page (T&C) → skip.
+ */
+function mergePageResults(pageResults: PageExtractResponse[]): MultiPOExtractResponse {
+  const allPOs: POExtractResponse[] = []
+  const seenPONumbers: Record<string, number> = {}
+
+  for (const page of pageResults) {
+    if (!page.purchase_orders || page.purchase_orders.length === 0) continue
+
+    for (const po of page.purchase_orders) {
+      const poNum = po.po_number?.trim() || null
+      const articles = po.articles || []
+
+      if (!poNum && articles.length === 0) continue
+
+      const fillFields: (keyof POExtractResponse)[] = [
+        "supplier_name", "customer_name", "source_location",
+        "destination_location", "purchased_by", "currency",
+        "total_amount", "tax_amount", "discount_amount", "po_quantity",
+      ]
+
+      if (poNum && poNum in seenPONumbers) {
+        const existing = allPOs[seenPONumbers[poNum]]
+        existing.articles = [...(existing.articles || []), ...articles]
+        for (const f of fillFields) {
+          if (!existing[f] && po[f]) {
+            ;(existing as any)[f] = po[f]
+          }
+        }
+      } else if (poNum) {
+        seenPONumbers[poNum] = allPOs.length
+        allPOs.push({ ...po, articles: [...articles] })
+      } else {
+        if (allPOs.length > 0) {
+          const prev = allPOs[allPOs.length - 1]
+          prev.articles = [...(prev.articles || []), ...articles]
+          for (const f of fillFields) {
+            if (!prev[f] && po[f]) {
+              ;(prev as any)[f] = po[f]
+            }
+          }
+        } else {
+          allPOs.push({ ...po, articles: [...articles] })
+        }
+      }
+    }
+  }
+
+  return { purchase_orders: allPOs }
+}
 
 interface NewInwardPageProps {
   params: { company: Company }
@@ -58,6 +114,12 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
   const [file, setFile] = useState<File | null>(null)
   const [extracting, setExtracting] = useState(false)
   const [extractError, setExtractError] = useState<string | null>(null)
+  const extractingRef = useRef(false) // sync guard against double-clicks
+  const [extractionProgress, setExtractionProgress] = useState<{
+    phase: "uploading" | "extracting" | "done"
+    currentPage: number
+    totalPages: number
+  } | null>(null)
 
   // Articles
   const [articles, setArticles] = useState<ArticleFields[]>([])
@@ -138,20 +200,50 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
   }
 
   const handleExtract = async () => {
-    if (!file) return
+    if (!file || extractingRef.current) return
+    extractingRef.current = true
     try {
       setExtracting(true)
       setExtractError(null)
+      setExtractionProgress({ phase: "uploading", currentPage: 0, totalPages: 0 })
 
-      const response = await inwardApiService.extractPO(file)
-      const pos = response.purchase_orders
+      // Phase 1: Upload PDF → get job_id + total_pages
+      const uploadResult = await inwardApiService.uploadPOForExtraction(file)
+      const { job_id, total_pages } = uploadResult
+
+      setExtractionProgress({ phase: "extracting", currentPage: 0, totalPages: total_pages })
+
+      // Phase 2: Extract each page sequentially
+      const pageResults: PageExtractResponse[] = []
+      for (let page = 1; page <= total_pages; page++) {
+        setExtractionProgress({ phase: "extracting", currentPage: page, totalPages: total_pages })
+
+        try {
+          const pageResult = await inwardApiService.extractPOPage(job_id, page)
+          pageResults.push(pageResult)
+        } catch (pageErr) {
+          console.warn(`Page ${page} extraction failed, skipping:`, pageErr)
+          pageResults.push({
+            job_id,
+            page_num: page,
+            total_pages,
+            purchase_orders: [],
+          })
+        }
+      }
+
+      setExtractionProgress({ phase: "done", currentPage: total_pages, totalPages: total_pages })
+
+      // Phase 3: Merge results client-side
+      const merged = mergePageResults(pageResults)
+      const pos = merged.purchase_orders
 
       if (!pos || pos.length === 0) {
         throw new Error("No purchase orders found in the PDF")
       }
 
       if (pos.length === 1) {
-        // Single PO — populate form as before
+        // Single PO — populate form
         const data = pos[0]
         setVendor(data.supplier_name || "")
         setVendorSearch(data.supplier_name || "")
@@ -224,6 +316,8 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
       })
     } finally {
       setExtracting(false)
+      setExtractionProgress(null)
+      extractingRef.current = false
     }
   }
 
@@ -680,7 +774,11 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
                 {extracting ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    Extracting with AI...
+                    {extractionProgress?.phase === "uploading"
+                      ? "Uploading PDF..."
+                      : extractionProgress?.phase === "extracting"
+                        ? `Extracting page ${extractionProgress.currentPage}/${extractionProgress.totalPages}...`
+                        : "Finalizing..."}
                   </>
                 ) : (
                   <>
@@ -689,6 +787,20 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
                   </>
                 )}
               </Button>
+
+              {extracting && extractionProgress?.phase === "extracting" && extractionProgress.totalPages > 0 && (
+                <div className="space-y-1.5">
+                  <div className="w-full bg-muted rounded-full h-2">
+                    <div
+                      className="bg-primary h-2 rounded-full transition-all duration-300"
+                      style={{ width: `${(extractionProgress.currentPage / extractionProgress.totalPages) * 100}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground text-center">
+                    Page {extractionProgress.currentPage} of {extractionProgress.totalPages}
+                  </p>
+                </div>
+              )}
 
               <Button
                 variant="ghost"
