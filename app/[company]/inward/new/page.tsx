@@ -833,7 +833,7 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
                   const hasSkuError = po.articles.some((a) => a.skuStatus === "error")
                   return (
                     <div key={idx} className={cn(
-                      "border rounded-lg overflow-hidden",
+                      "border rounded-lg",
                       hasSkuError && "border-red-500 border-2 bg-red-50/30 dark:bg-red-950/20"
                     )}>
                       {/* Collapsed header — always visible */}
