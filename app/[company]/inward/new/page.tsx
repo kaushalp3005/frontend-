@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import {
   Upload, FileText, Loader2, ArrowLeft, CheckCircle2,
-  AlertCircle, Sparkles, Send, Plus, PenLine, ChevronDown,
+  AlertCircle, Sparkles, Send, Plus, PenLine, ChevronDown, X,
 } from "lucide-react"
 import {
   inwardApiService,
@@ -240,10 +240,10 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
             i === index
               ? {
                   ...a,
-                  sku_id: result.sku_id,
-                  material_type: result.material_type,
-                  item_category: result.item_category,
-                  sub_category: result.sub_category,
+                  sku_id: result.sku_id ?? undefined,
+                  material_type: result.material_type ?? undefined,
+                  item_category: result.item_category ?? undefined,
+                  sub_category: result.sub_category ?? undefined,
                   skuStatus: "resolved",
                 }
               : a
@@ -310,7 +310,7 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
           transaction_no: txnNo,
           item_description: a.item_description,
           po_weight: a.po_weight,
-          sku_id: a.sku_id,
+          sku_id: a.sku_id ?? undefined,
           material_type: a.material_type,
           item_category: a.item_category,
           sub_category: a.sub_category,
@@ -382,7 +382,7 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
             transaction_no: txnNo,
             item_description: a.item_description,
             po_weight: a.po_weight,
-            sku_id: a.sku_id,
+            sku_id: a.sku_id ?? undefined,
             material_type: a.material_type,
             item_category: a.item_category,
             sub_category: a.sub_category,
@@ -483,6 +483,18 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
     )
   }
 
+  const removeEditablePO = (poIdx: number) => {
+    setEditablePOs((prev) => prev.filter((_, i) => i !== poIdx))
+    setExpandedPOs((prev) => {
+      const next = new Set<number>()
+      for (const idx of prev) {
+        if (idx < poIdx) next.add(idx)
+        else if (idx > poIdx) next.add(idx - 1)
+      }
+      return next
+    })
+  }
+
   const lookupMultiPOSKU = async (poIdx: number, artIdx: number, itemDescription: string) => {
     updateMultiPOArticle(poIdx, artIdx, "skuStatus", "loading")
     try {
@@ -497,10 +509,10 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
                 j === artIdx
                   ? {
                       ...a,
-                      sku_id: result.sku_id,
-                      material_type: result.material_type,
-                      item_category: result.item_category,
-                      sub_category: result.sub_category,
+                      sku_id: result.sku_id ?? undefined,
+                      material_type: result.material_type ?? undefined,
+                      item_category: result.item_category ?? undefined,
+                      sub_category: result.sub_category ?? undefined,
                       skuStatus: "resolved" as const,
                     }
                   : a
@@ -739,6 +751,17 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
                               isExpanded && "rotate-180"
                             )}
                           />
+                          <button
+                            type="button"
+                            className="h-6 w-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              removeEditablePO(idx)
+                            }}
+                            title="Remove this PO"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
                         </div>
                       </button>
 
