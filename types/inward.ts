@@ -144,6 +144,20 @@ export interface MultiPOExtractResponse {
   purchase_orders: POExtractResponse[]
 }
 
+// POST /inward/extract-po/upload
+export interface POUploadResponse {
+  job_id: string
+  total_pages: number
+}
+
+// POST /inward/extract-po/{job_id}/page/{page_num}
+export interface PageExtractResponse {
+  job_id: string
+  page_num: number
+  total_pages: number
+  purchase_orders: POExtractResponse[]
+}
+
 // POST /inward/sku-lookup/{company}
 export interface SKULookupRequest {
   item_description: string
@@ -347,6 +361,39 @@ class InwardApiService {
       body: formData,
     })
     return handleResponse<MultiPOExtractResponse>(response)
+  }
+
+  // ── 1b. POST /inward/extract-po/upload ────────────────
+  async uploadPOForExtraction(file: File): Promise<POUploadResponse> {
+    const formData = new FormData()
+    formData.append("file", file)
+
+    const { accessToken } = useAuthStore.getState()
+    const response = await fetch(`${API_BASE}/inward/extract-po/upload`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      },
+      body: formData,
+    })
+    return handleResponse<POUploadResponse>(response)
+  }
+
+  // ── 1c. POST /inward/extract-po/{job_id}/page/{page_num} ──
+  async extractPOPage(jobId: string, pageNum: number): Promise<PageExtractResponse> {
+    const { accessToken } = useAuthStore.getState()
+    const response = await fetch(
+      `${API_BASE}/inward/extract-po/${jobId}/page/${pageNum}`,
+      {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        },
+      }
+    )
+    return handleResponse<PageExtractResponse>(response)
   }
 
   // ── 2. POST /inward/sku-lookup/{company} ────────────────
