@@ -671,8 +671,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                 // Auto-fill SKU ID if available (convert string to number)
                 sku_id: firstItem.sku_id ? parseInt(firstItem.sku_id) : null,
 
-                // Auto-fill batch/lot if available
-                batch_number: normalizeField(firstItem.batch_number) || "",
+                // Auto-fill lot if available
                 lot_number: normalizeField(firstItem.lot_number) || ""
               }
             }
@@ -859,21 +858,21 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       if (article.id === id) {
         const updatedArticle = { ...article, [field]: value }
 
-        // If material type changes, clear dependent fields + reset package_size
-        if (field === "material_type") {
+        // If material type actually changes, clear dependent fields + reset package_size
+        if (field === "material_type" && value !== article.material_type) {
           updatedArticle.item_category = ""
           updatedArticle.sub_category = ""
           updatedArticle.item_description = ""
           updatedArticle.sku_id = null
           updatedArticle.package_size = 0
         }
-        // If category or sub category changes, nuke stale item selection + sku
-        if (field === "item_category") {
+        // If category or sub category actually changes, nuke stale item selection + sku
+        if (field === "item_category" && value !== article.item_category) {
           updatedArticle.sub_category = ""
           updatedArticle.item_description = ""
           updatedArticle.sku_id = null
         }
-        if (field === "sub_category") {
+        if (field === "sub_category" && value !== article.sub_category) {
           updatedArticle.item_description = ""
           updatedArticle.sku_id = null
         }
@@ -931,6 +930,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
           search: query.trim(),
           limit: 20,
         })
+        console.log("🔎 Quick Search results for '" + query.trim() + "':", result.items?.length, "items", result.items?.map((i: any) => ({ desc: i.item_description, mt: i.material_type, cat: i.group, sub: i.sub_group })))
         setItemSearchResults(prev => ({ ...prev, [articleId]: result.items || [] }))
         setItemSearchOpen(prev => ({ ...prev, [articleId]: true }))
       } catch (error) {
@@ -943,20 +943,23 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
   }
 
   const handleItemSelect = async (articleId: string, item: { id: number; item_description: string; material_type?: string; group?: string; sub_group?: string }) => {
-    // Auto-fill material_type, item_category, sub_category, item_description and reset numeric fields
+    console.log("🔍 handleItemSelect - API item data:", JSON.stringify(item))
+    const itemCategory = item.group ?? ""
+    const subCategory = item.sub_group ?? ""
+    console.log("🔍 handleItemSelect - mapped values:", { itemCategory, subCategory, materialType: item.material_type })
+
     const updatedArticles = articles.map((art) => {
       if (art.id === articleId) {
         const updated = {
           ...art,
           material_type: item.material_type || "",
-          item_category: item.group || "",
-          sub_category: item.sub_group || "",
+          item_category: itemCategory,
+          sub_category: subCategory,
           item_description: item.item_description || "",
           sku_id: item.id || null,
           package_size: 0,
           net_weight: 0,
         }
-        // Recalculate net weight with existing quantity/packSize values
         updated.net_weight = calculateNetWeight(updated)
         return updated
       }
@@ -964,14 +967,20 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     })
     setArticles(updatedArticles)
 
-    // Clear search state for this article
     setItemSearchQuery(prev => ({ ...prev, [articleId]: "" }))
     setItemSearchResults(prev => ({ ...prev, [articleId]: [] }))
     setItemSearchOpen(prev => ({ ...prev, [articleId]: false }))
 
+    const missingFields = []
+    if (!itemCategory) missingFields.push("Category")
+    if (!subCategory) missingFields.push("Sub Category")
+
     toast({
       title: "Item Selected",
-      description: `${item.item_description} — fields auto-filled`,
+      description: missingFields.length > 0
+        ? `${item.item_description} selected. Note: ${missingFields.join(", ")} not found in database — fill manually.`
+        : `${item.item_description} — all fields auto-filled`,
+      variant: missingFields.length > 0 ? "destructive" : "default",
     })
   }
 
@@ -2374,7 +2383,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                         key={`${item.id}-${i}`}
                         type="button"
                         className="w-full text-left px-3 py-2.5 hover:bg-violet-50 border-b border-gray-50 last:border-b-0 transition-colors"
-                        onClick={() => handleItemSelect(article.id, item)}
+                        onMouseDown={(e) => { e.preventDefault(); handleItemSelect(article.id, item) }}
                       >
                         <div className="text-sm font-medium text-gray-800">{item.item_description}</div>
                         <div className="flex gap-2 mt-0.5">
