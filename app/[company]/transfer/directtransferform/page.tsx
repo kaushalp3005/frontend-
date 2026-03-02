@@ -2874,9 +2874,12 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                       </Label>
                       <Input
                         id={`packaging_type_${article.id}`}
-                        type="text"
+                        type="number"
+                        step="any"
+                        min="0"
                         value={article.packaging_type || ""}
                         onChange={(e) => updateArticle(article.id, "packaging_type", parseFloat(e.target.value) || 0)}
+                        onWheel={(e) => e.currentTarget.blur()}
                         placeholder="0.00"
                       />
                     </div>
@@ -2887,9 +2890,12 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                         <Label htmlFor={`package_size_${article.id}`}>Package Size (gm) *</Label>
                         <Input
                           id={`package_size_${article.id}`}
-                          type="text"
+                          type="number"
+                          step="any"
+                          min="0"
                           value={article.package_size || ""}
                           onChange={(e) => updateArticle(article.id, "package_size", parseFloat(e.target.value) || 0)}
+                          onWheel={(e) => e.currentTarget.blur()}
                           placeholder="0"
                         />
                       </div>
@@ -2902,9 +2908,12 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                       </Label>
                       <Input
                         id={`net_weight_${article.id}`}
-                        type="text"
+                        type="number"
+                        step="any"
+                        min="0"
                         value={article.net_weight || ""}
                         onChange={(e) => updateArticle(article.id, "net_weight", parseFloat(e.target.value) || 0)}
+                        onWheel={(e) => e.currentTarget.blur()}
                         placeholder="Auto-calculated"
                         className={article.total_weight > 0 && article.net_weight > article.total_weight ? "border-red-500" : ""}
                       />
@@ -2920,9 +2929,12 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                       </Label>
                       <Input
                         id={`total_weight_${article.id}`}
-                        type="text"
+                        type="number"
+                        step="any"
+                        min="0"
                         value={article.total_weight || ""}
                         onChange={(e) => updateArticle(article.id, "total_weight", parseFloat(e.target.value) || 0)}
+                        onWheel={(e) => e.currentTarget.blur()}
                         placeholder="Enter gross weight"
                         className={article.total_weight > 0 && article.net_weight > article.total_weight ? "border-red-500" : ""}
                       />

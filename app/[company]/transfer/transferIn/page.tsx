@@ -129,6 +129,15 @@ export default function TransferInPage({ params }: TransferInPageProps) {
     toast({ title: "Box Acknowledged", description: `Box #${boxId} acknowledged` })
   }
 
+  const handleUnacknowledgeBox = (boxId: number) => {
+    setBoxesMatchMap((prev) => {
+      const next = { ...prev }
+      delete next[boxId]
+      return next
+    })
+    toast({ title: "Box Unacknowledged", description: `Box #${boxId} unacknowledged` })
+  }
+
   const handleAcknowledgeArticleBoxes = (articleName: string) => {
     const articleBoxes = groupedBoxes[articleName] || []
     if (articleBoxes.length === 0) return
@@ -143,6 +152,16 @@ export default function TransferInPage({ params }: TransferInPageProps) {
     setLinesMatchMap((prev) => ({ ...prev, [lineIndex]: true }))
     const line = lines[lineIndex]
     toast({ title: "Article Acknowledged", description: `${line?.item_desc_raw || line?.item_description || `Line ${lineIndex + 1}`} acknowledged` })
+  }
+
+  const handleUnacknowledgeLine = (lineIndex: number) => {
+    setLinesMatchMap((prev) => {
+      const next = { ...prev }
+      delete next[lineIndex]
+      return next
+    })
+    const line = lines[lineIndex]
+    toast({ title: "Article Unacknowledged", description: `${line?.item_desc_raw || line?.item_description || `Line ${lineIndex + 1}`} unacknowledged` })
   }
 
   // ── Issue handlers ──
@@ -502,7 +521,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                                       <span className="text-sm font-semibold text-gray-900">Box {b.box_number}</span>
                                     </div>
                                     {matched ? (
-                                      <Badge variant="outline" className="text-[11px] bg-emerald-50 text-emerald-700 border-emerald-200">
+                                      <Badge variant="outline" className="text-[11px] bg-emerald-50 text-emerald-700 border-emerald-200 cursor-pointer hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors" onClick={() => handleUnacknowledgeBox(b.id)}>
                                         <CheckCircle className="h-3 w-3 mr-0.5" /> Done
                                       </Badge>
                                     ) : (
@@ -531,7 +550,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                                   <span className="text-sm text-gray-600 w-24">{b.gross_weight || "-"}g</span>
                                   <div className="ml-auto shrink-0">
                                     {matched ? (
-                                      <Badge variant="outline" className="text-xs bg-emerald-50 text-emerald-700 border-emerald-200">
+                                      <Badge variant="outline" className="text-xs bg-emerald-50 text-emerald-700 border-emerald-200 cursor-pointer hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors" onClick={() => handleUnacknowledgeBox(b.id)}>
                                         <CheckCircle className="h-3.5 w-3.5 mr-1" /> Acknowledged
                                       </Badge>
                                     ) : (
@@ -614,7 +633,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                                   </div>
                                 </div>
                                 {matched ? (
-                                  <Badge variant="outline" className="text-[11px] bg-emerald-50 text-emerald-700 border-emerald-200 shrink-0">
+                                  <Badge variant="outline" className="text-[11px] bg-emerald-50 text-emerald-700 border-emerald-200 shrink-0 cursor-pointer hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors" onClick={() => handleUnacknowledgeLine(index)}>
                                     <CheckCircle className="h-3 w-3 mr-0.5" /> Done
                                   </Badge>
                                 ) : issued ? (
@@ -673,7 +692,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                               <span className="text-sm font-mono text-gray-600 w-24 truncate">{line.lot_number || "-"}</span>
                               <div className="ml-auto shrink-0 flex items-center gap-1.5">
                                 {matched ? (
-                                  <Badge variant="outline" className="text-xs bg-emerald-50 text-emerald-700 border-emerald-200">
+                                  <Badge variant="outline" className="text-xs bg-emerald-50 text-emerald-700 border-emerald-200 cursor-pointer hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors" onClick={() => handleUnacknowledgeLine(index)}>
                                     <CheckCircle className="h-3.5 w-3.5 mr-1" /> Acknowledged
                                   </Badge>
                                 ) : issued ? (

@@ -667,9 +667,12 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                     Pack Size ({articleData.materialType === 'FG' ? 'gm' : 'Kg'}) *
                   </Label>
                   <Input
-                    type="text"
+                    type="number"
+                    step="any"
+                    min="0"
                     value={articleData.packSize}
                     onChange={(e) => handleArticleChange('packSize', e.target.value)}
+                    onWheel={(e) => e.currentTarget.blur()}
                     className="h-9 bg-white border-gray-200"
                     placeholder="0.00"
                   />
@@ -682,9 +685,12 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                       Package Size (gm) *
                     </Label>
                     <Input
-                      type="text"
+                      type="number"
+                      step="any"
+                      min="0"
                       value={articleData.packageSize}
                       onChange={(e) => handleArticleChange('packageSize', e.target.value)}
+                      onWheel={(e) => e.currentTarget.blur()}
                       className="h-9 bg-white border-gray-200"
                       placeholder="0"
                     />

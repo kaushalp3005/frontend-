@@ -2374,6 +2374,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                     <Input
                       id={`package_size_${article.id}`}
                       type="number"
+                      step="any"
                       min="0"
                       value={article.package_size}
                       onChange={(e) => updateArticle(article.id, "package_size", parseFloat(e.target.value) || 0)}
