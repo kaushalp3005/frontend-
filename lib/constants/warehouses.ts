@@ -29,13 +29,17 @@ export const WAREHOUSE_ADDRESSES: Record<string, WarehouseAddress> = {
     name: "Warehouse F53", 
     address: "F53, APMC Masala Market, APMC Market, Sector 19, Vashi, Navi Mumbai, Maharashtra 400703" 
   },
-  "Savla": { 
-    name: "Savla Warehouse", 
-    address: "Savla, MIDC TTC Industrial area, Khairane, Navi Mumbai, Maharashtra 400709" 
+  "Rishi cold": { 
+    name: "Rishi Cold Warehouse", 
+    address: "Rishi cold, MIDC TTC Industrial area, Khairane, Navi Mumbai, Maharashtra 400709" 
   },
-  "Rishi": { 
-    name: "Rishi Warehouse", 
-    address: "Rishi, MIDC TTC Industrial area, Khairane, Navi Mumbai, Maharashtra 400709" 
+  "Savla D-39 cold": { 
+    name: "Savla D-39 Cold Warehouse", 
+    address: "Savla D-39 cold, MIDC TTC Industrial area, Khairane, Navi Mumbai, Maharashtra 400709" 
+  },
+  "Savla D-514 cold": { 
+    name: "Savla D-514 Cold Warehouse", 
+    address: "Savla D-514 cold, MIDC TTC Industrial area, Khairane, Navi Mumbai, Maharashtra 400709" 
   }
 }
 

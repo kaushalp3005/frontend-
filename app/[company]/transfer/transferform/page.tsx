@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { ArrowLeft, Send, Package, X, Clock, Plus, Trash2, Camera } from "lucide-react"
+import { ArrowLeft, Send, Package, X, Clock, Plus, Trash2, Camera, Search, Loader2 } from "lucide-react"
 import type { Company } from "@/types/auth"
 import { InterunitApiService } from "@/lib/interunitApiService"
 import { useToast } from "@/hooks/use-toast"
@@ -1292,30 +1292,20 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
           itemCategory: boxData.item_category || boxData.ic || 'N/A',
           subCategory: boxData.sub_category || boxData.sc || 'N/A',
 
-          // Weight information - Convert GM to KG for FINISHED GOODS
+          // Weight information - Store always in KG (FG from grams; RM from grams if value >= 100 else kg)
           netWeight: (() => {
             const materialType = boxData.material_type || boxData.mt || ''
-            const netWeightGm = parseFloat(boxData.net_weight || boxData.nw || boxData.netWeight || '0')
-            
-            // Convert to KG if FINISHED GOODS
-            if (materialType.toUpperCase().includes('FINISH')) {
-              const netWeightKg = (netWeightGm / 1000).toFixed(3)
-              console.log(`🔄 Weight Conversion (Net): ${netWeightGm} GM → ${netWeightKg} KG`)
-              return String(netWeightKg)
-            }
-            return String(netWeightGm)
+            const raw = parseFloat(boxData.net_weight || boxData.nw || boxData.netWeight || '0')
+            const isFG = materialType.toUpperCase().includes('FINISH')
+            const kg = isFG ? raw / 1000 : (raw >= 100 ? raw / 1000 : raw)
+            return String(Number(kg.toFixed(3)))
           })(),
           totalWeight: (() => {
             const materialType = boxData.material_type || boxData.mt || ''
-            const totalWeightGm = parseFloat(boxData.total_weight || boxData.gw || boxData.tw || boxData.wt || boxData.totalWeight || boxData.gross_weight || '0')
-            
-            // Convert to KG if FINISHED GOODS
-            if (materialType.toUpperCase().includes('FINISH')) {
-              const totalWeightKg = (totalWeightGm / 1000).toFixed(3)
-              console.log(`🔄 Weight Conversion (Total): ${totalWeightGm} GM → ${totalWeightKg} KG`)
-              return String(totalWeightKg)
-            }
-            return String(totalWeightGm)
+            const raw = parseFloat(boxData.total_weight || boxData.gw || boxData.tw || boxData.wt || boxData.totalWeight || boxData.gross_weight || '0')
+            const isFG = materialType.toUpperCase().includes('FINISH')
+            const kg = isFG ? raw / 1000 : (raw >= 100 ? raw / 1000 : raw)
+            return String(Number(kg.toFixed(3)))
           })(),
 
           // Batch and lot information
@@ -1663,16 +1653,25 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         batch_number: null,
         lot_number: null
       })),
-      boxes: scannedBoxes.map((box) => ({
-        box_number: box.boxNumber,
-        box_id: box.boxId || "",
-        article: box.itemDescription || "Unknown Article",
-        lot_number: box.lotNumber || "",
-        batch_number: box.batchNumber || "",
-        transaction_no: box.transactionNo || "",
-        net_weight: String(parseFloat(box.netWeight) || 0),
-        gross_weight: String(parseFloat(box.totalWeight) || 0)
-      })),
+      boxes: scannedBoxes.map((box) => {
+        const isFG = box.materialType?.toUpperCase().includes('FINISH')
+        const netVal = parseFloat(box.netWeight) || 0
+        const grossVal = parseFloat(box.totalWeight) || 0
+        // FG: ensure we send kg to DB (convert grams to kg if value >= 1)
+        // FG: value is always in grams — divide by 1000 to get kg for DB
+        const netKg = isFG ? netVal / 1000 : netVal
+        const grossKg = isFG ? grossVal / 1000 : grossVal
+        return {
+          box_number: box.boxNumber,
+          box_id: box.boxId || "",
+          article: box.itemDescription || "Unknown Article",
+          lot_number: box.lotNumber || "",
+          batch_number: box.batchNumber || "",
+          transaction_no: box.transactionNo || "",
+          net_weight: String(Number(netKg.toFixed(3))),
+          gross_weight: String(Number(grossKg.toFixed(3)))
+        }
+      }),
       request_id: requestIdFromUrl ? parseInt(requestIdFromUrl) : null
     }
 
@@ -1699,8 +1698,8 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         console.log(`  - Transaction No: ${box.transaction_no}`)
         console.log(`  - Batch Number: ${box.batch_number}`)
         console.log(`  - Lot Number: ${box.lot_number}`)
-        console.log(`  - Net Weight: ${box.net_weight} gm`)
-        console.log(`  - Gross Weight: ${box.gross_weight} gm`)
+        console.log(`  - Net Weight: ${box.net_weight} kg`)
+        console.log(`  - Gross Weight: ${box.gross_weight} kg`)
       })
       console.log('='.repeat(50))
     } else {
@@ -1846,8 +1845,9 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                   <SelectItem value="A101">A101</SelectItem>
                   <SelectItem value="A68">A68</SelectItem>
                   <SelectItem value="F53">F53</SelectItem>
-                  <SelectItem value="Savla">Savla</SelectItem>
-                  <SelectItem value="Rishi">Rishi</SelectItem>
+                  <SelectItem value="Rishi cold">Rishi cold</SelectItem>
+                  <SelectItem value="Savla D-39 cold">Savla D-39 cold</SelectItem>
+                  <SelectItem value="Savla D-514 cold">Savla D-514 cold</SelectItem>
 
                 </SelectContent>
 
@@ -1893,9 +1893,11 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
 
                   <SelectItem value="F53">F53</SelectItem>
 
-                  <SelectItem value="Savla">Savla</SelectItem>
+                  <SelectItem value="Rishi cold">Rishi cold</SelectItem>
 
-                  <SelectItem value="Rishi">Rishi</SelectItem>
+                  <SelectItem value="Savla D-39 cold">Savla D-39 cold</SelectItem>
+
+                  <SelectItem value="Savla D-514 cold">Savla D-514 cold</SelectItem>
 
                 </SelectContent>
 
@@ -2352,7 +2354,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
 
                 {/* Pack Size */}
                 <div>
-                  <Label htmlFor={`pack_size_${article.id}`}>Pack Size</Label>
+                  <Label htmlFor={`pack_size_${article.id}`}>Pack Size ({article.material_type === 'FG' ? 'gm' : 'Kg'})</Label>
                   <Input
                     id={`pack_size_${article.id}`}
                     type="number"
@@ -2368,7 +2370,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                 {/* Package Size - Only for FG */}
                 {article.material_type === "FG" && (
                   <div>
-                    <Label htmlFor={`package_size_${article.id}`}>Package Size</Label>
+                    <Label htmlFor={`package_size_${article.id}`}>Package Size (gm)</Label>
                     <Input
                       id={`package_size_${article.id}`}
                       type="number"
@@ -2384,7 +2386,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
 
                 {/* Net Weight */}
                 <div>
-                  <Label htmlFor={`net_weight_${article.id}`}>Net Weight</Label>
+                  <Label htmlFor={`net_weight_${article.id}`}>Net Weight (Kg)</Label>
                   <Input
                     id={`net_weight_${article.id}`}
                     type="number"
@@ -2624,13 +2626,13 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                           <div>
                             <span className="text-gray-500">Net Wt:</span>
                             <span className="ml-1 text-gray-800 font-medium">
-                              {box.netWeight} {box.materialType.toUpperCase().includes('FINISH') ? 'kg' : 'g'}
+                              {box.netWeight} kg
                             </span>
                           </div>
                           <div>
                             <span className="text-gray-500">Total Wt:</span>
                             <span className="ml-1 text-gray-800 font-medium">
-                              {box.totalWeight} {box.materialType.toUpperCase().includes('FINISH') ? 'kg' : 'g'}
+                              {box.totalWeight} kg
                             </span>
                           </div>
                         </div>
@@ -2685,10 +2687,10 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                             </div>
                           </td>
                           <td className="py-2 px-2 text-xs text-gray-700">
-                            {box.netWeight} {box.materialType.toUpperCase().includes('FINISH') ? 'kg' : 'g'}
+                            {box.netWeight} kg
                           </td>
                           <td className="py-2 px-2 text-xs text-gray-700">
-                            {box.totalWeight} {box.materialType.toUpperCase().includes('FINISH') ? 'kg' : 'g'}
+                            {box.totalWeight} kg
                           </td>
                           <td className="py-2 px-2 text-xs">
                             <span className="font-mono text-gray-700">
@@ -2746,19 +2748,13 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                     <div>
                       <p className="text-xs text-gray-600 mb-1">Total Net Wt</p>
                       <p className="text-base sm:text-lg font-bold text-gray-800">
-                        {scannedBoxes.reduce((sum, box) => {
-                          const weight = parseFloat(box.netWeight || '0')
-                          return sum + (box.materialType.toUpperCase().includes('FINISH') ? weight : weight / 1000)
-                        }, 0).toFixed(3)} kg
+                        {scannedBoxes.reduce((sum, box) => sum + parseFloat(box.netWeight || '0'), 0).toFixed(3)} kg
                       </p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-600 mb-1">Total Wt</p>
                       <p className="text-base sm:text-lg font-bold text-gray-800">
-                        {scannedBoxes.reduce((sum, box) => {
-                          const weight = parseFloat(box.totalWeight || '0')
-                          return sum + (box.materialType.toUpperCase().includes('FINISH') ? weight : weight / 1000)
-                        }, 0).toFixed(3)} kg
+                        {scannedBoxes.reduce((sum, box) => sum + parseFloat(box.totalWeight || '0'), 0).toFixed(3)} kg
                       </p>
                     </div>
                   </div>

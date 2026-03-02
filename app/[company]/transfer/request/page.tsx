@@ -212,17 +212,20 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     })
   }
 
+  // Always returns weight in Kg
   const calculateNetWeight = (data: typeof articleData): string => {
     const quantity = parseFloat(data.quantity) || 0
     const packSize = parseFloat(data.packSize) || 0
 
     if (data.materialType === 'FG') {
+      // FG: (packageSize_gm × packSize_gm) × quantity → grams, then ÷ 1000 → Kg
       const packageSize = parseFloat(data.packageSize) || 0
-      const netWeightGrams = (packageSize * packSize) * quantity
-      return netWeightGrams.toFixed(2)
+      const grams = (packageSize * packSize) * quantity
+      return (grams / 1000).toFixed(3)
     } else {
-      const netWeightGrams = quantity * packSize
-      return netWeightGrams.toFixed(2)
+      // RM/PM/RTV: quantity × packSize (already Kg)
+      const netWeightKg = quantity * packSize
+      return netWeightKg.toFixed(2)
     }
   }
 
@@ -425,8 +428,9 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                         <SelectItem value="A101">A101</SelectItem>
                         <SelectItem value="A68">A68</SelectItem>
                         <SelectItem value="F53">F53</SelectItem>
-                        <SelectItem value="Savla">Savla</SelectItem>
-                        <SelectItem value="Rishi">Rishi</SelectItem>
+                        <SelectItem value="Rishi cold">Rishi cold</SelectItem>
+                        <SelectItem value="Savla D-39 cold">Savla D-39 cold</SelectItem>
+                        <SelectItem value="Savla D-514 cold">Savla D-514 cold</SelectItem>
                       </>
                     )}
                   </SelectContent>
@@ -460,8 +464,9 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                         <SelectItem value="A101">A101</SelectItem>
                         <SelectItem value="A68">A68</SelectItem>
                         <SelectItem value="F53">F53</SelectItem>
-                        <SelectItem value="Savla">Savla</SelectItem>
-                        <SelectItem value="Rishi">Rishi</SelectItem>
+                        <SelectItem value="Rishi cold">Rishi cold</SelectItem>
+                        <SelectItem value="Savla D-39 cold">Savla D-39 cold</SelectItem>
+                        <SelectItem value="Savla D-514 cold">Savla D-514 cold</SelectItem>
                       </>
                     )}
                   </SelectContent>
@@ -689,7 +694,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                 {/* Net Weight */}
                 <div className="space-y-1.5">
                   <Label className="text-xs font-medium text-gray-600">
-                    Net Weight ({articleData.materialType === 'FG' ? 'gm' : 'Kg'}) *
+                    Net Weight (Kg) *
                   </Label>
                   <Input
                     type="text"

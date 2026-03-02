@@ -2,7 +2,7 @@ import type { Company } from "@/types/auth"
 // Updated to fix TypeScript cache issues
 
 export type SourceLocation = "W202" | "A185" | "A101" | "A68" | "F53"
-export type DestinationLocation = "W202" | "A185" | "A101" | "A68" | "F53" | "Savla" | "Rishi"
+export type DestinationLocation = "W202" | "A185" | "A101" | "A68" | "F53" | "Rishi cold" | "Savla D-39 cold" | "Savla D-514 cold"
 export type SiteCode = SourceLocation | DestinationLocation
 
 // Inter-Unit Movement Types - ENHANCED VERSION

@@ -464,18 +464,22 @@ export const transformFormDataToApi = (
       to_warehouse: formData.toWarehouse,
       reason_description: formData.reasonDescription
     },
-    article_data: articleData.map(article => ({
-      material_type: article.materialType,
-      item_category: article.itemCategory,
-      sub_category: article.subCategory,
-      item_description: article.itemDescription,
-      quantity: article.quantity,
-      uom: article.uom,
-      pack_size: article.packSize,
-      package_size: article.packageSize || "0",
-      net_weight: article.netWeight || "0",
-      lot_number: article.lotNumber || ""
-    })),
+    article_data: articleData.map(article => {
+      // netWeight is already in Kg (calculateNetWeight converts FG grams→Kg)
+      const net_weight = String(Number(parseFloat(article.netWeight || "0").toFixed(3)))
+      return {
+        material_type: article.materialType,
+        item_category: article.itemCategory,
+        sub_category: article.subCategory,
+        item_description: article.itemDescription,
+        quantity: article.quantity,
+        uom: article.uom,
+        pack_size: article.packSize,
+        package_size: article.packageSize || "0",
+        net_weight,
+        lot_number: article.lotNumber || ""
+      }
+    }),
     computed_fields: {
       request_no: requestNo || generateRequestNo()
     },

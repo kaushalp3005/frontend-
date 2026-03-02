@@ -12,12 +12,13 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { ArrowLeft, Send, Package, X, Clock, Plus, Trash2, Camera, Search } from "lucide-react"
+import { ArrowLeft, Send, Package, X, Clock, Plus, Trash2, Camera, Search, Loader2 } from "lucide-react"
 import type { Company } from "@/types/auth"
 import { InterunitApiService } from "@/lib/interunitApiService"
 import { useToast } from "@/hooks/use-toast"
 import { useFormPersistence } from "@/hooks/useFormPersistence"
 import HighPerformanceQRScanner from "@/components/transfer/high-performance-qr-scanner"
+import { ColdStorageApiService, type ColdStorageStockRecord } from "@/lib/api/coldStorageApiService"
 
 interface NewTransferRequestPageProps {
   params: {
@@ -318,6 +319,182 @@ function ItemDescriptionDropdown({
       disabled={disabled || !categoryId || !subCategoryId}
       className={error ? "border-red-500" : ""}
     />
+  )
+}
+
+// Cold storage warehouse values that trigger the stock search UI
+const COLD_STORAGE_WAREHOUSES = ["Rishi cold", "Savla D-39 cold", "Savla D-514 cold"]
+
+// Cold Storage Stock Search Component (same as cold-storage/transfer-out)
+function ColdStorageStockSearch({
+  onSelect,
+}: {
+  onSelect: (record: ColdStorageStockRecord) => void
+}) {
+  const [lotNoSearch, setLotNoSearch] = useState("")
+  const [descSearch, setDescSearch] = useState("")
+  const [results, setResults] = useState<ColdStorageStockRecord[]>([])
+  const [loading, setLoading] = useState(false)
+  const [showResults, setShowResults] = useState(false)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const doSearch = useCallback(async (lotNo: string, desc: string) => {
+    if (!lotNo && !desc) {
+      setResults([])
+      setShowResults(false)
+      return
+    }
+    setLoading(true)
+    try {
+      const params: Record<string, string> = {}
+      if (lotNo.trim()) params.lot_no = lotNo.trim()
+      if (desc.trim()) params.q = desc.trim()
+      const data = await ColdStorageApiService.searchColdStorageStocks(params)
+      setResults(data.results)
+      setShowResults(true)
+    } catch {
+      setResults([])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  const handleSearch = useCallback(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      doSearch(lotNoSearch, descSearch)
+    }, 400)
+  }, [lotNoSearch, descSearch, doSearch])
+
+  useEffect(() => {
+    handleSearch()
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+    }
+  }, [handleSearch])
+
+  const handleSelect = (record: ColdStorageStockRecord) => {
+    onSelect(record)
+    setShowResults(false)
+    setLotNoSearch("")
+    setDescSearch("")
+    setResults([])
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2 mb-1">
+        <Search className="h-4 w-4 text-blue-600" />
+        <span className="text-sm font-medium text-blue-600">Search Cold Storage Stock</span>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div>
+          <Label className="text-xs">Search by Lot Number</Label>
+          <div className="relative">
+            <Input
+              value={lotNoSearch}
+              onChange={(e) => setLotNoSearch(e.target.value)}
+              placeholder="Type lot number..."
+              className="pr-8"
+            />
+            {lotNoSearch && (
+              <button
+                type="button"
+                onClick={() => { setLotNoSearch(""); setResults([]); setShowResults(false) }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+        </div>
+        <div>
+          <Label className="text-xs">Search by Group Name / Item Description</Label>
+          <div className="relative">
+            <Input
+              value={descSearch}
+              onChange={(e) => setDescSearch(e.target.value)}
+              placeholder="Type group name or item description..."
+              className="pr-8"
+            />
+            {descSearch && (
+              <button
+                type="button"
+                onClick={() => { setDescSearch(""); setResults([]); setShowResults(false) }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {loading && (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Searching...
+        </div>
+      )}
+
+      {showResults && !loading && results.length === 0 && (
+        <div className="text-sm text-muted-foreground py-2">No results found.</div>
+      )}
+
+      {showResults && results.length > 0 && (
+        <div className="border rounded-lg overflow-hidden">
+          <div className="overflow-x-auto max-h-[300px] overflow-y-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-sky-100 sticky top-0">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium text-gray-700">#</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-700">Inward Dt</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-700">Unit</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-700">Item Description</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-700">Item Mark</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-700">Lot No</th>
+                  <th className="px-3 py-2 text-right font-medium text-gray-700">Qty of Cartons</th>
+                  <th className="px-3 py-2 text-right font-medium text-gray-700">Weight (kg)</th>
+                  <th className="px-3 py-2 text-right font-medium text-gray-700">Total Inv (kgs)</th>
+                  <th className="px-3 py-2 text-center font-medium text-gray-700">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {results.map((record, idx) => (
+                  <tr
+                    key={record.id}
+                    className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}
+                  >
+                    <td className="px-3 py-2 text-gray-600">{idx + 1}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">{record.inward_dt || "-"}</td>
+                    <td className="px-3 py-2">{record.unit || "-"}</td>
+                    <td className="px-3 py-2 font-medium">{record.item_description || "-"}</td>
+                    <td className="px-3 py-2">{record.item_mark || "-"}</td>
+                    <td className="px-3 py-2 font-mono">{record.lot_no || "-"}</td>
+                    <td className="px-3 py-2 text-right">{record.net_qty_on_cartons ?? "-"}</td>
+                    <td className="px-3 py-2 text-right">{record.weight_kg ?? "-"}</td>
+                    <td className="px-3 py-2 text-right">{record.total_inventory_kgs ?? "-"}</td>
+                    <td className="px-3 py-2 text-center">
+                      <Button
+                        size="sm"
+                        variant="default"
+                        className="h-7 px-3 text-xs"
+                        onClick={() => handleSelect(record)}
+                      >
+                        Select
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="bg-gray-50 px-3 py-1.5 text-xs text-muted-foreground border-t">
+            Showing {results.length} result{results.length !== 1 ? "s" : ""}
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -837,15 +1014,43 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     }
   }
 
-  // Auto-calculate net weight based on material type (same logic as request form)
+  // Check if from warehouse is a cold storage
+  const isColdStorageFrom = COLD_STORAGE_WAREHOUSES.includes(formData.fromWarehouse)
+
+  // Auto-fill article fields from cold storage stock record
+  const handleSelectColdStorageStock = (articleId: string, record: ColdStorageStockRecord) => {
+    setArticles(prev =>
+      prev.map(article => {
+        if (article.id !== articleId) return article
+        const availableBoxes = record.net_qty_on_cartons ? Math.ceil(record.net_qty_on_cartons) : 0
+        return {
+          ...article,
+          item_category: record.group_name || article.item_category,
+          item_description: record.item_description || article.item_description,
+          lot_number: record.lot_no ? String(record.lot_no) : article.lot_number,
+          quantity_units: 0,
+          net_weight: record.weight_kg ?? 0,
+          total_weight: record.total_inventory_kgs ?? 0,
+          packaging_type: availableBoxes,
+        }
+      })
+    )
+    toast({
+      title: "Stock Selected",
+      description: `Filled from stock: ${record.item_description || "N/A"} - Lot ${record.lot_no || "N/A"}`,
+    })
+  }
+
+  // Auto-calculate net weight — always returns value in Kg
   const calculateNetWeight = (article: Article): number => {
     const quantity = Number(article.quantity_units) || 0
     const packSize = Number(article.packaging_type) || 0
 
     if (article.material_type === 'FG') {
-      // FG: (packageSize × packSize) × quantity  (grams)
+      // FG: (packageSize_gm × packSize_gm) × quantity → grams, then ÷ 1000 → Kg
       const packageSize = Number(article.package_size) || 0
-      return parseFloat(((packageSize * packSize) * quantity).toFixed(2))
+      const grams = (packageSize * packSize) * quantity
+      return parseFloat((grams / 1000).toFixed(3))
     } else {
       // RM/PM/RTV: quantity × packSize  (Kg)
       return parseFloat((quantity * packSize).toFixed(2))
@@ -1007,6 +1212,11 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     const uniqueId = boxIdCounterRef.current
     boxIdCounterRef.current += 1
 
+    // All weights are already in Kg (calculateNetWeight converts FG grams→Kg,
+    // and Total Wt label now says Kg so user enters in Kg directly)
+    const netWeightKg = article.net_weight || 0
+    const totalWeightKg = article.total_weight || 0
+
     const newEntry = {
       id: uniqueId,
       boxNumber: uniqueId,
@@ -1018,8 +1228,8 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       materialType: article.material_type || 'N/A',
       itemCategory: article.item_category || 'N/A',
       subCategory: article.sub_category || 'N/A',
-      netWeight: String(article.net_weight || 0),
-      totalWeight: String(article.total_weight || 0),
+      netWeight: String(netWeightKg),
+      totalWeight: String(totalWeightKg),
       batchNumber: article.batch_number || 'N/A',
       lotNumber: article.lot_number || 'N/A',
       manufacturingDate: article.manufacturing_date || 'N/A',
@@ -1471,30 +1681,20 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
           itemCategory: boxData.item_category || boxData.ic || 'N/A',
           subCategory: boxData.sub_category || boxData.sc || 'N/A',
 
-          // Weight information - Convert GM to KG for FINISHED GOODS
+          // Weight information - Store always in KG (FG from grams; RM from grams if value >= 100 else kg)
           netWeight: (() => {
             const materialType = boxData.material_type || boxData.mt || ''
-            const netWeightGm = parseFloat(boxData.net_weight || boxData.nw || boxData.netWeight || '0')
-            
-            // Convert to KG if FINISHED GOODS
-            if (materialType.toUpperCase().includes('FINISH')) {
-              const netWeightKg = (netWeightGm / 1000).toFixed(3)
-              console.log(`🔄 Weight Conversion (Net): ${netWeightGm} GM → ${netWeightKg} KG`)
-              return String(netWeightKg)
-            }
-            return String(netWeightGm)
+            const raw = parseFloat(boxData.net_weight || boxData.nw || boxData.netWeight || '0')
+            const isFG = materialType.toUpperCase().includes('FINISH')
+            const kg = isFG ? raw / 1000 : (raw >= 100 ? raw / 1000 : raw)
+            return String(Number(kg.toFixed(3)))
           })(),
           totalWeight: (() => {
             const materialType = boxData.material_type || boxData.mt || ''
-            const totalWeightGm = parseFloat(boxData.total_weight || boxData.gw || boxData.tw || boxData.wt || boxData.totalWeight || boxData.gross_weight || '0')
-            
-            // Convert to KG if FINISHED GOODS
-            if (materialType.toUpperCase().includes('FINISH')) {
-              const totalWeightKg = (totalWeightGm / 1000).toFixed(3)
-              console.log(`🔄 Weight Conversion (Total): ${totalWeightGm} GM → ${totalWeightKg} KG`)
-              return String(totalWeightKg)
-            }
-            return String(totalWeightGm)
+            const raw = parseFloat(boxData.total_weight || boxData.gw || boxData.tw || boxData.wt || boxData.totalWeight || boxData.gross_weight || '0')
+            const isFG = materialType.toUpperCase().includes('FINISH')
+            const kg = isFG ? raw / 1000 : (raw >= 100 ? raw / 1000 : raw)
+            return String(Number(kg.toFixed(3)))
           })(),
 
           // Batch and lot information
@@ -1793,6 +1993,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     const cleanNull = (val: any) => (val && val !== 'N/A') ? val : null
 
     // Build lines from scannedBoxes (manually added articles)
+    // net_weight and total_weight are already in Kg (converted at add time)
     const lines = scannedBoxes.map((box) => ({
       material_type: clean(box.materialType),
       item_category: clean(box.itemCategory),
@@ -1802,21 +2003,32 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       uom: clean(box.uom),
       pack_size: String(clean(box.packagingType)),
       package_size: box.materialType === "FG" ? String(clean(box.packageSize) || "0") : null,
+      net_weight: String(box.netWeight || 0),
+      total_weight: String(box.totalWeight || 0),
       batch_number: cleanNull(box.batchNumber),
       lot_number: cleanNull(box.lotNumber)
     }))
 
     // Only include boxes that were actually QR-scanned (not manually added via "Add to Articles List")
     const qrScannedBoxes = scannedBoxes.filter((box) => box.transactionNo !== 'DIRECT')
-    const boxes = qrScannedBoxes.map((box) => ({
-      box_number: box.boxNumber,
-      article: box.itemDescription || "Unknown Article",
-      lot_number: box.lotNumber || "",
-      batch_number: box.batchNumber || "",
-      transaction_no: box.transactionNo || "",
-      net_weight: String(parseFloat(box.netWeight) || 0),
-      gross_weight: String(parseFloat(box.totalWeight) || 0)
-    }))
+    const boxes = qrScannedBoxes.map((box) => {
+      const isFG = box.materialType?.toUpperCase().includes('FINISH')
+      const netVal = parseFloat(box.netWeight) || 0
+      const grossVal = parseFloat(box.totalWeight) || 0
+      // FG: ensure we send kg to DB (convert grams to kg if value >= 1)
+      // FG: value is always in grams — divide by 1000 to get kg for DB
+      const netKg = isFG ? netVal / 1000 : netVal
+      const grossKg = isFG ? grossVal / 1000 : grossVal
+      return {
+        box_number: box.boxNumber,
+        article: box.itemDescription || "Unknown Article",
+        lot_number: box.lotNumber || "",
+        batch_number: box.batchNumber || "",
+        transaction_no: box.transactionNo || "",
+        net_weight: String(Number(netKg.toFixed(3))),
+        gross_weight: String(Number(grossKg.toFixed(3)))
+      }
+    })
 
     const payload = {
       header: {
@@ -1859,8 +2071,8 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         console.log(`  - Transaction No: ${box.transaction_no}`)
         console.log(`  - Batch Number: ${box.batch_number}`)
         console.log(`  - Lot Number: ${box.lot_number}`)
-        console.log(`  - Net Weight: ${box.net_weight} gm`)
-        console.log(`  - Gross Weight: ${box.gross_weight} gm`)
+        console.log(`  - Net Weight: ${box.net_weight} kg`)
+        console.log(`  - Gross Weight: ${box.gross_weight} kg`)
       })
       console.log('='.repeat(50))
     } else {
@@ -2005,8 +2217,9 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                   <SelectItem value="A101">A101</SelectItem>
                   <SelectItem value="A68">A68</SelectItem>
                   <SelectItem value="F53">F53</SelectItem>
-                  <SelectItem value="Savla">Savla</SelectItem>
-                  <SelectItem value="Rishi">Rishi</SelectItem>
+                  <SelectItem value="Rishi cold">Rishi cold</SelectItem>
+                  <SelectItem value="Savla D-39 cold">Savla D-39 cold</SelectItem>
+                  <SelectItem value="Savla D-514 cold">Savla D-514 cold</SelectItem>
 
                 </SelectContent>
 
@@ -2052,9 +2265,11 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
 
                   <SelectItem value="F53">F53</SelectItem>
 
-                  <SelectItem value="Savla">Savla</SelectItem>
+                  <SelectItem value="Rishi cold">Rishi cold</SelectItem>
 
-                  <SelectItem value="Rishi">Rishi</SelectItem>
+                  <SelectItem value="Savla D-39 cold">Savla D-39 cold</SelectItem>
+
+                  <SelectItem value="Savla D-514 cold">Savla D-514 cold</SelectItem>
 
                 </SelectContent>
 
@@ -2348,294 +2563,399 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                 </div>
               </div>
 
-              {/* Quick Item Search */}
-              <div className="relative">
-                <Label className="text-xs font-medium text-gray-600 mb-1 block">Quick Search Item</Label>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <Input
-                    type="text"
-                    placeholder="Type item name to search..."
-                    value={itemSearchQuery[article.id] || ""}
-                    onChange={(e) => handleItemSearch(article.id, e.target.value)}
-                    onFocus={() => {
-                      if (itemSearchResults[article.id]?.length > 0) {
-                        setItemSearchOpen(prev => ({ ...prev, [article.id]: true }))
-                      }
-                    }}
-                    onBlur={() => {
-                      // Delay close so click on result can fire first
-                      setTimeout(() => setItemSearchOpen(prev => ({ ...prev, [article.id]: false })), 200)
-                    }}
-                    className="pl-9 h-9 text-sm border-violet-200 focus:border-violet-400 focus:ring-violet-400"
-                  />
-                  {itemSearchLoading[article.id] && (
-                    <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                      <div className="h-4 w-4 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
-                    </div>
-                  )}
-                </div>
-                {/* Search Results Dropdown */}
-                {itemSearchOpen[article.id] && itemSearchResults[article.id]?.length > 0 && (
-                  <div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                    {itemSearchResults[article.id].map((item, i) => (
-                      <button
-                        key={`${item.id}-${i}`}
-                        type="button"
-                        className="w-full text-left px-3 py-2.5 hover:bg-violet-50 border-b border-gray-50 last:border-b-0 transition-colors"
-                        onMouseDown={(e) => { e.preventDefault(); handleItemSelect(article.id, item) }}
-                      >
-                        <div className="text-sm font-medium text-gray-800">{item.item_description}</div>
-                        <div className="flex gap-2 mt-0.5">
-                          {item.material_type && (
-                            <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">{item.material_type}</span>
-                          )}
-                          {item.group && (
-                            <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded">{item.group}</span>
-                          )}
-                          {item.sub_group && (
-                            <span className="text-[10px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded">{item.sub_group}</span>
-                          )}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {itemSearchOpen[article.id] && itemSearchQuery[article.id]?.length >= 2 && !itemSearchLoading[article.id] && itemSearchResults[article.id]?.length === 0 && (
-                  <div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg px-3 py-3 text-sm text-gray-500 text-center">
-                    No items found
-                  </div>
-                )}
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-                {/* Material Type */}
-                <div className="space-y-1">
-                  <Label htmlFor={`material_type_${article.id}`}>Material Type *</Label>
-                  <MaterialTypeDropdown
-                    value={article.material_type}
-                    onValueChange={(value) => {
-                      updateArticle(article.id, "material_type", value)
-                    }}
-                    company={company}
-                  />
-                  {requestIdFromUrl && index === 0 && (
-                    <p className="text-xs text-gray-500 mt-1">🔒 Loaded from request</p>
-                  )}
-                </div>
-
-                {/* Item Category */}
-                <div className="space-y-1">
-                  <Label htmlFor={`item_category_${article.id}`}>Item Category *</Label>
-                  <ItemCategoryDropdown
-                    materialType={article.material_type}
-                    value={article.item_category}
-                    onValueChange={(value) => {
-                      console.log("Item Category selected:", value, "for article:", article.id)
-                      // Update the article with new category and clear dependent fields in a single operation
-                      const updatedArticles = articles.map((art) => {
-                        if (art.id === article.id) {
-                          return {
-                            ...art,
-                            item_category: value,
-                            sub_category: "",
-                            item_description: "",
-                            sku_id: null
-                          }
-                        }
-                        return art
-                      })
-                      setArticles(updatedArticles)
-                    }}
-                    company={company}
-                    disabled={!article.material_type || !!(requestIdFromUrl && index === 0)}
-                  />
-                  {requestIdFromUrl && index === 0 && (
-                    <p className="text-xs text-gray-500 mt-1">🔒 Loaded from request</p>
-                  )}
-                </div>
-
-                {/* Sub Category */}
-                <div className="space-y-1">
-                  <Label htmlFor={`sub_category_${article.id}`}>Sub Category *</Label>
-                  <SubCategoryDropdown
-                    articleId={article.id}
-                    categoryId={article.item_category}
-                    value={article.sub_category}
-                    onValueChange={(value) => {
-                      console.log("Sub Category selected:", value, "for article:", article.id)
-                      // Update the article with new sub category and clear dependent fields in a single operation
-                      const updatedArticles = articles.map((art) => {
-                        if (art.id === article.id) {
-                          return {
-                            ...art,
-                            sub_category: value,
-                            item_description: "",
-                            sku_id: null
-                          }
-                        }
-                        return art
-                      })
-                      setArticles(updatedArticles)
-                    }}
-                    company={company}
-                    disabled={!article.material_type || !article.item_category || !!(requestIdFromUrl && index === 0)}
-                    materialType={article.material_type}
-                  />
-                  {requestIdFromUrl && index === 0 && (
-                    <p className="text-xs text-gray-500 mt-1">🔒 Loaded from request</p>
-                  )}
-                </div>
-
-                {/* Item Description */}
-                <div className="space-y-1">
-                  <Label htmlFor={`item_description_${article.id}`}>Item Description *</Label>
-                  <ItemDescriptionDropdown
-                    articleId={article.id}
-                    categoryId={article.item_category}
-                    subCategoryId={article.sub_category}
-                    materialType={article.material_type}
-                    value={article.item_description}
-                    onValueChange={(value) => {
-                      console.log("Item Description selected:", value, "for article:", article.id)
-                      // Update the article with new item description in a single operation
-                      const updatedArticles = articles.map((art) => {
-                        if (art.id === article.id) {
-                          return {
-                            ...art,
-                            item_description: value
-                          }
-                        }
-                        return art
-                      })
-                      setArticles(updatedArticles)
-                    }}
-                    company={company}
-                    updateArticle={updateArticle}
-                    disabled={!article.material_type || !article.item_category || !article.sub_category || !!(requestIdFromUrl && index === 0)}
-                  />
-                  {requestIdFromUrl && index === 0 && (
-                    <p className="text-xs text-gray-500 mt-1">🔒 Loaded from request</p>
-                  )}
-                </div>
-
-                {/* Quantity (Units) */}
-                <div className="space-y-1">
-                  <Label htmlFor={`quantity_units_${article.id}`}>Quantity (Units) *</Label>
-                  <Input
-                    id={`quantity_units_${article.id}`}
-                    type="text"
-                    value={article.quantity_units || ""}
-                    onChange={(e) => updateArticle(article.id, "quantity_units", Number(e.target.value) || 0)}
-                    placeholder="0"
-                  />
-                </div>
-
-                {/* UOM */}
-                <div className="space-y-1">
-                  <Label htmlFor={`uom_${article.id}`}>UOM</Label>
-                  <Select
-                    value={article.uom}
-                    onValueChange={(value) => updateArticle(article.id, "uom", value)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select UOM" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="BOX">BOX</SelectItem>
-                      <SelectItem value="BAG">BAG</SelectItem>
-                      <SelectItem value="CARTON">CARTON</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Pack Size - label changes based on material type */}
-                <div className="space-y-1">
-                  <Label htmlFor={`packaging_type_${article.id}`}>
-                    Pack Size ({article.material_type === 'FG' ? 'gm' : 'Kg'}) *
-                  </Label>
-                  <Input
-                    id={`packaging_type_${article.id}`}
-                    type="text"
-                    value={article.packaging_type || ""}
-                    onChange={(e) => updateArticle(article.id, "packaging_type", parseFloat(e.target.value) || 0)}
-                    placeholder="0.00"
-                  />
-                </div>
-
-                {/* Package Size - only shown for FG material type */}
-                {article.material_type === 'FG' && (
-                  <div className="space-y-1">
-                    <Label htmlFor={`package_size_${article.id}`}>Package Size (gm) *</Label>
-                    <Input
-                      id={`package_size_${article.id}`}
-                      type="text"
-                      value={article.package_size || ""}
-                      onChange={(e) => updateArticle(article.id, "package_size", parseFloat(e.target.value) || 0)}
-                      placeholder="0"
+              {/* Conditional: Cold Storage Stock Search OR Regular Article Form */}
+              {isColdStorageFrom ? (
+                <>
+                  {/* Cold Storage Stock Search */}
+                  <div className="bg-blue-50/50 border border-blue-200 rounded-lg p-3">
+                    <ColdStorageStockSearch
+                      onSelect={(record) => handleSelectColdStorageStock(article.id, record)}
                     />
                   </div>
-                )}
 
-                {/* Net Weight - auto-calculated but editable */}
-                <div className="space-y-1">
-                  <Label htmlFor={`net_weight_${article.id}`}>
-                    Net Weight ({article.material_type === 'FG' ? 'gm' : 'Kg'})
-                  </Label>
-                  <Input
-                    id={`net_weight_${article.id}`}
-                    type="text"
-                    value={article.net_weight || ""}
-                    onChange={(e) => updateArticle(article.id, "net_weight", parseFloat(e.target.value) || 0)}
-                    placeholder="Auto-calculated"
-                    className={article.total_weight > 0 && article.net_weight > article.total_weight ? "border-red-500" : ""}
-                  />
-                  {article.total_weight > 0 && article.net_weight > article.total_weight && (
-                    <p className="text-xs text-red-500">Net weight must be ≤ gross weight</p>
-                  )}
-                </div>
+                  {/* Auto-filled fields from cold storage stock selection */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Item Category</Label>
+                      <Input
+                        value={article.item_category}
+                        readOnly
+                        placeholder="Auto-filled from stock selection"
+                        className="bg-muted"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Item Description</Label>
+                      <Input
+                        value={article.item_description}
+                        readOnly
+                        placeholder="Auto-filled from stock selection"
+                        className="bg-muted"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Weight (kg)</Label>
+                      <Input
+                        value={article.net_weight || ""}
+                        readOnly
+                        placeholder="Auto-filled"
+                        className="bg-muted"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Total Weight (kgs)</Label>
+                      <Input
+                        value={
+                          article.quantity_units && article.net_weight
+                            ? (article.quantity_units * article.net_weight).toFixed(2)
+                            : ""
+                        }
+                        readOnly
+                        placeholder="Auto-calculated"
+                        className="bg-muted"
+                      />
+                    </div>
+                  </div>
 
-                {/* Total Weight (Gross Weight) */}
-                <div className="space-y-1">
-                  <Label htmlFor={`total_weight_${article.id}`}>
-                    Total Wt ({article.material_type === 'FG' ? 'gm' : 'Kg'}) <span className="text-gray-400 font-normal">(Gross)</span>
-                  </Label>
-                  <Input
-                    id={`total_weight_${article.id}`}
-                    type="text"
-                    value={article.total_weight || ""}
-                    onChange={(e) => updateArticle(article.id, "total_weight", parseFloat(e.target.value) || 0)}
-                    placeholder="Enter gross weight"
-                    className={article.total_weight > 0 && article.net_weight > article.total_weight ? "border-red-500" : ""}
-                  />
-                </div>
+                  {/* Editable fields: No. of Boxes, UOM, Lot Number */}
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                    <div className="space-y-1">
+                      <Label className="text-xs">No. of Boxes/Cartons *</Label>
+                      <Input
+                        type="number"
+                        min="1"
+                        value={article.quantity_units || ""}
+                        onChange={(e) => updateArticle(article.id, "quantity_units", Number(e.target.value) || 0)}
+                        placeholder="Enter count"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">UOM *</Label>
+                      <Select value={article.uom} onValueChange={(value) => updateArticle(article.id, "uom", value)}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select UOM" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="BOX">BOX</SelectItem>
+                          <SelectItem value="CARTON">CARTON</SelectItem>
+                          <SelectItem value="BAG">BAG</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Lot Number *</Label>
+                      <Input
+                        value={article.lot_number}
+                        onChange={(e) => updateArticle(article.id, "lot_number", e.target.value)}
+                        placeholder="Enter lot number"
+                      />
+                    </div>
+                  </div>
 
-                {/* Lot Number (Optional) */}
-                <div className="space-y-1">
-                  <Label htmlFor={`lot_number_${article.id}`}>
-                    Lot Number <span className="text-gray-400 font-normal">(Optional)</span>
-                  </Label>
-                  <Input
-                    id={`lot_number_${article.id}`}
-                    type="text"
-                    value={article.lot_number}
-                    onChange={(e) => updateArticle(article.id, "lot_number", e.target.value)}
-                    placeholder="Enter lot number"
-                  />
-                </div>
-              </div>
+                  {/* Add to List Button */}
+                  <div className="flex justify-end pt-2 border-t border-gray-100">
+                    <Button
+                      type="button"
+                      onClick={() => handleAddArticleToList(article)}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white h-10 sm:h-9 px-5 text-xs sm:text-sm w-full sm:w-auto"
+                    >
+                      <Plus className="mr-2 h-3.5 w-3.5" />
+                      Add to Articles List
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* Quick Item Search */}
+                  <div className="relative">
+                    <Label className="text-xs font-medium text-gray-600 mb-1 block">Quick Search Item</Label>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      <Input
+                        type="text"
+                        placeholder="Type item name to search..."
+                        value={itemSearchQuery[article.id] || ""}
+                        onChange={(e) => handleItemSearch(article.id, e.target.value)}
+                        onFocus={() => {
+                          if (itemSearchResults[article.id]?.length > 0) {
+                            setItemSearchOpen(prev => ({ ...prev, [article.id]: true }))
+                          }
+                        }}
+                        onBlur={() => {
+                          // Delay close so click on result can fire first
+                          setTimeout(() => setItemSearchOpen(prev => ({ ...prev, [article.id]: false })), 200)
+                        }}
+                        className="pl-9 h-9 text-sm border-violet-200 focus:border-violet-400 focus:ring-violet-400"
+                      />
+                      {itemSearchLoading[article.id] && (
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                          <div className="h-4 w-4 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
+                        </div>
+                      )}
+                    </div>
+                    {/* Search Results Dropdown */}
+                    {itemSearchOpen[article.id] && itemSearchResults[article.id]?.length > 0 && (
+                      <div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                        {itemSearchResults[article.id].map((item, i) => (
+                          <button
+                            key={`${item.id}-${i}`}
+                            type="button"
+                            className="w-full text-left px-3 py-2.5 hover:bg-violet-50 border-b border-gray-50 last:border-b-0 transition-colors"
+                            onMouseDown={(e) => { e.preventDefault(); handleItemSelect(article.id, item) }}
+                          >
+                            <div className="text-sm font-medium text-gray-800">{item.item_description}</div>
+                            <div className="flex gap-2 mt-0.5">
+                              {item.material_type && (
+                                <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">{item.material_type}</span>
+                              )}
+                              {item.group && (
+                                <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded">{item.group}</span>
+                              )}
+                              {item.sub_group && (
+                                <span className="text-[10px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded">{item.sub_group}</span>
+                              )}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {itemSearchOpen[article.id] && itemSearchQuery[article.id]?.length >= 2 && !itemSearchLoading[article.id] && itemSearchResults[article.id]?.length === 0 && (
+                      <div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg px-3 py-3 text-sm text-gray-500 text-center">
+                        No items found
+                      </div>
+                    )}
+                  </div>
 
-              {/* Add to List Button */}
-              <div className="flex justify-end pt-2 border-t border-gray-100">
-                <Button
-                  type="button"
-                  onClick={() => handleAddArticleToList(article)}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white h-10 sm:h-9 px-5 text-xs sm:text-sm w-full sm:w-auto"
-                >
-                  <Plus className="mr-2 h-3.5 w-3.5" />
-                  Add to Articles List
-                </Button>
-              </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                    {/* Material Type */}
+                    <div className="space-y-1">
+                      <Label htmlFor={`material_type_${article.id}`}>Material Type *</Label>
+                      <MaterialTypeDropdown
+                        value={article.material_type}
+                        onValueChange={(value) => {
+                          updateArticle(article.id, "material_type", value)
+                        }}
+                        company={company}
+                      />
+                      {requestIdFromUrl && index === 0 && (
+                        <p className="text-xs text-gray-500 mt-1">🔒 Loaded from request</p>
+                      )}
+                    </div>
+
+                    {/* Item Category */}
+                    <div className="space-y-1">
+                      <Label htmlFor={`item_category_${article.id}`}>Item Category *</Label>
+                      <ItemCategoryDropdown
+                        materialType={article.material_type}
+                        value={article.item_category}
+                        onValueChange={(value) => {
+                          console.log("Item Category selected:", value, "for article:", article.id)
+                          // Update the article with new category and clear dependent fields in a single operation
+                          const updatedArticles = articles.map((art) => {
+                            if (art.id === article.id) {
+                              return {
+                                ...art,
+                                item_category: value,
+                                sub_category: "",
+                                item_description: "",
+                                sku_id: null
+                              }
+                            }
+                            return art
+                          })
+                          setArticles(updatedArticles)
+                        }}
+                        company={company}
+                        disabled={!article.material_type || !!(requestIdFromUrl && index === 0)}
+                      />
+                      {requestIdFromUrl && index === 0 && (
+                        <p className="text-xs text-gray-500 mt-1">🔒 Loaded from request</p>
+                      )}
+                    </div>
+
+                    {/* Sub Category */}
+                    <div className="space-y-1">
+                      <Label htmlFor={`sub_category_${article.id}`}>Sub Category *</Label>
+                      <SubCategoryDropdown
+                        articleId={article.id}
+                        categoryId={article.item_category}
+                        value={article.sub_category}
+                        onValueChange={(value) => {
+                          console.log("Sub Category selected:", value, "for article:", article.id)
+                          // Update the article with new sub category and clear dependent fields in a single operation
+                          const updatedArticles = articles.map((art) => {
+                            if (art.id === article.id) {
+                              return {
+                                ...art,
+                                sub_category: value,
+                                item_description: "",
+                                sku_id: null
+                              }
+                            }
+                            return art
+                          })
+                          setArticles(updatedArticles)
+                        }}
+                        company={company}
+                        disabled={!article.material_type || !article.item_category || !!(requestIdFromUrl && index === 0)}
+                        materialType={article.material_type}
+                      />
+                      {requestIdFromUrl && index === 0 && (
+                        <p className="text-xs text-gray-500 mt-1">🔒 Loaded from request</p>
+                      )}
+                    </div>
+
+                    {/* Item Description */}
+                    <div className="space-y-1">
+                      <Label htmlFor={`item_description_${article.id}`}>Item Description *</Label>
+                      <ItemDescriptionDropdown
+                        articleId={article.id}
+                        categoryId={article.item_category}
+                        subCategoryId={article.sub_category}
+                        materialType={article.material_type}
+                        value={article.item_description}
+                        onValueChange={(value) => {
+                          console.log("Item Description selected:", value, "for article:", article.id)
+                          // Update the article with new item description in a single operation
+                          const updatedArticles = articles.map((art) => {
+                            if (art.id === article.id) {
+                              return {
+                                ...art,
+                                item_description: value
+                              }
+                            }
+                            return art
+                          })
+                          setArticles(updatedArticles)
+                        }}
+                        company={company}
+                        updateArticle={updateArticle}
+                        disabled={!article.material_type || !article.item_category || !article.sub_category || !!(requestIdFromUrl && index === 0)}
+                      />
+                      {requestIdFromUrl && index === 0 && (
+                        <p className="text-xs text-gray-500 mt-1">🔒 Loaded from request</p>
+                      )}
+                    </div>
+
+                    {/* Quantity (Units) */}
+                    <div className="space-y-1">
+                      <Label htmlFor={`quantity_units_${article.id}`}>Quantity (Units) *</Label>
+                      <Input
+                        id={`quantity_units_${article.id}`}
+                        type="text"
+                        value={article.quantity_units || ""}
+                        onChange={(e) => updateArticle(article.id, "quantity_units", Number(e.target.value) || 0)}
+                        placeholder="0"
+                      />
+                    </div>
+
+                    {/* UOM */}
+                    <div className="space-y-1">
+                      <Label htmlFor={`uom_${article.id}`}>UOM</Label>
+                      <Select
+                        value={article.uom}
+                        onValueChange={(value) => updateArticle(article.id, "uom", value)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select UOM" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="BOX">BOX</SelectItem>
+                          <SelectItem value="BAG">BAG</SelectItem>
+                          <SelectItem value="CARTON">CARTON</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Pack Size - label changes based on material type */}
+                    <div className="space-y-1">
+                      <Label htmlFor={`packaging_type_${article.id}`}>
+                        Pack Size ({article.material_type === 'FG' ? 'gm' : 'Kg'}) *
+                      </Label>
+                      <Input
+                        id={`packaging_type_${article.id}`}
+                        type="text"
+                        value={article.packaging_type || ""}
+                        onChange={(e) => updateArticle(article.id, "packaging_type", parseFloat(e.target.value) || 0)}
+                        placeholder="0.00"
+                      />
+                    </div>
+
+                    {/* Package Size - only shown for FG material type */}
+                    {article.material_type === 'FG' && (
+                      <div className="space-y-1">
+                        <Label htmlFor={`package_size_${article.id}`}>Package Size (gm) *</Label>
+                        <Input
+                          id={`package_size_${article.id}`}
+                          type="text"
+                          value={article.package_size || ""}
+                          onChange={(e) => updateArticle(article.id, "package_size", parseFloat(e.target.value) || 0)}
+                          placeholder="0"
+                        />
+                      </div>
+                    )}
+
+                    {/* Net Weight - auto-calculated in Kg */}
+                    <div className="space-y-1">
+                      <Label htmlFor={`net_weight_${article.id}`}>
+                        Net Weight (Kg)
+                      </Label>
+                      <Input
+                        id={`net_weight_${article.id}`}
+                        type="text"
+                        value={article.net_weight || ""}
+                        onChange={(e) => updateArticle(article.id, "net_weight", parseFloat(e.target.value) || 0)}
+                        placeholder="Auto-calculated"
+                        className={article.total_weight > 0 && article.net_weight > article.total_weight ? "border-red-500" : ""}
+                      />
+                      {article.total_weight > 0 && article.net_weight > article.total_weight && (
+                        <p className="text-xs text-red-500">Net weight must be ≤ gross weight</p>
+                      )}
+                    </div>
+
+                    {/* Total Weight (Gross Weight) - always in Kg */}
+                    <div className="space-y-1">
+                      <Label htmlFor={`total_weight_${article.id}`}>
+                        Total Wt (Kg) <span className="text-gray-400 font-normal">(Gross)</span>
+                      </Label>
+                      <Input
+                        id={`total_weight_${article.id}`}
+                        type="text"
+                        value={article.total_weight || ""}
+                        onChange={(e) => updateArticle(article.id, "total_weight", parseFloat(e.target.value) || 0)}
+                        placeholder="Enter gross weight"
+                        className={article.total_weight > 0 && article.net_weight > article.total_weight ? "border-red-500" : ""}
+                      />
+                    </div>
+
+                    {/* Lot Number (Optional) */}
+                    <div className="space-y-1">
+                      <Label htmlFor={`lot_number_${article.id}`}>
+                        Lot Number <span className="text-gray-400 font-normal">(Optional)</span>
+                      </Label>
+                      <Input
+                        id={`lot_number_${article.id}`}
+                        type="text"
+                        value={article.lot_number}
+                        onChange={(e) => updateArticle(article.id, "lot_number", e.target.value)}
+                        placeholder="Enter lot number"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Add to List Button */}
+                  <div className="flex justify-end pt-2 border-t border-gray-100">
+                    <Button
+                      type="button"
+                      onClick={() => handleAddArticleToList(article)}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white h-10 sm:h-9 px-5 text-xs sm:text-sm w-full sm:w-auto"
+                    >
+                      <Plus className="mr-2 h-3.5 w-3.5" />
+                      Add to Articles List
+                    </Button>
+                  </div>
+                </>
+              )}
             </div>
           )
           })}
@@ -2850,13 +3170,13 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                           <div>
                             <span className="text-gray-500">Net Wt:</span>
                             <span className="ml-1 text-gray-800 font-medium">
-                              {box.netWeight} {box.materialType.toUpperCase().includes('FINISH') ? 'kg' : 'g'}
+                              {box.netWeight} kg
                             </span>
                           </div>
                           <div>
                             <span className="text-gray-500">Total Wt:</span>
                             <span className="ml-1 text-gray-800 font-medium">
-                              {box.totalWeight} {box.materialType.toUpperCase().includes('FINISH') ? 'kg' : 'g'}
+                              {box.totalWeight} kg
                             </span>
                           </div>
                         </div>
@@ -2911,10 +3231,10 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                             </div>
                           </td>
                           <td className="py-2 px-2 text-xs text-gray-700">
-                            {box.netWeight} {box.materialType.toUpperCase().includes('FINISH') ? 'kg' : 'g'}
+                            {box.netWeight} kg
                           </td>
                           <td className="py-2 px-2 text-xs text-gray-700">
-                            {box.totalWeight} {box.materialType.toUpperCase().includes('FINISH') ? 'kg' : 'g'}
+                            {box.totalWeight} kg
                           </td>
                           <td className="py-2 px-2 text-xs">
                             <span className="font-mono text-gray-700">
@@ -2972,19 +3292,13 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                     <div>
                       <p className="text-xs text-gray-600 mb-1">Total Net Wt</p>
                       <p className="text-base sm:text-lg font-bold text-gray-800">
-                        {scannedBoxes.reduce((sum, box) => {
-                          const weight = parseFloat(box.netWeight || '0')
-                          return sum + (box.materialType.toUpperCase().includes('FINISH') ? weight : weight / 1000)
-                        }, 0).toFixed(3)} kg
+                        {scannedBoxes.reduce((sum, box) => sum + parseFloat(box.netWeight || '0'), 0).toFixed(3)} kg
                       </p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-600 mb-1">Total Wt</p>
                       <p className="text-base sm:text-lg font-bold text-gray-800">
-                        {scannedBoxes.reduce((sum, box) => {
-                          const weight = parseFloat(box.totalWeight || '0')
-                          return sum + (box.materialType.toUpperCase().includes('FINISH') ? weight : weight / 1000)
-                        }, 0).toFixed(3)} kg
+                        {scannedBoxes.reduce((sum, box) => sum + parseFloat(box.totalWeight || '0'), 0).toFixed(3)} kg
                       </p>
                     </div>
                   </div>

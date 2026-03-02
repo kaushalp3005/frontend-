@@ -29,44 +29,41 @@ interface TransferDetail {
   to_warehouse: string
   vehicle_no: string
   vehicle_number: string
+  driver_name: string | null
+  approved_by: string | null
   remark: string
   reason_code: string
   status: string
   request_id: number
   created_by: string
   created_ts: string
-  approved_by: string | null
   approved_ts: string | null
   has_variance: boolean
-  items_count: number
-  boxes_count: number
-  pending_items: number
   lines?: Array<{
     id: number
-    rm_pm_fg_type: string
+    material_type: string
     item_category: string
     sub_category: string
-    item_desc_raw: string
-    item_id?: number
-    hsn_code?: string
-    pack_size: number
-    packaging_type: number
-    qty: number
+    item_description: string
+    pack_size: string
+    package_size: string
+    quantity: string
     uom: string
-    net_weight: number
-    total_weight: number
+    net_weight: string
+    total_weight: string
     batch_number: string
     lot_number: string
   }>
   boxes?: Array<{
     id: number
     box_number: number
+    box_id: string
     article: string
     lot_number: string
     batch_number: string
     transaction_no: string
-    net_weight: number
-    gross_weight: number
+    net_weight: string
+    gross_weight: string
     created_at?: string
     updated_at?: string
   }>
@@ -285,29 +282,36 @@ export default function TransferViewPage({ params }: TransferViewPageProps) {
               <p className="text-sm font-semibold text-gray-900">{transfer.vehicle_no || transfer.vehicle_number}</p>
             </div>
 
-            {/* Driver Name - Extract from remark */}
-            {transfer.remark && transfer.remark.includes('Driver:') && (
+            {/* Driver Name */}
+            {transfer.driver_name && (
               <div className="space-y-1">
                 <div className="flex items-center space-x-2 text-gray-600">
                   <User className="h-4 w-4" />
                   <span className="text-xs font-medium">Driver Name</span>
                 </div>
-                <p className="text-sm font-semibold text-gray-900">
-                  {transfer.remark.split('|')[0].replace('Driver:', '').trim()}
-                </p>
+                <p className="text-sm font-semibold text-gray-900">{transfer.driver_name}</p>
               </div>
             )}
 
-            {/* Approval Authority - Extract from remark */}
-            {transfer.remark && transfer.remark.includes('Approval:') && (
+            {/* Approval Authority */}
+            {transfer.approved_by && (
               <div className="space-y-1">
                 <div className="flex items-center space-x-2 text-gray-600">
                   <User className="h-4 w-4" />
                   <span className="text-xs font-medium">Approval Authority</span>
                 </div>
-                <p className="text-sm font-semibold text-gray-900">
-                  {transfer.remark.split('|')[1]?.replace('Approval:', '').trim() || transfer.remark}
-                </p>
+                <p className="text-sm font-semibold text-gray-900">{transfer.approved_by}</p>
+              </div>
+            )}
+
+            {/* Created By */}
+            {transfer.created_by && (
+              <div className="space-y-1">
+                <div className="flex items-center space-x-2 text-gray-600">
+                  <User className="h-4 w-4" />
+                  <span className="text-xs font-medium">Created By</span>
+                </div>
+                <p className="text-sm font-semibold text-gray-900">{transfer.created_by}</p>
               </div>
             )}
 
@@ -325,18 +329,14 @@ export default function TransferViewPage({ params }: TransferViewPageProps) {
 
           {/* Summary Stats */}
           <div className="mt-6 pt-4 border-t border-gray-200">
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 gap-4">
               <div className="text-center p-3 bg-blue-50 rounded-lg border border-blue-200">
                 <p className="text-xs text-blue-600 mb-1">Items</p>
-                <p className="text-2xl font-bold text-blue-900">{transfer.items_count || 0}</p>
+                <p className="text-2xl font-bold text-blue-900">{transfer.lines?.length || 0}</p>
               </div>
               <div className="text-center p-3 bg-green-50 rounded-lg border border-green-200">
-                <p className="text-xs text-green-600 mb-1">Boxes</p>
-                <p className="text-2xl font-bold text-green-900">{transfer.boxes_count || 0}</p>
-              </div>
-              <div className="text-center p-3 bg-orange-50 rounded-lg border border-orange-200">
-                <p className="text-xs text-orange-600 mb-1">Pending</p>
-                <p className="text-2xl font-bold text-orange-900">{transfer.pending_items || 0}</p>
+                <p className="text-xs text-green-600 mb-1">Boxes Scanned</p>
+                <p className="text-2xl font-bold text-green-900">{transfer.boxes?.length || 0}</p>
               </div>
             </div>
           </div>
@@ -356,13 +356,15 @@ export default function TransferViewPage({ params }: TransferViewPageProps) {
           </CardHeader>
           <CardContent className="p-4">
             <div className="space-y-4">
-              {transfer.lines.map((line, index) => (
+              {transfer.lines.map((line, index) => {
+                const isFG = line.material_type?.toUpperCase() === 'FG'
+                return (
                 <Card key={line.id} className="border border-gray-200 shadow-sm">
                   <CardHeader className="pb-3 bg-blue-50">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-2">
                         <Badge className="bg-blue-600 text-white">Item #{index + 1}</Badge>
-                        <Badge variant="outline" className="text-xs">{line.rm_pm_fg_type}</Badge>
+                        <Badge variant="outline" className="text-xs">{line.material_type}</Badge>
                       </div>
                     </div>
                   </CardHeader>
@@ -370,11 +372,17 @@ export default function TransferViewPage({ params }: TransferViewPageProps) {
                     {/* Item Description - Prominent */}
                     <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
                       <p className="text-xs text-gray-600 mb-1">Item Description</p>
-                      <p className="text-base font-semibold text-gray-900">{line.item_desc_raw}</p>
+                      <p className="text-base font-semibold text-gray-900">{line.item_description}</p>
                     </div>
 
                     {/* Item Details Grid */}
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                      {/* Material Type */}
+                      <div className="space-y-1">
+                        <p className="text-xs text-gray-600">Material Type</p>
+                        <p className="text-sm font-medium text-gray-900">{line.material_type}</p>
+                      </div>
+
                       {/* Category */}
                       <div className="space-y-1">
                         <p className="text-xs text-gray-600">Category</p>
@@ -390,48 +398,48 @@ export default function TransferViewPage({ params }: TransferViewPageProps) {
                       {/* Quantity */}
                       <div className="space-y-1">
                         <p className="text-xs text-gray-600">Quantity</p>
-                        <p className="text-sm font-medium text-gray-900">{line.qty} {line.uom}</p>
+                        <p className="text-sm font-medium text-gray-900">{line.quantity}</p>
+                      </div>
+
+                      {/* UOM */}
+                      <div className="space-y-1">
+                        <p className="text-xs text-gray-600">UOM</p>
+                        <p className="text-sm font-medium text-gray-900">{line.uom}</p>
                       </div>
 
                       {/* Pack Size */}
                       <div className="space-y-1">
-                        <p className="text-xs text-gray-600">Pack Size</p>
+                        <p className="text-xs text-gray-600">Pack Size ({isFG ? 'gm' : 'Kg'})</p>
                         <p className="text-sm font-medium text-gray-900">{line.pack_size}</p>
                       </div>
 
-                      {/* Packaging Type */}
-                      {line.packaging_type && (
+                      {/* Package Size (FG only) */}
+                      {isFG && line.package_size && line.package_size !== '0' && (
                         <div className="space-y-1">
-                          <p className="text-xs text-gray-600">Packaging Type</p>
-                          <p className="text-sm font-medium text-gray-900">{line.packaging_type}</p>
+                          <p className="text-xs text-gray-600">Package Size (gm)</p>
+                          <p className="text-sm font-medium text-gray-900">{line.package_size}</p>
                         </div>
                       )}
 
                       {/* Net Weight */}
                       <div className="space-y-1">
-                        <p className="text-xs text-gray-600">Net Weight</p>
+                        <p className="text-xs text-gray-600">Net Weight (Kg)</p>
                         <p className="text-sm font-medium text-gray-900">{line.net_weight} kg</p>
                       </div>
 
                       {/* Total Weight */}
                       <div className="space-y-1">
-                        <p className="text-xs text-gray-600">Total Weight</p>
+                        <p className="text-xs text-gray-600">Total Weight (Kg)</p>
                         <p className="text-sm font-medium text-gray-900">{line.total_weight} kg</p>
                       </div>
 
-                      {/* HSN Code */}
-                      {line.hsn_code && (
+                      {/* Batch Number */}
+                      {line.batch_number && (
                         <div className="space-y-1">
-                          <p className="text-xs text-gray-600">HSN Code</p>
-                          <p className="text-sm font-medium text-gray-900">{line.hsn_code}</p>
+                          <p className="text-xs text-gray-600">Batch Number</p>
+                          <p className="text-sm font-medium text-gray-900">{line.batch_number}</p>
                         </div>
                       )}
-
-                      {/* Batch Number */}
-                      <div className="space-y-1">
-                        <p className="text-xs text-gray-600">Batch Number</p>
-                        <p className="text-sm font-medium text-gray-900">{line.batch_number || 'N/A'}</p>
-                      </div>
 
                       {/* Lot Number */}
                       {line.lot_number && (
@@ -443,7 +451,8 @@ export default function TransferViewPage({ params }: TransferViewPageProps) {
                     </div>
                   </CardContent>
                 </Card>
-              ))}
+                )
+              })}
             </div>
           </CardContent>
         </Card>
