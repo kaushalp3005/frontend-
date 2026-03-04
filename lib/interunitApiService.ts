@@ -352,6 +352,24 @@ export class InterunitApiService {
     }
   }
 
+  // Update an existing transfer
+  static async updateTransfer(transferId: number, payload: any): Promise<any> {
+    console.log('InterunitApiService.updateTransfer called')
+    console.log('Transfer ID:', transferId)
+
+    try {
+      const url = `${API_BASE_URL}/interunit/transfers/${transferId}`
+      const response = await fetchJSON(url, {
+        method: 'PUT',
+        body: JSON.stringify(payload)
+      })
+      return response
+    } catch (error: any) {
+      console.error('API Error in updateTransfer:', error)
+      throw error
+    }
+  }
+
   // Get single transfer by ID
   static async getTransferById(company: string, transferId: string): Promise<any> {
     try {

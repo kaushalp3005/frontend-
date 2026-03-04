@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Plus, Trash2, Loader2, RefreshCw, CheckCircle, Clock,
   Truck, ArrowRightLeft, PackageCheck, FileText, ArrowRight,
-  Package, ClipboardList, Send, Inbox, Eye, Printer
+  Package, ClipboardList, Send, Inbox, Eye, Printer, Pencil
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { InterunitApiService, RequestResponse } from "@/lib/interunitApiService"
@@ -352,6 +352,10 @@ export default function TransferPage({ params }: TransferPageProps) {
                         ))}
                       </div>
                       <div className="flex gap-2 pt-1">
+                        <Button variant="outline" size="sm" onClick={() => router.push(`/${company}/transfer/request/${req.id}`)}
+                          className="h-9 w-9 p-0 border-gray-200 hover:bg-blue-50">
+                          <Eye className="h-3.5 w-3.5 text-blue-600" />
+                        </Button>
                         <Button size="sm" onClick={() => handleApproveRequest(req.id)}
                           disabled={req.status.toLowerCase() !== 'pending'}
                           className="flex-1 h-9 text-xs bg-emerald-600 hover:bg-emerald-700 text-white">
@@ -402,6 +406,10 @@ export default function TransferPage({ params }: TransferPageProps) {
                           </td>
                           <td className="py-3 px-4">
                             <div className="flex items-center justify-end gap-1.5">
+                              <Button variant="ghost" size="sm" onClick={() => router.push(`/${company}/transfer/request/${req.id}`)}
+                                className="h-8 w-8 p-0 hover:bg-blue-50">
+                                <Eye className="h-3.5 w-3.5 text-blue-600" />
+                              </Button>
                               <Button variant="outline" size="sm" onClick={() => handleApproveRequest(req.id)}
                                 disabled={req.status.toLowerCase() !== 'pending'}
                                 className="h-8 px-3 text-xs bg-emerald-50 border-emerald-200 hover:bg-emerald-100 text-emerald-700">
@@ -492,12 +500,18 @@ export default function TransferPage({ params }: TransferPageProps) {
                           <Eye className="h-3.5 w-3.5 mr-1.5" />View
                         </Button>
                         <Button variant="outline" size="sm"
+                          onClick={() => router.push(`/${company}/transfer/directtransferform?editId=${t.id}`)}
+                          disabled={t.status === 'Received' || t.status === 'Completed'}
+                          className="h-9 text-xs flex-1 border-amber-200 hover:bg-amber-50 text-amber-700">
+                          <Pencil className="h-3.5 w-3.5 mr-1.5" />Edit
+                        </Button>
+                        <Button variant="outline" size="sm"
                           onClick={() => router.push(`/${company}/transfer/dc/${t.id}`)}
                           className="h-9 text-xs flex-1 border-violet-200 hover:bg-violet-50 text-violet-700">
                           <Printer className="h-3.5 w-3.5 mr-1.5" />DC
                         </Button>
                         <Button variant="outline" size="sm" onClick={() => handleDeleteTransfer(t.id)}
-                          disabled={t.status === 'Received' || t.status === 'Completed' || t.status === 'Dispatch'}
+                          disabled={t.status === 'Received' || t.status === 'Completed'}
                           className="h-9 w-9 p-0 border-red-200 hover:bg-red-50">
                           <Trash2 className="h-3.5 w-3.5 text-red-500" />
                         </Button>
@@ -554,12 +568,18 @@ export default function TransferPage({ params }: TransferPageProps) {
                                 <Eye className="h-3.5 w-3.5 mr-1" />View
                               </Button>
                               <Button variant="outline" size="sm"
+                                onClick={() => router.push(`/${company}/transfer/directtransferform?editId=${t.id}`)}
+                                disabled={t.status === 'Received' || t.status === 'Completed'}
+                                className="h-8 px-3 text-xs border-amber-200 hover:bg-amber-50 text-amber-700">
+                                <Pencil className="h-3.5 w-3.5 mr-1" />Edit
+                              </Button>
+                              <Button variant="outline" size="sm"
                                 onClick={() => router.push(`/${company}/transfer/dc/${t.id}`)}
                                 className="h-8 px-3 text-xs border-violet-200 hover:bg-violet-50 text-violet-700">
                                 <Printer className="h-3.5 w-3.5 mr-1" />DC
                               </Button>
                               <Button variant="ghost" size="sm" onClick={() => handleDeleteTransfer(t.id)}
-                                disabled={t.status === 'Received' || t.status === 'Completed' || t.status === 'Dispatch'}
+                                disabled={t.status === 'Received' || t.status === 'Completed'}
                                 className="h-8 w-8 p-0 hover:bg-red-50">
                                 <Trash2 className="h-3.5 w-3.5 text-red-500" />
                               </Button>

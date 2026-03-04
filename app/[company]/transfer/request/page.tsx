@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { useItemCategories, useSubCategories, useItemDescriptions } from "@/lib/hooks/useDropdownData"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -10,10 +10,12 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { SearchableSelect } from "@/components/ui/searchable-select"
-import { ArrowLeft, Plus, Send, Loader2, FileText, AlertCircle, Trash2 } from "lucide-react"
+import { ArrowLeft, Plus, Send, Loader2, FileText, AlertCircle, Trash2, Search, List } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/hooks/use-toast"
 import { InterunitApiService, transformFormDataToApi, validateRequestData } from "@/lib/interunitApiService"
 import { dropdownApi } from "@/lib/api"
+import { useAuthStore } from "@/lib/stores/auth"
 import type { Company } from "@/types/auth"
 
 interface NewTransferRequestPageProps {
@@ -99,6 +101,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
   const { company } = params
   const router = useRouter()
   const { toast } = useToast()
+  const { user } = useAuthStore()
 
   // Generate a unique request number with REQ prefix and YYYYMMDDHHMMS format
   const now = new Date()
@@ -161,6 +164,70 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     netWeight: string
     lotNumber: string
   }>>([])
+
+  // ─── Article Search Mode ───────────────────────────
+  type ArticleMode = "search" | "dropdown"
+  const [articleMode, setArticleMode] = useState<ArticleMode>("search")
+  const [searchQuery, setSearchQuery] = useState("")
+  const [searchResults, setSearchResults] = useState<Array<{ id: number; item_description: string; material_type?: string; group?: string; sub_group?: string }>>([])
+  const [searching, setSearching] = useState(false)
+  const [showSearchResults, setShowSearchResults] = useState(false)
+  const [searchError, setSearchError] = useState<string | null>(null)
+  const [searchTotal, setSearchTotal] = useState(0)
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const searchWrapperRef = useRef<HTMLDivElement>(null)
+
+  // Close search dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (searchWrapperRef.current && !searchWrapperRef.current.contains(e.target as Node)) {
+        setShowSearchResults(false)
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside)
+    return () => document.removeEventListener("mousedown", handleClickOutside)
+  }, [])
+
+  const doArticleSearch = useCallback(async (query: string) => {
+    if (!query || query.length < 2) {
+      setSearchResults([])
+      setShowSearchResults(false)
+      return
+    }
+    setSearching(true)
+    setSearchError(null)
+    try {
+      const data = await dropdownApi.globalSearch({ company, search: query })
+      setSearchResults(data.items || [])
+      setSearchTotal(data.meta?.total ?? data.items?.length ?? 0)
+      setShowSearchResults(true)
+    } catch (err) {
+      console.error("Article search failed:", err)
+      setSearchError("Search failed. Check connection.")
+      setSearchResults([])
+    } finally {
+      setSearching(false)
+    }
+  }, [company])
+
+  const handleSearchInput = (value: string) => {
+    setSearchQuery(value)
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
+    searchDebounceRef.current = setTimeout(() => doArticleSearch(value), 300)
+  }
+
+  const handleSelectSearchItem = (item: { id: number; item_description: string; material_type?: string; group?: string; sub_group?: string }) => {
+    setArticleData(prev => ({
+      ...prev,
+      materialType: item.material_type || "",
+      itemCategory: item.group || "",
+      subCategory: item.sub_group || "",
+      itemDescription: item.item_description,
+    }))
+    setSearchQuery("")
+    setShowSearchResults(false)
+    setSearchResults([])
+  }
 
   // Use the same dropdown hooks as inward module with material_type filtering
   const { options: itemCategories, loading: categoriesLoading } = useItemCategories({ company, material_type: articleData.materialType })
@@ -316,7 +383,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
 
       setValidationErrors([])
 
-      const response = await InterunitApiService.createRequest(apiData)
+      const response = await InterunitApiService.createRequest(apiData, user?.email || 'unknown')
 
       const responseRequestNo = response?.request_no || 'N/A'
 
@@ -543,7 +610,71 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
               <CardTitle className="text-sm sm:text-base font-semibold text-gray-800">Article {articlesList.length + 1}</CardTitle>
             </CardHeader>
             <CardContent className="p-4 sm:p-5">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* ─── Quick Search (auto-fills dropdowns below) ─── */}
+              <div className="mb-4">
+                <div className="relative" ref={searchWrapperRef}>
+                  <Label className="text-xs font-medium text-gray-600 mb-1.5 block">
+                    <Search className="inline h-3 w-3 mr-1 -mt-0.5" />
+                    Quick Search Item
+                  </Label>
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+                    <Input
+                      value={searchQuery}
+                      onChange={(e) => handleSearchInput(e.target.value)}
+                      onFocus={() => { if (searchResults.length > 0) setShowSearchResults(true) }}
+                      placeholder="Type to search and auto-fill fields below..."
+                      className="h-9 pl-8 pr-8 bg-white border-gray-200"
+                    />
+                    {searching && (
+                      <Loader2 className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin text-gray-400" />
+                    )}
+                  </div>
+
+                  {searchError && <p className="text-xs text-red-500 mt-1">{searchError}</p>}
+
+                  {showSearchResults && searchResults.length > 0 && (
+                    <div className="absolute z-50 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg flex flex-col" style={{ maxHeight: "min(480px, 60vh)" }}>
+                      <div className="overflow-y-auto flex-1">
+                        {searchResults.map((item) => (
+                          <button
+                            key={`${item.id}-${item.item_description}`}
+                            type="button"
+                            className="w-full text-left px-3 py-2 hover:bg-gray-50 transition-colors border-b last:border-0"
+                            onClick={() => handleSelectSearchItem(item)}
+                          >
+                            <p className="text-sm font-medium truncate text-gray-900">{item.item_description}</p>
+                            <div className="flex gap-1.5 mt-0.5">
+                              {item.material_type && (
+                                <span className="text-[10px] text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">{item.material_type}</span>
+                              )}
+                              {item.group && (
+                                <span className="text-[10px] text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">{item.group}</span>
+                              )}
+                              {item.sub_group && (
+                                <span className="text-[10px] text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">{item.sub_group}</span>
+                              )}
+                              <span className="text-[10px] text-gray-400 ml-auto">ID: {item.id}</span>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                      <div className="px-3 py-1.5 border-t bg-gray-50 text-[10px] text-gray-500 text-center rounded-b-lg flex-shrink-0">
+                        Showing {searchResults.length} of {searchTotal} results
+                      </div>
+                    </div>
+                  )}
+
+                  {showSearchResults && searchResults.length === 0 && !searching && searchQuery.length >= 2 && (
+                    <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-3 text-center text-sm text-gray-500">
+                      No items found for &quot;{searchQuery}&quot;
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* ─── Dropdown Fields (always visible, auto-filled by search) ─── */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
                 {/* Material Type */}
                 <div className="space-y-1.5">
                   <Label className="text-xs font-medium text-gray-600">
@@ -627,7 +758,10 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                     disabled={!articleData.itemCategory || !articleData.subCategory || descriptionsLoading}
                   />
                 </div>
+              </div>
 
+              {/* ─── Common fields (Quantity, UOM, Pack Size, etc.) ─── */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {/* Quantity (Units) */}
                 <div className="space-y-1.5">
                   <Label className="text-xs font-medium text-gray-600">

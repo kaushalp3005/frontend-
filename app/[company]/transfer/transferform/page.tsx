@@ -2011,7 +2011,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
             </h4>
             <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-3 items-end">
               <div className="space-y-1">
-                <Label className="text-xs font-medium text-gray-600">Box Number *</Label>
+                <Label className="text-xs font-medium text-gray-600">Box Number</Label>
                 <Input
                   type="number"
                   placeholder="Enter Box Number"
@@ -2027,7 +2027,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                 />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs font-medium text-gray-600">Transaction No *</Label>
+                <Label className="text-xs font-medium text-gray-600">Transaction No</Label>
                 <Input
                   id="manual-txn-input"
                   placeholder="Enter Transaction No"

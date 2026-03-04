@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Checkbox } from "@/components/ui/checkbox"
 import { ArrowLeft, Send, Package, X, Clock, Plus, Trash2, Camera, Search, Loader2 } from "lucide-react"
 import type { Company } from "@/types/auth"
 import { InterunitApiService } from "@/lib/interunitApiService"
@@ -506,7 +507,12 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
   
   // Get requestId from URL parameter
   const requestIdFromUrl = searchParams.get('requestId')
-  
+
+  // Get editId from URL parameter (edit mode)
+  const editIdFromUrl = searchParams.get('editId')
+  const isEditMode = !!editIdFromUrl
+  const [editLoading, setEditLoading] = useState(false)
+
   // Generate transfer request number with format: TRANSYYYYMMDDHHMM
   const generateTransferNo = () => {
     const now = new Date()
@@ -530,12 +536,17 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
 
 
 
+  // Warehouses that trigger the X-bond checkbox requirement
+  const XBOND_WAREHOUSES = ["Rishi cold", "Savla D-39 cold", "Savla D-514 cold"]
+
   const [formData, setFormData] = useState({
     requestDate: currentDate,
     fromWarehouse: "",
     toWarehouse: "",
     reason: "",
-    reasonDescription: ""
+    reasonDescription: "",
+    isXBond: false,
+    newLotNumber: ""
   })
 
   // Article interface matching inward form
@@ -623,8 +634,8 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
   // Validation errors state
   const [validationErrors, setValidationErrors] = useState<string[]>([])
 
-  // Persist form data across page refreshes
-  const { clearSavedData } = useFormPersistence("draft-directtransfer", {
+  // Persist form data across page refreshes (use different key for edit mode)
+  const { clearSavedData } = useFormPersistence(isEditMode ? `draft-edit-transfer-${editIdFromUrl}` : "draft-directtransfer", {
     formData: { value: formData, setter: setFormData },
     articles: { value: articles, setter: setArticles },
     transferInfo: { value: transferInfo, setter: setTransferInfo },
@@ -916,6 +927,157 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     loadRequestDetails()
   }, [requestIdFromUrl])
 
+  // Load existing transfer data when editing
+  useEffect(() => {
+    const loadTransferForEdit = async () => {
+      if (!editIdFromUrl) return
+
+      setEditLoading(true)
+      try {
+        const transfer = await InterunitApiService.getTransferById(company, editIdFromUrl)
+
+        // Set transfer number (challan_no)
+        setTransferNo(transfer.challan_no)
+
+        // Set request number if linked
+        if (transfer.request_no) setRequestNo(transfer.request_no)
+
+        // Set form data from header
+        setFormData(prev => ({
+          ...prev,
+          requestDate: transfer.stock_trf_date || currentDate,
+          fromWarehouse: transfer.from_warehouse || "",
+          toWarehouse: transfer.to_warehouse || "",
+          reason: transfer.reason_code || "",
+          reasonDescription: transfer.remark || "",
+        }))
+
+        // Set transfer info - check if values match dropdown presets
+        const knownVehicles = ["MH43BP6885", "MH43BX1881", "MH46BM5987"]
+        const vehicleVal = transfer.vehicle_no || ""
+        const isKnownVehicle = knownVehicles.includes(vehicleVal)
+
+        const knownDrivers = ["Tukaram (+919930056340)", "Sayaji (+919819944031)", "Prashant (+919619606340)", "Shantilal (+919819048534)"]
+        const driverVal = transfer.driver_name || ""
+        const isKnownDriver = knownDrivers.includes(driverVal)
+
+        setTransferInfo(prev => ({
+          ...prev,
+          vehicleNumber: isKnownVehicle ? vehicleVal : "other",
+          vehicleNumberOther: isKnownVehicle ? "" : vehicleVal,
+          driverName: isKnownDriver ? driverVal : "other",
+          driverNameOther: isKnownDriver ? "" : driverVal,
+          approvalAuthorityOther: transfer.approved_by || "",
+        }))
+
+        // Load lines as scanned boxes
+        if (transfer.lines && transfer.lines.length > 0) {
+          const loadedBoxes = transfer.lines.map((line: any, index: number) => {
+            const uniqueId = boxIdCounterRef.current
+            boxIdCounterRef.current += 1
+            return {
+              id: uniqueId,
+              boxNumber: uniqueId,
+              boxId: "",
+              itemDescription: line.item_description || "",
+              skuId: null,
+              transactionNo: "DIRECT",
+              boxNumberInArray: index + 1,
+              materialType: line.material_type || "",
+              itemCategory: line.item_category || "",
+              subCategory: line.sub_category || "",
+              netWeight: line.net_weight || "0",
+              totalWeight: line.total_weight || "0",
+              batchNumber: line.batch_number || "",
+              lotNumber: line.lot_number || "",
+              manufacturingDate: "",
+              expiryDate: "",
+              packagingType: line.pack_size || "0",
+              packageSize: line.package_size || "0",
+              quantityUnits: line.quantity || "1",
+              uom: line.uom || "",
+              scannedAt: new Date().toLocaleTimeString(),
+              rawData: line,
+            }
+          })
+          setScannedBoxes(loadedBoxes)
+
+          // Also set first article dropdown values
+          const firstLine = transfer.lines[0]
+          setArticles(prev => prev.map((art, idx) => {
+            if (idx === 0) {
+              return {
+                ...art,
+                material_type: firstLine.material_type || "",
+                item_category: firstLine.item_category || "",
+                sub_category: firstLine.sub_category || "",
+                item_description: firstLine.item_description || "",
+                quantity_units: parseInt(firstLine.quantity) || 0,
+                uom: firstLine.uom || "",
+                packaging_type: parseFloat(firstLine.pack_size) || 0,
+                package_size: parseFloat(firstLine.package_size) || 0,
+                net_weight: parseFloat(firstLine.net_weight) || 0,
+                lot_number: firstLine.lot_number || "",
+                batch_number: firstLine.batch_number || "",
+              }
+            }
+            return art
+          }))
+        }
+
+        // Load QR-scanned boxes (boxes array from API)
+        if (transfer.boxes && transfer.boxes.length > 0) {
+          const qrBoxes = transfer.boxes.map((box: any) => {
+            const uniqueId = boxIdCounterRef.current
+            boxIdCounterRef.current += 1
+            return {
+              id: uniqueId,
+              boxNumber: uniqueId,
+              boxId: box.box_id || "",
+              itemDescription: box.article || "",
+              skuId: null,
+              transactionNo: box.transaction_no || "",
+              boxNumberInArray: box.box_number,
+              materialType: "",
+              itemCategory: "",
+              subCategory: "",
+              netWeight: box.net_weight || "0",
+              totalWeight: box.gross_weight || "0",
+              batchNumber: box.batch_number || "",
+              lotNumber: box.lot_number || "",
+              manufacturingDate: "",
+              expiryDate: "",
+              packagingType: "0",
+              packageSize: "0",
+              quantityUnits: "1",
+              uom: "",
+              scannedAt: new Date().toLocaleTimeString(),
+              rawData: box,
+            }
+          })
+          // If we have QR boxes, use them instead of line-based boxes
+          setScannedBoxes(qrBoxes)
+        }
+
+        toast({
+          title: "Transfer Loaded",
+          description: `Editing transfer ${transfer.challan_no}`,
+        })
+      } catch (error: any) {
+        console.error("Failed to load transfer for editing:", error)
+        toast({
+          title: "Error",
+          description: error.message || "Failed to load transfer details",
+          variant: "destructive",
+        })
+      } finally {
+        setEditLoading(false)
+      }
+    }
+
+    loadTransferForEdit()
+  }, [editIdFromUrl])
+
   // Fetch SKU ID when article values are auto-filled from request
   useEffect(() => {
     const fetchSkuIdForAutoFilledArticle = async () => {
@@ -1016,6 +1178,9 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
 
   // Check if from warehouse is a cold storage
   const isColdStorageFrom = COLD_STORAGE_WAREHOUSES.includes(formData.fromWarehouse)
+
+  // Check if X-bond checkbox should be shown (From is Savla or Rishi)
+  const isXBondApplicable = XBOND_WAREHOUSES.includes(formData.fromWarehouse)
 
   // Auto-fill article fields from cold storage stock record
   const handleSelectColdStorageStock = (articleId: string, record: ColdStorageStockRecord) => {
@@ -1190,6 +1355,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
   }
 
   // Handle adding an article to the scanned boxes / articles list
+  // Creates one box entry per quantity unit, dividing weights equally
   const handleAddArticleToList = (article: Article) => {
     // Validate required fields
     if (!article.item_description) {
@@ -1209,47 +1375,58 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       return
     }
 
-    const uniqueId = boxIdCounterRef.current
-    boxIdCounterRef.current += 1
+    const qty = article.quantity_units
 
     // All weights are already in Kg (calculateNetWeight converts FG grams→Kg,
     // and Total Wt label now says Kg so user enters in Kg directly)
     const netWeightKg = article.net_weight || 0
     const totalWeightKg = article.total_weight || 0
 
-    const newEntry = {
-      id: uniqueId,
-      boxNumber: uniqueId,
-      boxId: article.sku_id ? String(article.sku_id) : 'N/A',
-      itemDescription: article.item_description || 'N/A',
-      skuId: article.sku_id || null,
-      transactionNo: 'DIRECT',
-      boxNumberInArray: uniqueId,
-      materialType: article.material_type || 'N/A',
-      itemCategory: article.item_category || 'N/A',
-      subCategory: article.sub_category || 'N/A',
-      netWeight: String(netWeightKg),
-      totalWeight: String(totalWeightKg),
-      batchNumber: article.batch_number || 'N/A',
-      lotNumber: article.lot_number || 'N/A',
-      manufacturingDate: article.manufacturing_date || 'N/A',
-      expiryDate: article.expiry_date || 'N/A',
-      packagingType: String(article.packaging_type) || 'N/A',
-      packageSize: String(article.package_size || 0),
-      quantityUnits: String(article.quantity_units) || 'N/A',
-      uom: article.uom || 'N/A',
-      itemCode: 'N/A',
-      hsnCode: 'N/A',
-      qualityGrade: 'N/A',
-      scannedAt: new Date().toLocaleTimeString(),
-      rawData: article,
+    // Divide weights equally per box
+    const netWeightPerBox = qty > 0 ? netWeightKg / qty : 0
+    const totalWeightPerBox = qty > 0 ? totalWeightKg / qty : 0
+
+    const newEntries = []
+    const timeStamp = new Date().toLocaleTimeString()
+
+    for (let i = 0; i < qty; i++) {
+      const uniqueId = boxIdCounterRef.current
+      boxIdCounterRef.current += 1
+
+      newEntries.push({
+        id: uniqueId,
+        boxNumber: uniqueId,
+        boxId: article.sku_id ? String(article.sku_id) : 'N/A',
+        itemDescription: article.item_description || 'N/A',
+        skuId: article.sku_id || null,
+        transactionNo: 'DIRECT',
+        boxNumberInArray: uniqueId,
+        materialType: article.material_type || 'N/A',
+        itemCategory: article.item_category || 'N/A',
+        subCategory: article.sub_category || 'N/A',
+        netWeight: String(parseFloat(netWeightPerBox.toFixed(3))),
+        totalWeight: String(parseFloat(totalWeightPerBox.toFixed(3))),
+        batchNumber: article.batch_number || 'N/A',
+        lotNumber: article.lot_number || 'N/A',
+        manufacturingDate: article.manufacturing_date || 'N/A',
+        expiryDate: article.expiry_date || 'N/A',
+        packagingType: String(article.packaging_type) || 'N/A',
+        packageSize: String(article.package_size || 0),
+        quantityUnits: '1',
+        uom: article.uom || 'N/A',
+        itemCode: 'N/A',
+        hsnCode: 'N/A',
+        qualityGrade: 'N/A',
+        scannedAt: timeStamp,
+        rawData: article,
+      })
     }
 
-    setScannedBoxes(prev => [...prev, newEntry])
+    setScannedBoxes(prev => [...prev, ...newEntries])
 
     toast({
-      title: "Article Added",
-      description: `${article.item_description} | Qty: ${article.quantity_units} ${article.uom}`,
+      title: "Boxes Added",
+      description: `${qty} boxes added for ${article.item_description} (${netWeightPerBox.toFixed(3)} kg each)`,
     })
 
     // Reset the article fields after adding
@@ -1909,8 +2086,20 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       errors.push('To warehouse is required')
     }
 
-    if (formData.fromWarehouse && formData.toWarehouse && formData.fromWarehouse === formData.toWarehouse) {
+    // Allow same warehouse only when X-bond is applicable (Savla/Rishi)
+    const xbondApplicable = XBOND_WAREHOUSES.includes(formData.fromWarehouse)
+    if (formData.fromWarehouse && formData.toWarehouse && formData.fromWarehouse === formData.toWarehouse && !xbondApplicable) {
       errors.push('From warehouse and To warehouse must be different')
+    }
+
+    // X-Bond validation: mandatory when From is Savla or Rishi
+    if (xbondApplicable && !formData.isXBond) {
+      errors.push('Is X-Bond is mandatory when transferring from Savla or Rishi cold storage')
+    }
+
+    // New Lot Number is required when X-Bond is checked
+    if (formData.isXBond && (!formData.newLotNumber || formData.newLotNumber.trim() === '')) {
+      errors.push('New Lot Number is required when X-Bond is selected')
     }
 
     if (!formData.reason || formData.reason.trim() === '') {
@@ -2040,7 +2229,9 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         driver_name: driverName || null,
         approved_by: approvalAuthority && approvalAuthority.trim() !== "" ? approvalAuthority : null,
         remark: formData.reasonDescription || formData.reason,
-        reason_code: formData.reason
+        reason_code: formData.reason,
+        is_xbond: formData.isXBond || false,
+        new_lot_number: formData.isXBond ? (formData.newLotNumber || null) : null
       },
       lines,
       boxes,
@@ -2091,37 +2282,37 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     })
 
     try {
-      console.log('🌐 Step 3: Sending request to API...')
-      console.log('API Endpoint: POST /api/transfer/' + company)
-      
-      const response = await InterunitApiService.submitTransfer(company, payload)
-      
-      console.log('✅ Step 3: API Response received!')
-      console.log('Response:', response)
-      
-      toast({
-        title: "Transfer Submitted Successfully",
-        description: `Transfer ${payload.header.challan_no} has been created successfully`,
-      })
-      
-      console.log('🎉 ========== TRANSFER FORM SUBMISSION COMPLETED ==========')
-      console.log('Transfer Status: Created')
-      console.log('Lines Submitted:', payload.lines.length)
+      console.log('Step 3: Sending request to API...')
+
+      let response
+      if (isEditMode && editIdFromUrl) {
+        console.log('API Endpoint: PUT /interunit/transfers/' + editIdFromUrl)
+        response = await InterunitApiService.updateTransfer(Number(editIdFromUrl), payload)
+        toast({
+          title: "Transfer Updated Successfully",
+          description: `Transfer ${payload.header.challan_no} has been updated`,
+        })
+      } else {
+        console.log('API Endpoint: POST /interunit/transfers')
+        response = await InterunitApiService.submitTransfer(company, payload)
+        toast({
+          title: "Transfer Submitted Successfully",
+          description: `Transfer ${payload.header.challan_no} has been created successfully`,
+        })
+      }
+
+      console.log('Step 3: API Response received!', response)
 
       // Clear saved draft after successful submission
       clearSavedData()
 
       // Redirect back to transfer list
       setTimeout(() => {
-        console.log('🔄 Redirecting to transfer list...')
         router.push(`/${company}/transfer`)
       }, 1500)
 
     } catch (error: any) {
-      console.error('❌ ========== TRANSFER FORM SUBMISSION FAILED ==========')
-      console.error('Error Details:', error)
-      console.error('Error Message:', error.message)
-      console.error('Error Response:', error.response?.data)
+      console.error('Transfer form submission failed:', error)
 
       toast({
         title: "Submission Failed",
@@ -2158,11 +2349,19 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         <div className="flex-1 min-w-0">
           <h1 className="text-xl sm:text-2xl font-bold tracking-tight flex items-center gap-2">
             <Send className="h-5 w-5 sm:h-6 sm:w-6 text-violet-600" />
-            Transfer OUT
+            {isEditMode ? "Edit Transfer OUT" : "Transfer OUT"}
           </h1>
           <p className="text-xs text-muted-foreground mt-0.5">Transfer No: <span className="font-medium">{transferNo}</span></p>
         </div>
       </div>
+      {/* Loading overlay for edit mode */}
+      {editLoading && (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-gray-400 mr-3" />
+          <span className="text-lg text-gray-600">Loading transfer data...</span>
+        </div>
+      )}
+
       {/* Form Card */}
       <Card className="border-0 shadow-sm overflow-hidden">
         <CardHeader className="pb-3 bg-gradient-to-r from-blue-50 to-indigo-50 border-b">
@@ -2276,6 +2475,45 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
               </Select>
 
             </div>
+
+            {/* Is X-Bond Checkbox - shown when From warehouse is Savla or Rishi */}
+            {isXBondApplicable && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 p-3 rounded-lg border border-amber-200 bg-amber-50">
+                  <Checkbox
+                    id="isXBond"
+                    checked={formData.isXBond}
+                    onCheckedChange={(checked) => {
+                      setFormData(prev => ({
+                        ...prev,
+                        isXBond: checked === true,
+                        newLotNumber: checked === true ? prev.newLotNumber : ""
+                      }))
+                    }}
+                  />
+                  <Label htmlFor="isXBond" className="text-sm font-medium text-amber-800 cursor-pointer">
+                    Is X-Bond? <span className="text-red-500">*</span>
+                  </Label>
+                </div>
+
+                {/* New Lot Number - shown when X-Bond is checked */}
+                {formData.isXBond && (
+                  <div className="space-y-1 pl-1">
+                    <Label htmlFor="newLotNumber" className="text-xs font-medium text-gray-600">
+                      New Lot Number <span className="text-red-500">*</span>
+                    </Label>
+                    <Input
+                      id="newLotNumber"
+                      type="text"
+                      value={formData.newLotNumber}
+                      onChange={(e) => handleInputChange('newLotNumber', e.target.value)}
+                      className="h-9 bg-white border-gray-200"
+                      placeholder="Enter new lot number"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Reason (Code) */}
             <div className="space-y-1">
@@ -3363,7 +3601,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                   type="submit"
                   className="h-10 sm:h-9 px-5 text-sm bg-gray-900 hover:bg-gray-800 text-white">
                   <Send className="mr-2 h-4 w-4" />
-                  Submit Transfer
+                  {isEditMode ? "Update Transfer" : "Submit Transfer"}
                 </Button>
               </div>
             </div>
