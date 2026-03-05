@@ -35,19 +35,6 @@ export default function DeliveryChallan({
 }: DeliveryChallanProps) {
 
   useEffect(() => {
-    console.log('📄 DC Component Props:')
-    console.log('- DC Number:', dcNumber)
-    console.log('- Date:', requestDate)
-    console.log('- From:', fromWarehouse)
-    console.log('- To:', toWarehouse)
-    console.log('- Vehicle:', vehicleNumber)
-    console.log('- Driver:', driverName)
-    console.log('- Approved By:', approvalAuthority)
-    console.log('- Reason:', reasonDescription)
-    console.log('- Items:', items)
-    console.log('- Total Qty:', totalQtyRequired)
-    console.log('- Boxes Provided:', boxesProvided)
-    console.log('- Boxes Pending:', boxesPending)
     
     const timer = setTimeout(() => {
       window.print()
@@ -56,11 +43,28 @@ export default function DeliveryChallan({
     return () => clearTimeout(timer)
   }, [])
 
-  // Split items into chunks for pagination - 10 items per page
-  const itemsPerPage = 10
+  // Consolidate items with same description into single rows
+  const consolidatedItems = items.reduce((acc: any[], item) => {
+    const desc = item.item_desc_raw || item.item_description || 'N/A'
+    const existing = acc.find(i => (i.item_desc_raw || i.item_description) === desc)
+    if (existing) {
+      existing._totalQty = (existing._totalQty || 0) + parseFloat(item.qty || item.quantity || 0)
+      existing._totalNetWeight = parseFloat(((existing._totalNetWeight || 0) + parseFloat(item.net_weight || 0)).toFixed(3))
+    } else {
+      acc.push({
+        ...item,
+        _totalQty: parseFloat(item.qty || item.quantity || 0),
+        _totalNetWeight: parseFloat(parseFloat(item.net_weight || 0).toFixed(3))
+      })
+    }
+    return acc
+  }, [])
+
+  // Split consolidated items into chunks for pagination - 15 items per page
+  const itemsPerPage = 15
   const itemPages = []
-  for (let i = 0; i < items.length; i += itemsPerPage) {
-    itemPages.push(items.slice(i, i + itemsPerPage))
+  for (let i = 0; i < consolidatedItems.length; i += itemsPerPage) {
+    itemPages.push(consolidatedItems.slice(i, i + itemsPerPage))
   }
 
   // Render DC header function
@@ -96,14 +100,14 @@ export default function DeliveryChallan({
       </tr>
       <tr>
         <td colSpan={3} style={{ padding: '8px', border: '1px solid #000', verticalAlign: 'top' }}>
-          <strong>FROM:</strong><br />
+          <strong>FROM: Candor Foods</strong><br />
           <div style={{ marginTop: '5px', fontSize: '11px' }}>
             <div style={{ fontWeight: 'bold' }}>{warehouseAddresses[fromWarehouse]?.name || fromWarehouse}</div>
             <div style={{ color: '#666', marginTop: '3px' }}>{warehouseAddresses[fromWarehouse]?.address || ''}</div>
           </div>
         </td>
         <td colSpan={4} style={{ padding: '8px', border: '1px solid #000', verticalAlign: 'top' }}>
-          <strong>TO:</strong><br />
+          <strong>TO: Candor Foods</strong><br />
           <div style={{ marginTop: '5px', fontSize: '11px' }}>
             <div style={{ fontWeight: 'bold' }}>{warehouseAddresses[toWarehouse]?.name || toWarehouse}</div>
             <div style={{ color: '#666', marginTop: '3px' }}>{warehouseAddresses[toWarehouse]?.address || ''}</div>
@@ -124,7 +128,7 @@ export default function DeliveryChallan({
         <td style={{ padding: '8px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', width: '100px' }}>Category</td>
         <td style={{ padding: '8px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', width: '60px' }}>Qty</td>
         <td style={{ padding: '8px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', width: '60px' }}>UOM</td>
-        <td style={{ padding: '8px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', width: '80px' }}>Pack Size (in kg)</td>
+        <td style={{ padding: '8px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', width: '80px' }}>Case Pack/Box Wt. (kg)</td>
         <td style={{ padding: '8px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'right', width: '100px' }}>Net Weight (in kg)</td>
       </tr>
     </>
@@ -159,7 +163,7 @@ export default function DeliveryChallan({
                       {item.item_category || 'N/A'}
                     </td>
                     <td style={{ padding: '6px', border: '1px solid #000', textAlign: 'center', fontWeight: 'bold' }}>
-                      {item.qty || item.quantity || 0}
+                      {item._totalQty}
                     </td>
                     <td style={{ padding: '6px', border: '1px solid #000', textAlign: 'center' }}>
                       {item.uom || 'N/A'}
@@ -168,7 +172,7 @@ export default function DeliveryChallan({
                       {item.pack_size || 'N/A'}
                     </td>
                     <td style={{ padding: '6px', border: '1px solid #000', textAlign: 'right' }}>
-                      {item.net_weight || 0}
+                      {item._totalNetWeight}
                     </td>
                   </tr>
                 )
@@ -177,9 +181,22 @@ export default function DeliveryChallan({
               {/* Show summary only on last page */}
               {pageIndex === itemPages.length - 1 && (
                 <>
+                  <tr style={{ backgroundColor: '#f0f0f0' }}>
+                    <td colSpan={3} style={{ padding: '10px', border: '1px solid #000', fontWeight: 'bold' }}>
+                      Total Items: {consolidatedItems.length}
+                    </td>
+                    <td style={{ padding: '10px', border: '1px solid #000', textAlign: 'center', fontWeight: 'bold' }}>
+                      {consolidatedItems.reduce((s, i) => s + i._totalQty, 0)}
+                    </td>
+                    <td style={{ padding: '10px', border: '1px solid #000' }}></td>
+                    <td style={{ padding: '10px', border: '1px solid #000' }}></td>
+                    <td style={{ padding: '10px', border: '1px solid #000', textAlign: 'right', fontWeight: 'bold' }}>
+                      {consolidatedItems.reduce((s, i) => parseFloat((s + i._totalNetWeight).toFixed(3)), 0)} kg
+                    </td>
+                  </tr>
                   <tr>
                     <td colSpan={3} style={{ padding: '10px', border: '1px solid #000' }}>
-                      <strong>Total Qty Required:</strong> {totalQtyRequired}
+                      <strong>Total Qty Required:</strong> {consolidatedItems.reduce((s, i) => s + i._totalQty, 0)}
                     </td>
                     <td colSpan={2} style={{ padding: '10px', border: '1px solid #000' }}>
                       <strong>Boxes Provided:</strong> {boxesProvided}
@@ -303,32 +320,25 @@ export default function DeliveryChallan({
             <td style={{ padding: '6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center' }}>Qty</td>
             <td style={{ padding: '6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center' }}>UOM</td>
           </tr>
-          {items.slice(0, 5).map((item, index) => (
+          {consolidatedItems.map((item, index) => (
             <tr key={index}>
               <td style={{ padding: '5px', border: '1px solid #000', textAlign: 'center' }}>{index + 1}</td>
               <td style={{ padding: '5px', border: '1px solid #000' }}>
                 {item.item_desc_raw || item.item_description || 'N/A'}
               </td>
               <td style={{ padding: '5px', border: '1px solid #000', textAlign: 'center', fontWeight: 'bold' }}>
-                {item.qty || item.quantity || 0}
+                {item._totalQty}
               </td>
               <td style={{ padding: '5px', border: '1px solid #000', textAlign: 'center' }}>
                 {item.uom || 'N/A'}
               </td>
             </tr>
           ))}
-          {items.length > 5 && (
-            <tr>
-              <td colSpan={4} style={{ padding: '5px', border: '1px solid #000', textAlign: 'center', fontStyle: 'italic', color: '#666' }}>
-                ... and {items.length - 5} more items (See Delivery Challan above for full details)
-              </td>
-            </tr>
-          )}
 
           {/* Summary Totals */}
           <tr style={{ backgroundColor: '#f8f9fa' }}>
-            <td style={{ padding: '6px', border: '1px solid #000', fontWeight: 'bold' }}>Total Items: {items.length}</td>
-            <td style={{ padding: '6px', border: '1px solid #000', fontWeight: 'bold' }}>Total Qty: {totalQtyRequired}</td>
+            <td style={{ padding: '6px', border: '1px solid #000', fontWeight: 'bold' }}>Total Items: {consolidatedItems.length}</td>
+            <td style={{ padding: '6px', border: '1px solid #000', fontWeight: 'bold' }}>Total Qty: {consolidatedItems.reduce((s, i) => s + i._totalQty, 0)}</td>
             <td style={{ padding: '6px', border: '1px solid #000', fontWeight: 'bold' }}>Boxes: {boxesProvided}</td>
             <td style={{ padding: '6px', border: '1px solid #000', textAlign: 'center' }}>
               <span style={{ 

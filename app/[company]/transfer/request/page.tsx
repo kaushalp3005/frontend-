@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react"
 import { useRouter } from "next/navigation"
-import { useItemCategories, useSubCategories, useItemDescriptions } from "@/lib/hooks/useDropdownData"
+import { useCategorialItemCategories, useCategorialSubCategories, useCategorialItemDescriptions } from "@/lib/hooks/useDropdownData"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -46,23 +46,19 @@ function MaterialTypeDropdown({
       setErrorState(null)
 
       try {
-        const data = await dropdownApi.fetchDropdown({
-          company,
-          limit: 1000
-        })
+        const data = await dropdownApi.categorialDropdown({ limit: 1000 })
 
         if (data.options && data.options.material_types && Array.isArray(data.options.material_types)) {
-          const materialTypeOptions = data.options.material_types.map((type: string) => ({
-            value: type,
-            label: type
-          }))
+          const allowed = ['RM', 'PM', 'FG']
+          const materialTypeOptions = data.options.material_types
+            .filter((type: string) => allowed.includes(type.toUpperCase()))
+            .map((type: string) => ({ value: type, label: type }))
           setOptions(materialTypeOptions)
         } else {
           const fallbackOptions = [
             { value: "RM", label: "RM" },
             { value: "PM", label: "PM" },
-            { value: "FG", label: "FG" },
-            { value: "RTV", label: "RTV" }
+            { value: "FG", label: "FG" }
           ]
           setOptions(fallbackOptions)
         }
@@ -72,8 +68,7 @@ function MaterialTypeDropdown({
         setOptions([
           { value: "RM", label: "RM" },
           { value: "PM", label: "PM" },
-          { value: "FG", label: "FG" },
-          { value: "RTV", label: "RTV" }
+          { value: "FG", label: "FG" }
         ])
       } finally {
         setLoading(false)
@@ -81,7 +76,7 @@ function MaterialTypeDropdown({
     }
 
     fetchMaterialTypes()
-  }, [company])
+  }, [])
 
   return (
     <SearchableSelect
@@ -143,10 +138,10 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     itemCategory: "",
     subCategory: "",
     itemDescription: "",
-    quantity: "0",
+    quantity: "",
     uom: "",
-    packSize: "0.00",
-    packageSize: "0",
+    packSize: "",
+    packageSize: "",
     netWeight: "0",
     lotNumber: ""
   })
@@ -169,7 +164,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
   type ArticleMode = "search" | "dropdown"
   const [articleMode, setArticleMode] = useState<ArticleMode>("search")
   const [searchQuery, setSearchQuery] = useState("")
-  const [searchResults, setSearchResults] = useState<Array<{ id: number; item_description: string; material_type?: string; group?: string; sub_group?: string }>>([])
+  const [searchResults, setSearchResults] = useState<Array<{ id: number; item_description: string; material_type?: string; group?: string; sub_group?: string; uom?: number | null }>>([])
   const [searching, setSearching] = useState(false)
   const [showSearchResults, setShowSearchResults] = useState(false)
   const [searchError, setSearchError] = useState<string | null>(null)
@@ -197,9 +192,9 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     setSearching(true)
     setSearchError(null)
     try {
-      const data = await dropdownApi.globalSearch({ company, search: query })
+      const data = await dropdownApi.categorialSearch({ search: query })
       setSearchResults(data.items || [])
-      setSearchTotal(data.meta?.total ?? data.items?.length ?? 0)
+      setSearchTotal(data.meta?.total_items ?? data.items?.length ?? 0)
       setShowSearchResults(true)
     } catch (err) {
       console.error("Article search failed:", err)
@@ -208,7 +203,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     } finally {
       setSearching(false)
     }
-  }, [company])
+  }, [])
 
   const handleSearchInput = (value: string) => {
     setSearchQuery(value)
@@ -216,24 +211,24 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     searchDebounceRef.current = setTimeout(() => doArticleSearch(value), 300)
   }
 
-  const handleSelectSearchItem = (item: { id: number; item_description: string; material_type?: string; group?: string; sub_group?: string }) => {
+  const handleSelectSearchItem = (item: { id: number; item_description: string; material_type?: string; group?: string; sub_group?: string; uom?: number | null }) => {
     setArticleData(prev => ({
       ...prev,
       materialType: item.material_type || "",
       itemCategory: item.group || "",
       subCategory: item.sub_group || "",
       itemDescription: item.item_description,
+      packageSize: item.uom != null ? String(item.uom) : prev.packageSize,
     }))
     setSearchQuery("")
     setShowSearchResults(false)
     setSearchResults([])
   }
 
-  // Use the same dropdown hooks as inward module with material_type filtering
-  const { options: itemCategories, loading: categoriesLoading } = useItemCategories({ company, material_type: articleData.materialType })
-  const { options: subCategories, loading: subCategoriesLoading } = useSubCategories(articleData.itemCategory, { company, material_type: articleData.materialType })
-  const { options: itemDescriptions, loading: descriptionsLoading } = useItemDescriptions({
-    company,
+  // Use categorial_inv dropdown hooks for transfer/request
+  const { options: itemCategories, loading: categoriesLoading } = useCategorialItemCategories({ material_type: articleData.materialType })
+  const { options: subCategories, loading: subCategoriesLoading } = useCategorialSubCategories(articleData.itemCategory, { material_type: articleData.materialType })
+  const { options: itemDescriptions, loading: descriptionsLoading } = useCategorialItemDescriptions({
     material_type: articleData.materialType,
     item_category: articleData.itemCategory,
     sub_category: articleData.subCategory
@@ -271,7 +266,15 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         newData.itemDescription = ""
       }
 
-      if (field === 'quantity' || field === 'packSize' || field === 'packageSize' || field === 'materialType') {
+      // Auto-fill packageSize from categorial_inv uom when item description is selected via dropdown
+      if (field === 'itemDescription' && value) {
+        const match = itemDescriptions.find((opt: any) => opt.value === value)
+        if (match && (match as any).uom != null) {
+          newData.packageSize = String((match as any).uom)
+        }
+      }
+
+      if (field === 'quantity' || field === 'packSize' || field === 'packageSize' || field === 'materialType' || field === 'itemDescription') {
         newData.netWeight = calculateNetWeight(newData)
       }
 
@@ -285,22 +288,20 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     const packSize = parseFloat(data.packSize) || 0
 
     if (data.materialType === 'FG') {
-      // FG: (packageSize_gm × packSize_gm) × quantity → grams, then ÷ 1000 → Kg
       const packageSize = parseFloat(data.packageSize) || 0
-      const grams = (packageSize * packSize) * quantity
-      return (grams / 1000).toFixed(3)
+      const result = (packageSize * packSize) * quantity
+      return result.toFixed(3)
     } else {
-      // RM/PM/RTV: quantity × packSize (already Kg)
       const netWeightKg = quantity * packSize
       return netWeightKg.toFixed(2)
     }
   }
 
   const handleAddArticle = () => {
-    if (!articleData.materialType || !articleData.itemDescription || !articleData.quantity || articleData.quantity === "0") {
+    if (!articleData.materialType || !articleData.itemDescription) {
       toast({
         title: "Incomplete Article",
-        description: "Please fill in at least Material Type, Item Description, and Quantity before adding.",
+        description: "Please fill in at least Material Type and Item Description before adding.",
         variant: "destructive",
       })
       return
@@ -311,10 +312,10 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       itemCategory: "",
       subCategory: "",
       itemDescription: "",
-      quantity: "0",
+      quantity: "1",
       uom: "",
-      packSize: "0.00",
-      packageSize: "0",
+      packSize: "1",
+      packageSize: "",
       netWeight: "0",
       lotNumber: ""
     })
@@ -326,6 +327,10 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
 
   const handleRemoveArticle = (index: number) => {
     setArticlesList(prev => prev.filter((_, i) => i !== index))
+    toast({
+      title: "Article Removed",
+      description: `Article ${index + 1} has been removed.`,
+    })
   }
 
   // Load warehouse sites on component mount
@@ -762,15 +767,18 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
 
               {/* ─── Common fields (Quantity, UOM, Pack Size, etc.) ─── */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                {/* Quantity (Units) */}
+                {/* Package Size */}
                 <div className="space-y-1.5">
                   <Label className="text-xs font-medium text-gray-600">
-                    Quantity (Units) *
+                    Unit Pack Size
                   </Label>
                   <Input
-                    type="text"
-                    value={articleData.quantity}
-                    onChange={(e) => handleArticleChange('quantity', e.target.value)}
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={articleData.packageSize}
+                    onChange={(e) => handleArticleChange('packageSize', e.target.value)}
+                    onWheel={(e) => e.currentTarget.blur()}
                     className="h-9 bg-white border-gray-200"
                     placeholder="0"
                   />
@@ -779,7 +787,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                 {/* UOM */}
                 <div className="space-y-1.5">
                   <Label className="text-xs font-medium text-gray-600">
-                    UOM *
+                    UOM
                   </Label>
                   <Select
                     value={articleData.uom}
@@ -791,6 +799,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                     <SelectContent>
                       <SelectItem value="BOX">BOX</SelectItem>
                       <SelectItem value="CARTON">CARTON</SelectItem>
+                      <SelectItem value="BAG">BAG</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -798,7 +807,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                 {/* Pack Size */}
                 <div className="space-y-1.5">
                   <Label className="text-xs font-medium text-gray-600">
-                    Pack Size ({articleData.materialType === 'FG' ? 'gm' : 'Kg'}) *
+                    Case Pack/Box Wt.
                   </Label>
                   <Input
                     type="number"
@@ -812,35 +821,33 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                   />
                 </div>
 
-                {/* Package Size (only for FG) */}
-                {articleData.materialType === 'FG' && (
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-medium text-gray-600">
-                      Package Size (gm) *
-                    </Label>
-                    <Input
-                      type="number"
-                      step="any"
-                      min="0"
-                      value={articleData.packageSize}
-                      onChange={(e) => handleArticleChange('packageSize', e.target.value)}
-                      onWheel={(e) => e.currentTarget.blur()}
-                      className="h-9 bg-white border-gray-200"
-                      placeholder="0"
-                    />
-                  </div>
-                )}
+                {/* Quantity (Box/Bags) */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-gray-600">
+                    Quantity (Box/Bags)
+                  </Label>
+                  <Input
+                    type="text"
+                    value={articleData.quantity}
+                    onChange={(e) => handleArticleChange('quantity', e.target.value)}
+                    className="h-9 bg-white border-gray-200"
+                    placeholder="0"
+                  />
+                </div>
 
                 {/* Net Weight */}
                 <div className="space-y-1.5">
                   <Label className="text-xs font-medium text-gray-600">
-                    Net Weight (Kg) *
+                    Net Weight (Kg)
                   </Label>
                   <Input
-                    type="text"
+                    type="number"
+                    step="any"
+                    min="0"
                     value={articleData.netWeight}
-                    readOnly
-                    className="h-9 bg-gray-50 border-gray-200 text-gray-500 cursor-not-allowed"
+                    onChange={(e) => handleArticleChange('netWeight', e.target.value)}
+                    onWheel={(e) => e.currentTarget.blur()}
+                    className="h-9 bg-white border-gray-200"
                     placeholder="Auto-calculated"
                   />
                 </div>

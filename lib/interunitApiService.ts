@@ -61,23 +61,6 @@ export interface WarehouseSite {
   is_active: boolean
 }
 
-export interface MaterialType {
-  type: string
-  description: string
-}
-
-export interface UOM {
-  uom: string
-  description: string
-}
-
-export interface ApprovalAuthority {
-  id: number
-  authority_name: string
-  email: string
-  is_active: boolean
-}
-
 export interface FormData {
   request_date: string
   from_warehouse: string
@@ -93,7 +76,7 @@ export interface ArticleData {
   quantity: string
   uom: string
   pack_size: string
-  package_size?: string
+  unit_pack_size?: string
   net_weight?: string
   lot_number?: string
 }
@@ -111,8 +94,8 @@ export interface RequestCreate {
     to_warehouse_not_equal_from_warehouse: boolean
     material_type_required: boolean
     material_type_enum: string[]
-    package_size_required: boolean
-    package_size_conditional: string
+    unit_pack_size_required: boolean
+    unit_pack_size_conditional: string
   }
 }
 
@@ -127,7 +110,7 @@ export interface RequestLine {
   quantity: string
   uom: string
   pack_size: string
-  package_size?: string
+  unit_pack_size?: string
   net_weight: string
   lot_number?: string
   created_at: string
@@ -165,34 +148,18 @@ export class InterunitApiService {
     return await fetchJSON(`${API_BASE_URL}/interunit/dropdowns/warehouse-sites?active_only=${activeOnly}`)
   }
 
-  static async getMaterialTypes(): Promise<MaterialType[]> {
-    return await fetchJSON(`${API_BASE_URL}/interunit/dropdowns/material-types`)
-  }
-
-  static async getUOM(): Promise<UOM[]> {
-    return await fetchJSON(`${API_BASE_URL}/interunit/dropdowns/uom`)
-  }
-
-  static async getApprovalAuthorities(): Promise<ApprovalAuthority[]> {
-    return await fetchJSON(`${API_BASE_URL}/interunit/dropdowns/approval-authorities`)
-  }
-
   // Request endpoints
   static async createRequest(
     requestData: RequestCreate,
     createdBy: string = 'user@example.com'
   ): Promise<RequestResponse> {
     const url = `${API_BASE_URL}/interunit/requests?created_by=${createdBy}`
-    console.log('🌐 InterunitApiService.createRequest called')
-    console.log('🔗 URL:', url)
-    console.log('📤 Request Data:', JSON.stringify(requestData, null, 2))
     
     const response = await fetchJSON(url, {
       method: 'POST',
       body: JSON.stringify(requestData)
     })
     
-    console.log('📥 InterunitApiService.createRequest response:', JSON.stringify(response, null, 2))
     return response
   }
 
@@ -217,9 +184,6 @@ export class InterunitApiService {
     }
     
     const url = `${API_BASE_URL}/interunit/requests?${queryParams.toString()}`
-    console.log('🌐 InterunitApiService.getRequests called')
-    console.log('🔗 URL:', url)
-    console.log('📋 Params:', params)
 
     const response = await fetchJSON(url)
 
@@ -245,68 +209,33 @@ export class InterunitApiService {
     })
   }
 
-  static async deleteRequest(requestId: number): Promise<{ success: boolean; message: string }> {
-    console.log('🌐 InterunitApiService.deleteRequest called')
-    console.log('🔗 Request ID:', requestId)
-
-    const response = await fetchJSON(`${API_BASE_URL}/interunit/requests/${requestId}`, {
+  static async deleteRequest(requestId: number, userEmail: string): Promise<{ success: boolean; message: string }> {
+    const response = await fetchJSON(`${API_BASE_URL}/interunit/requests/${requestId}?user_email=${encodeURIComponent(userEmail)}`, {
       method: 'DELETE'
     })
-
-    console.log('📥 Delete response:', response)
     return response
   }
 
   // Transfer management
-  static async deleteTransfer(transferId: number): Promise<{ success: boolean; message: string }> {
-    console.log('🌐 InterunitApiService.deleteTransfer called')
-    console.log('🔗 Transfer ID:', transferId)
-
-    const response = await fetchJSON(`${API_BASE_URL}/interunit/transfers/${transferId}`, {
+  static async deleteTransfer(transferId: number, userEmail: string): Promise<{ success: boolean; message: string }> {
+    const response = await fetchJSON(`${API_BASE_URL}/interunit/transfers/${transferId}?user_email=${encodeURIComponent(userEmail)}`, {
       method: 'DELETE'
     })
-
-    console.log('📥 Delete transfer response:', response)
     return response
   }
 
-  // Utility endpoints
-  static async generateRequestNumber(): Promise<{ request_no: string }> {
-    return await fetchJSON(`${API_BASE_URL}/interunit/utils/generate-request-number`)
-  }
-
-  static async generateTransferNumber(): Promise<{ transfer_no: string }> {
-    return await fetchJSON(`${API_BASE_URL}/interunit/utils/generate-transfer-number`)
-  }
-
-  // Statistics endpoint
-  static async getStatsSummary(): Promise<{
-    total_requests: number
-    total_transfers: number
-    request_status: Record<string, number>
-    transfer_status: Record<string, number>
-    warehouse_stats: Record<string, { total_outbound: number; total_inbound: number }>
-  }> {
-    return await fetchJSON(`${API_BASE_URL}/interunit/stats/summary`)
-  }
-
   // Submit transfer with scanned boxes and transport info
-  static async submitTransfer(company: string, payload: any): Promise<any> {
-    console.log('🌐 InterunitApiService.submitTransfer called')
-    console.log('Company:', company)
-    console.log('Payload:', payload)
+  static async submitTransfer(company: string, payload: any, createdBy: string = 'user@example.com'): Promise<any> {
 
     try {
       // Correct endpoint: /interunit/transfers (not /transfer/interunit)
-      const url = `${API_BASE_URL}/interunit/transfers`
-      console.log('📡 API URL:', url)
+      const url = `${API_BASE_URL}/interunit/transfers?created_by=${encodeURIComponent(createdBy)}`
 
       const response = await fetchJSON(url, {
         method: 'POST',
         body: JSON.stringify(payload)
       })
 
-      console.log('✅ API Response:', response)
       return response
     } catch (error: any) {
       console.error('❌ API Error in submitTransfer:', error)
@@ -326,8 +255,6 @@ export class InterunitApiService {
     sort_by?: string
     sort_order?: string
   }): Promise<any> {
-    console.log('🌐 InterunitApiService.getTransfers called')
-    console.log('Params:', params)
     
     try {
       const queryParams = new URLSearchParams()
@@ -340,11 +267,9 @@ export class InterunitApiService {
       }
       
       const url = `${API_BASE_URL}/interunit/transfers?${queryParams.toString()}`
-      console.log('📡 API URL:', url)
       
       const response = await fetchJSON(url)
       
-      console.log('✅ API Response:', response)
       return response
     } catch (error: any) {
       console.error('❌ API Error in getTransfers:', error)
@@ -354,8 +279,6 @@ export class InterunitApiService {
 
   // Update an existing transfer
   static async updateTransfer(transferId: number, payload: any): Promise<any> {
-    console.log('InterunitApiService.updateTransfer called')
-    console.log('Transfer ID:', transferId)
 
     try {
       const url = `${API_BASE_URL}/interunit/transfers/${transferId}`
@@ -417,21 +340,16 @@ export class InterunitApiService {
   // Get transfer by transfer number (challan_no)
   static async getTransferByNumber(company: string, transferNumber: string): Promise<any> {
     try {
-      console.log('🔍 Searching for transfer number:', transferNumber)
       const url = `${API_BASE_URL}/interunit/transfers?challan_no=${encodeURIComponent(transferNumber)}&per_page=1`
-      console.log('📡 API URL:', url)
       
       const response = await fetchJSON(url)
-      console.log('📦 API Response:', response)
       
       // Check if we have records (the actual field name in the API response)
       if (response.records && response.records.length > 0) {
         const transferItem = response.records[0]
-        console.log('✅ Found transfer:', transferItem)
         // Now fetch full details using the ID
         return await this.getTransferById(company, transferItem.id.toString())
       } else {
-        console.log('❌ No transfer found in response')
         throw new Error(`Transfer ${transferNumber} not found`)
       }
     } catch (error: any) {
@@ -493,7 +411,7 @@ export const transformFormDataToApi = (
         quantity: article.quantity,
         uom: article.uom,
         pack_size: article.packSize,
-        package_size: article.packageSize || "0",
+        unit_pack_size: article.packageSize || "0",
         net_weight,
         lot_number: article.lotNumber || ""
       }
@@ -508,8 +426,8 @@ export const transformFormDataToApi = (
       to_warehouse_not_equal_from_warehouse: true,
       material_type_required: true,
       material_type_enum: ["RM", "PM", "FG", "RTV"],
-      package_size_required: true,
-      package_size_conditional: "Only when materialType === 'FG'"
+      unit_pack_size_required: true,
+      unit_pack_size_conditional: "Only when materialType === 'FG'"
     }
   }
 }
@@ -552,15 +470,6 @@ export const validateRequestData = (formData: FormData, articleData: ArticleData
     }
     if (!article.item_description) {
       errors.push(`Article ${index + 1}: Item description is required`)
-    }
-    if (!article.quantity || article.quantity === '0') {
-      errors.push(`Article ${index + 1}: Quantity must be greater than 0`)
-    }
-    if (!article.pack_size || article.pack_size === '0' || article.pack_size === '0.00') {
-      errors.push(`Article ${index + 1}: Pack size must be greater than 0`)
-    }
-    if (article.material_type === 'FG' && (!article.package_size || article.package_size === '0')) {
-      errors.push(`Article ${index + 1}: Package size is required for FG material type`)
     }
   })
 

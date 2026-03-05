@@ -156,7 +156,8 @@ export function ArticleEditor({
     setDdLoading("material_type")
     try {
       const data = await dropdownApi.skuDropdown({ company })
-      setMaterialTypes(data.options.material_types || [])
+      const allowed = ['RM', 'PM', 'FG']
+      setMaterialTypes((data.options.material_types || []).filter((t: string) => allowed.includes(t.toUpperCase())))
     } catch (err) {
       console.error("Failed to load material types:", err)
     } finally {

@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils"
 
 // Simple Toast Provider
 export const ToastProvider = ({ children }: { children: React.ReactNode }) => {
-  return <div>{children}</div>
+  return <>{children}</>
 }
 
 // Simple Toast Viewport
@@ -16,7 +16,7 @@ export const ToastViewport = React.forwardRef<
   <div
     ref={ref}
     className={cn(
-      "fixed bottom-0 right-0 z-[100] flex max-h-screen flex-col p-4 sm:p-6 w-full max-w-[420px]",
+      "fixed top-4 right-4 z-[100] flex max-h-screen flex-col gap-2 w-full max-w-[380px] sm:max-w-[420px]",
       className
     )}
     {...props}
@@ -35,12 +35,13 @@ export const Toast = React.forwardRef<
     <div
       ref={ref}
       className={cn(
-        "group pointer-events-auto relative flex w-full items-center justify-between space-x-4 overflow-hidden rounded-lg border p-4 pr-8 shadow-lg transition-all",
+        "group pointer-events-auto relative flex w-full items-center justify-between space-x-4 overflow-hidden rounded-xl border p-4 pr-10 shadow-2xl transition-all animate-in slide-in-from-top-2 fade-in-0 duration-300",
         variant === "destructive"
-          ? "border-destructive/30 bg-destructive/10 text-destructive"
-          : "border bg-background text-foreground",
+          ? "border-red-300 bg-red-50 text-red-800 dark:border-red-700 dark:bg-red-950 dark:text-red-200"
+          : "border-green-200 bg-white text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100",
         className
       )}
+      style={{ boxShadow: "0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08)" }}
       {...props}
     />
   )
@@ -67,16 +68,18 @@ ToastAction.displayName = "ToastAction"
 export const ToastClose = React.forwardRef<
   HTMLButtonElement,
   React.ButtonHTMLAttributes<HTMLButtonElement>
->(({ className, ...props }, ref) => (
+>(({ className, onClick, ...props }, ref) => (
   <button
     ref={ref}
     className={cn(
-      "absolute right-2 top-2 rounded-md p-1 text-foreground/50 opacity-0 transition-opacity hover:text-foreground focus:opacity-100 focus:outline-none focus:ring-2 group-hover:opacity-100",
+      "absolute right-3 top-3 rounded-full p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:text-gray-300 dark:hover:bg-gray-800 transition-colors focus:outline-none focus:ring-2 focus:ring-ring",
       className
     )}
     {...props}
   >
-    ×
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <path d="M1 1l12 12M13 1L1 13" />
+    </svg>
   </button>
 ))
 ToastClose.displayName = "ToastClose"
@@ -88,7 +91,7 @@ export const ToastTitle = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <div
     ref={ref}
-    className={cn("text-sm font-semibold", className)}
+    className={cn("text-sm font-bold", className)}
     {...props}
   />
 ))
@@ -101,7 +104,7 @@ export const ToastDescription = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <div
     ref={ref}
-    className={cn("text-sm opacity-90", className)}
+    className={cn("text-sm text-gray-600 dark:text-gray-400", className)}
     {...props}
   />
 ))

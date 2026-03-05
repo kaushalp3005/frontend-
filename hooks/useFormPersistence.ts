@@ -7,8 +7,11 @@ interface StateEntry {
   setter: (val: any) => void
 }
 
+const MAX_AGE_MS = 60 * 60 * 1000 // 1 hour — discard drafts older than this
+
 /**
  * Persists form state to localStorage and restores it on mount.
+ * Data expires after 1 hour to avoid loading stale entries.
  *
  * @param key - localStorage key for this form's draft
  * @param stateMap - Record of { fieldName: { value, setter } } for each piece of state to persist
@@ -27,9 +30,15 @@ export function useFormPersistence(
       const saved = localStorage.getItem(key)
       if (saved) {
         const parsed = JSON.parse(saved)
-        for (const [field, entry] of Object.entries(stateMap)) {
-          if (parsed[field] !== undefined) {
-            entry.setter(parsed[field])
+        const savedAt = parsed.__savedAt
+        // Discard if older than MAX_AGE_MS
+        if (savedAt && Date.now() - savedAt > MAX_AGE_MS) {
+          localStorage.removeItem(key)
+        } else {
+          for (const [field, entry] of Object.entries(stateMap)) {
+            if (field !== "__savedAt" && parsed[field] !== undefined) {
+              entry.setter(parsed[field])
+            }
           }
         }
       }
@@ -49,7 +58,7 @@ export function useFormPersistence(
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
       try {
-        const snapshot: Record<string, any> = {}
+        const snapshot: Record<string, any> = { __savedAt: Date.now() }
         for (const [field, entry] of Object.entries(stateMap)) {
           snapshot[field] = entry.value
         }

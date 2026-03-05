@@ -16,6 +16,7 @@ import {
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { InterunitApiService } from "@/lib/interunitApiService"
+import { useAuthStore } from "@/lib/stores/auth"
 
 import HighPerformanceQRScanner from "@/components/transfer/high-performance-qr-scanner"
 import type { Company } from "@/types/auth"
@@ -30,6 +31,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
   const { company } = params
   const router = useRouter()
   const { toast } = useToast()
+  const { user } = useAuthStore()
 
   const [transferNumber, setTransferNumber] = useState("")
   const [loading, setLoading] = useState(false)
@@ -312,7 +314,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
         transfer_out_id: transferData.id,
         grn_number: grnNumber,
         receiving_warehouse: transferData.to_warehouse || transferData.to_site_code || "UNKNOWN",
-        received_by: "USER",
+        received_by: user?.name || user?.email || "USER",
         box_condition: boxCondition,
         condition_remarks: conditionRemarks.trim() || null,
         scanned_boxes: allScannedBoxes,

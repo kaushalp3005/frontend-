@@ -47,7 +47,9 @@ export function useMaterialTypes(args: { company: Company }) {
     setError(null)
     try {
       const data = await dropdownApi.fetchDropdown({ company, limit: 1000 })
-      setOptions(toOptions(data.options.material_types || []))
+      const allowed = ['RM', 'PM', 'FG']
+      const filtered = (data.options.material_types || []).filter((t: string) => allowed.includes(t.toUpperCase()))
+      setOptions(toOptions(filtered))
     } catch (e: any) {
       console.error("Error fetching material types:", e)
       setOptions([])
@@ -510,3 +512,150 @@ export function useTransporters(args?: { company?: Company; active_only?: boolea
 
 // Legacy alias for backward compatibility
 export const useSubGroups = useSubCategories
+
+
+// ══════════════════════════════════════════════
+//  Categorial Inventory hooks (for Transfer & Request)
+// ══════════════════════════════════════════════
+
+type CategorialOpt = { value: string; label: string; uom?: number | null }
+
+function toCategorialOptions(values: string[] = [], uomValues: (number | null)[] = []): CategorialOpt[] {
+  return values
+    .filter(v => v != null && v !== '')
+    .map((v, i) => ({
+      value: v,
+      label: v,
+      uom: uomValues[i] ?? null,
+    }))
+}
+
+/**
+ * CATEGORIAL MATERIAL TYPES
+ */
+export function useCategorialMaterialTypes() {
+  const [options, setOptions] = useState<CategorialOpt[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const fetchData = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const data = await dropdownApi.categorialDropdown({ limit: 1000 })
+      setOptions(toCategorialOptions(data.options.material_types || []))
+    } catch (e: any) {
+      console.error("Error fetching categorial material types:", e)
+      setOptions([])
+      setError("Connection not available.")
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { fetchData() }, [fetchData])
+  return { options, loading, error }
+}
+
+/**
+ * CATEGORIAL ITEM CATEGORIES (groups)
+ */
+export function useCategorialItemCategories(args: { material_type?: string }) {
+  const { material_type } = args
+  const [options, setOptions] = useState<CategorialOpt[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const fetchData = useCallback(async () => {
+    if (!material_type) { setOptions([]); return }
+    setLoading(true)
+    setError(null)
+    try {
+      const data = await dropdownApi.categorialDropdown({ material_type, limit: 1000 })
+      setOptions(toCategorialOptions(data.options.item_categories || []))
+    } catch (e: any) {
+      console.error("Error fetching categorial categories:", e)
+      setOptions([])
+      setError("Connection not available.")
+    } finally {
+      setLoading(false)
+    }
+  }, [material_type])
+
+  useEffect(() => { fetchData() }, [fetchData])
+  return { options, loading, error }
+}
+
+/**
+ * CATEGORIAL SUB CATEGORIES (sub_groups)
+ */
+export function useCategorialSubCategories(categoryId: string | undefined, args: { material_type?: string }) {
+  const { material_type } = args
+  const [options, setOptions] = useState<CategorialOpt[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const fetchData = useCallback(async () => {
+    if (!categoryId || !material_type) { setOptions([]); return }
+    setLoading(true)
+    setError(null)
+    try {
+      const data = await dropdownApi.categorialDropdown({
+        material_type,
+        item_category: categoryId,
+        limit: 1000,
+      })
+      setOptions(toCategorialOptions(data.options.sub_categories || []))
+    } catch (e: any) {
+      console.error("Error fetching categorial sub categories:", e)
+      setOptions([])
+      setError("Connection not available.")
+    } finally {
+      setLoading(false)
+    }
+  }, [material_type, categoryId])
+
+  useEffect(() => { fetchData() }, [fetchData])
+  return { options, loading, error }
+}
+
+/**
+ * CATEGORIAL ITEM DESCRIPTIONS (particulars) — also returns uom_values
+ */
+export function useCategorialItemDescriptions(args: {
+  material_type?: string
+  item_category?: string
+  sub_category?: string
+}) {
+  const { material_type, item_category, sub_category } = args
+  const [options, setOptions] = useState<CategorialOpt[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const fetchData = useCallback(async () => {
+    if (!material_type || !item_category || !sub_category) { setOptions([]); return }
+    setLoading(true)
+    setError(null)
+    try {
+      const data = await dropdownApi.categorialDropdown({
+        material_type,
+        item_category,
+        sub_category,
+        limit: 500,
+      })
+      setOptions(toCategorialOptions(
+        data.options.item_descriptions || [],
+        data.options.uom_values || [],
+      ))
+    } catch (e: any) {
+      console.error("Error fetching categorial item descriptions:", e)
+      setOptions([])
+      setError("Connection not available.")
+    } finally {
+      setLoading(false)
+    }
+  }, [material_type, item_category, sub_category])
+
+  useEffect(() => { fetchData() }, [fetchData])
+  return { options, loading, error }
+}

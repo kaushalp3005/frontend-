@@ -14,6 +14,7 @@ import {
 import { useToast } from "@/hooks/use-toast"
 import { InterunitApiService, RequestResponse } from "@/lib/interunitApiService"
 import type { Company } from "@/types/auth"
+import { useAuthStore } from "@/lib/stores/auth"
 
 interface TransferPageProps {
   params: {
@@ -25,6 +26,8 @@ export default function TransferPage({ params }: TransferPageProps) {
   const { company } = params
   const router = useRouter()
   const { toast } = useToast()
+  const { user } = useAuthStore()
+  const canDelete = user?.email === 'yash@candorfoods.in'
   const [activeTab, setActiveTab] = useState("request")
 
   // State for requests data
@@ -58,11 +61,7 @@ export default function TransferPage({ params }: TransferPageProps) {
         per_page: perPage,
       })
 
-      const activeRequests = response.records.filter((req: RequestResponse) =>
-        req.status === 'Pending' || req.status === 'Accept' || req.status === 'Accepted' || req.status === 'Rejected'
-      )
-
-      setRequests(activeRequests)
+      setRequests(response.records)
       setTotalPages(response.total_pages)
       setTotalRecords(response.total)
       setCurrentPage(page)
@@ -129,7 +128,7 @@ export default function TransferPage({ params }: TransferPageProps) {
   const handleDeleteRequest = async (requestId: number) => {
     if (!confirm("Are you sure you want to delete this request?")) return
     try {
-      const response = await InterunitApiService.deleteRequest(requestId)
+      const response = await InterunitApiService.deleteRequest(requestId, user?.email || '')
       toast({ title: "Deleted", description: response.message || "Request deleted." })
       loadRequests(currentPage)
     } catch (error: any) {
@@ -141,7 +140,7 @@ export default function TransferPage({ params }: TransferPageProps) {
   const handleDeleteTransfer = async (transferId: number) => {
     if (!confirm("Are you sure you want to delete this transfer?")) return
     try {
-      const response = await InterunitApiService.deleteTransfer(transferId)
+      const response = await InterunitApiService.deleteTransfer(transferId, user?.email || '')
       toast({ title: "Deleted", description: response.message || "Transfer deleted." })
       loadTransfers(transfersPage)
     } catch (error: any) {
@@ -510,11 +509,12 @@ export default function TransferPage({ params }: TransferPageProps) {
                           className="h-9 text-xs flex-1 border-violet-200 hover:bg-violet-50 text-violet-700">
                           <Printer className="h-3.5 w-3.5 mr-1.5" />DC
                         </Button>
-                        <Button variant="outline" size="sm" onClick={() => handleDeleteTransfer(t.id)}
-                          disabled={t.status === 'Received' || t.status === 'Completed'}
-                          className="h-9 w-9 p-0 border-red-200 hover:bg-red-50">
-                          <Trash2 className="h-3.5 w-3.5 text-red-500" />
-                        </Button>
+                        {canDelete && (
+                          <Button variant="outline" size="sm" onClick={() => handleDeleteTransfer(t.id)}
+                            className="h-9 w-9 p-0 border-red-200 hover:bg-red-50">
+                            <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                          </Button>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -578,11 +578,12 @@ export default function TransferPage({ params }: TransferPageProps) {
                                 className="h-8 px-3 text-xs border-violet-200 hover:bg-violet-50 text-violet-700">
                                 <Printer className="h-3.5 w-3.5 mr-1" />DC
                               </Button>
-                              <Button variant="ghost" size="sm" onClick={() => handleDeleteTransfer(t.id)}
-                                disabled={t.status === 'Received' || t.status === 'Completed'}
-                                className="h-8 w-8 p-0 hover:bg-red-50">
-                                <Trash2 className="h-3.5 w-3.5 text-red-500" />
-                              </Button>
+                              {canDelete && (
+                                <Button variant="ghost" size="sm" onClick={() => handleDeleteTransfer(t.id)}
+                                  className="h-8 w-8 p-0 hover:bg-red-50">
+                                  <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                                </Button>
+                              )}
                             </div>
                           </td>
                         </tr>

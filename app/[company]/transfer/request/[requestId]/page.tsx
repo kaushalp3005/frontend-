@@ -322,14 +322,14 @@ export default function RequestViewPage({ params }: RequestViewPageProps) {
                         </div>
 
                         <div className="space-y-1">
-                          <p className="text-xs text-gray-600">Pack Size ({isFG ? "gm" : "Kg"})</p>
+                          <p className="text-xs text-gray-600">Case Pack/Box wt(kg)</p>
                           <p className="text-sm font-medium text-gray-900">{line.pack_size}</p>
                         </div>
 
-                        {isFG && line.package_size && line.package_size !== "0" && (
+                        {line.unit_pack_size && line.unit_pack_size !== "0" && (
                           <div className="space-y-1">
-                            <p className="text-xs text-gray-600">Package Size (gm)</p>
-                            <p className="text-sm font-medium text-gray-900">{line.package_size}</p>
+                            <p className="text-xs text-gray-600">Unit Pack Size</p>
+                            <p className="text-sm font-medium text-gray-900">{line.unit_pack_size}</p>
                           </div>
                         )}
 

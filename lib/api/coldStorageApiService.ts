@@ -1,7 +1,7 @@
 // Cold Storage Stock Search API Service
 // Connects to the cold storage stocks backend (Transfer project)
 
-const STOCK_API_URL = process.env.NEXT_PUBLIC_STOCK_API_URL ?? "http://localhost:8001"
+const STOCK_API_URL = process.env.NEXT_PUBLIC_STOCK_API_URL ?? "http://localhost:8000"
 
 async function fetchJSON(url: string) {
   const response = await fetch(url, {

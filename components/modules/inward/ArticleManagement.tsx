@@ -281,7 +281,7 @@ export function ArticleManagement({
             <div className="grid grid-cols-2 gap-4">
               {/* Quantity Units */}
               <div className="space-y-2">
-                <Label htmlFor={`quantity-${article.id}`}>Quantity Units *</Label>
+                <Label htmlFor={`quantity-${article.id}`}>Quantity Units</Label>
                 <Input
                   id={`quantity-${article.id}`}
                   type="number"

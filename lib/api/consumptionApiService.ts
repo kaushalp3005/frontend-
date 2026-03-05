@@ -22,6 +22,8 @@ import {
   QCReleaseResponse,
   TransferRequest,
   TransferResponse,
+  TransferUpdateRequest,
+  TransferUpdateResponse,
   TransferHistoryRequest,
   TransferHistoryResponse,
   DispatchRequest,
@@ -277,6 +279,19 @@ class ConsumptionApiService {
     return this.handleResponse<TransferResponse>(response)
   }
 
+  async updateTransfer(request: TransferUpdateRequest): Promise<TransferUpdateResponse> {
+    const response = await fetch(`${API_BASE}/consumption/transfer/${encodeURIComponent(request.transfer_id)}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(request),
+    })
+
+    return this.handleResponse<TransferUpdateResponse>(response)
+  }
+
   async getTransferHistory(request: TransferHistoryRequest): Promise<TransferHistoryResponse> {
     const searchParams = new URLSearchParams()
     if (request.source_warehouse) searchParams.append('source_warehouse', request.source_warehouse)
@@ -469,6 +484,7 @@ export const getFEFOSuggestions = consumptionApiService.getFEFOSuggestions.bind(
 export const postProductionReceipt = consumptionApiService.postProductionReceipt.bind(consumptionApiService)
 export const releaseQCHold = consumptionApiService.releaseQCHold.bind(consumptionApiService)
 export const postTransfer = consumptionApiService.postTransfer.bind(consumptionApiService)
+export const updateTransfer = consumptionApiService.updateTransfer.bind(consumptionApiService)
 export const getTransferHistory = consumptionApiService.getTransferHistory.bind(consumptionApiService)
 export const postDispatch = consumptionApiService.postDispatch.bind(consumptionApiService)
 export const getFEFOPicklist = consumptionApiService.getFEFOPicklist.bind(consumptionApiService)

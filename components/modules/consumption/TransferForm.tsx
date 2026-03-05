@@ -13,19 +13,21 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { 
-  ArrowRightLeft, 
-  Plus, 
-  Trash2, 
-  Save, 
+import {
+  ArrowRightLeft,
+  Plus,
+  Trash2,
+  Save,
   RefreshCw,
   AlertCircle,
   CheckCircle,
   Package,
   History,
-  Search
+  Search,
+  Pencil,
+  X
 } from "lucide-react"
-import { postTransfer, getTransferHistory } from "@/lib/api/consumptionApiService"
+import { postTransfer, updateTransfer, getTransferHistory } from "@/lib/api/consumptionApiService"
 import { TransferLine, TransferHistoryEntry } from "@/types/consumption"
 
 interface TransferFormProps {
@@ -39,7 +41,11 @@ export function TransferForm({ company }: TransferFormProps) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
-  
+  const [activeTab, setActiveTab] = useState("transfer")
+
+  // Editing state
+  const [editingTransferId, setEditingTransferId] = useState<string | null>(null)
+
   // History tab state
   const [historyData, setHistoryData] = useState<TransferHistoryEntry[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
@@ -70,6 +76,31 @@ export function TransferForm({ company }: TransferFormProps) {
     setLines(updatedLines)
   }
 
+  const handleEdit = (entry: TransferHistoryEntry) => {
+    setEditingTransferId(entry.transfer_id)
+    setSourceWarehouse(entry.source_warehouse)
+    setDestinationWarehouse(entry.destination_warehouse)
+    setLines([{
+      sku_id: entry.sku_id,
+      uom: entry.uom,
+      qty: entry.qty,
+      lot_no: entry.lot_no,
+      batch_no: entry.batch_no
+    }])
+    setError(null)
+    setSuccess(null)
+    setActiveTab("transfer")
+  }
+
+  const handleCancelEdit = () => {
+    setEditingTransferId(null)
+    setLines([])
+    setSourceWarehouse("")
+    setDestinationWarehouse("")
+    setError(null)
+    setSuccess(null)
+  }
+
   const handleSubmit = async () => {
     if (!sourceWarehouse || !destinationWarehouse || lines.length === 0) {
       setError("Please fill in all required fields and add at least one transfer line")
@@ -96,23 +127,40 @@ export function TransferForm({ company }: TransferFormProps) {
       setError(null)
       setSuccess(null)
 
-      const response = await postTransfer({
-        source_warehouse: sourceWarehouse,
-        destination_warehouse: destinationWarehouse,
-        lines
-      })
+      if (editingTransferId) {
+        const response = await updateTransfer({
+          transfer_id: editingTransferId,
+          source_warehouse: sourceWarehouse,
+          destination_warehouse: destinationWarehouse,
+          lines
+        })
 
-      if (response.success) {
-        setSuccess(`Transfer posted successfully! Processed ${response.data.lines_processed} lines.`)
-        setLines([])
-        setSourceWarehouse("")
-        setDestinationWarehouse("")
-        // Refresh history
-        fetchTransferHistory()
+        if (response.success) {
+          setSuccess(`Transfer ${editingTransferId} updated successfully! Processed ${response.data.lines_processed} lines.`)
+          setEditingTransferId(null)
+          setLines([])
+          setSourceWarehouse("")
+          setDestinationWarehouse("")
+          fetchTransferHistory()
+        }
+      } else {
+        const response = await postTransfer({
+          source_warehouse: sourceWarehouse,
+          destination_warehouse: destinationWarehouse,
+          lines
+        })
+
+        if (response.success) {
+          setSuccess(`Transfer posted successfully! Processed ${response.data.lines_processed} lines.`)
+          setLines([])
+          setSourceWarehouse("")
+          setDestinationWarehouse("")
+          fetchTransferHistory()
+        }
       }
     } catch (err) {
       console.error("Error posting transfer:", err)
-      setError(err instanceof Error ? err.message : "Failed to post transfer")
+      setError(err instanceof Error ? err.message : editingTransferId ? "Failed to update transfer" : "Failed to post transfer")
     } finally {
       setLoading(false)
     }
@@ -156,7 +204,7 @@ export function TransferForm({ company }: TransferFormProps) {
 
   return (
     <div className="space-y-6">
-      <Tabs defaultValue="transfer" className="space-y-4">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList>
           <TabsTrigger value="transfer">Transfer Form</TabsTrigger>
           <TabsTrigger value="history">Transfer History</TabsTrigger>
@@ -166,13 +214,29 @@ export function TransferForm({ company }: TransferFormProps) {
           {/* Header */}
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <ArrowRightLeft className="h-5 w-5" />
-                Inter-Warehouse Transfer
-              </CardTitle>
-              <CardDescription>
-                Transfer materials between warehouses with cost carryover
-              </CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    {editingTransferId ? (
+                      <Pencil className="h-5 w-5" />
+                    ) : (
+                      <ArrowRightLeft className="h-5 w-5" />
+                    )}
+                    {editingTransferId ? `Edit Transfer - ${editingTransferId}` : "Inter-Warehouse Transfer"}
+                  </CardTitle>
+                  <CardDescription>
+                    {editingTransferId
+                      ? "Modify the transfer details and save changes"
+                      : "Transfer materials between warehouses with cost carryover"}
+                  </CardDescription>
+                </div>
+                {editingTransferId && (
+                  <Button variant="outline" size="sm" onClick={handleCancelEdit}>
+                    <X className="h-4 w-4 mr-2" />
+                    Cancel Edit
+                  </Button>
+                )}
+              </div>
             </CardHeader>
           </Card>
 
@@ -349,15 +413,21 @@ export function TransferForm({ company }: TransferFormProps) {
           <Card>
             <CardContent className="pt-6">
               <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => {
-                  setLines([])
-                  setSourceWarehouse("")
-                  setDestinationWarehouse("")
-                }}>
-                  Clear All
-                </Button>
-                <Button 
-                  onClick={handleSubmit} 
+                {editingTransferId ? (
+                  <Button variant="outline" onClick={handleCancelEdit}>
+                    Cancel Edit
+                  </Button>
+                ) : (
+                  <Button variant="outline" onClick={() => {
+                    setLines([])
+                    setSourceWarehouse("")
+                    setDestinationWarehouse("")
+                  }}>
+                    Clear All
+                  </Button>
+                )}
+                <Button
+                  onClick={handleSubmit}
                   disabled={loading || lines.length === 0 || !sourceWarehouse || !destinationWarehouse}
                 >
                   {loading ? (
@@ -365,7 +435,7 @@ export function TransferForm({ company }: TransferFormProps) {
                   ) : (
                     <Save className="h-4 w-4 mr-2" />
                   )}
-                  Post Transfer
+                  {editingTransferId ? "Update Transfer" : "Post Transfer"}
                 </Button>
               </div>
             </CardContent>
@@ -470,6 +540,7 @@ export function TransferForm({ company }: TransferFormProps) {
                         <TableHead>Total Value</TableHead>
                         <TableHead>Transfer Date</TableHead>
                         <TableHead>Created By</TableHead>
+                        <TableHead>Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -495,6 +566,16 @@ export function TransferForm({ company }: TransferFormProps) {
                           <TableCell className="font-semibold">₹{entry.total_value.toLocaleString()}</TableCell>
                           <TableCell>{new Date(entry.transfer_date).toLocaleDateString()}</TableCell>
                           <TableCell>{entry.created_by}</TableCell>
+                          <TableCell>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleEdit(entry)}
+                              title="Edit transfer"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>

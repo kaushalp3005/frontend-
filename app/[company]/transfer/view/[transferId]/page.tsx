@@ -46,7 +46,7 @@ interface TransferDetail {
     sub_category: string
     item_description: string
     pack_size: string
-    package_size: string
+    unit_pack_size: string
     quantity: string
     uom: string
     net_weight: string
@@ -85,11 +85,9 @@ export default function TransferViewPage({ params }: TransferViewPageProps) {
   const loadTransferDetails = async () => {
     setLoading(true)
     try {
-      console.log('📋 Loading transfer details for ID:', transferId)
       
       const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
       const url = `${API_BASE_URL}/interunit/transfers/${transferId}`
-      console.log('🔗 API URL:', url)
       
       const response = await fetch(url, {
         headers: {
@@ -103,7 +101,6 @@ export default function TransferViewPage({ params }: TransferViewPageProps) {
       }
       
       const data = await response.json()
-      console.log('✅ Transfer details loaded:', data)
       
       setTransfer(data)
     } catch (error: any) {
@@ -413,11 +410,11 @@ export default function TransferViewPage({ params }: TransferViewPageProps) {
                         <p className="text-sm font-medium text-gray-900">{line.pack_size}</p>
                       </div>
 
-                      {/* Package Size (FG only) */}
-                      {isFG && line.package_size && line.package_size !== '0' && (
+                      {/* Case Pack */}
+                      {line.unit_pack_size && line.unit_pack_size !== '0' && (
                         <div className="space-y-1">
-                          <p className="text-xs text-gray-600">Package Size (gm)</p>
-                          <p className="text-sm font-medium text-gray-900">{line.package_size}</p>
+                          <p className="text-xs text-gray-600">Unit Pack Size</p>
+                          <p className="text-sm font-medium text-gray-900">{line.unit_pack_size}</p>
                         </div>
                       )}
 

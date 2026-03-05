@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { useItemCategories, useSubCategories, useItemDescriptions } from "@/lib/hooks/useDropdownData"
+import { useCategorialItemCategories, useCategorialSubCategories, useCategorialItemDescriptions } from "@/lib/hooks/useDropdownData"
 import { SearchableSelect } from "@/components/ui/searchable-select"
 import { dropdownApi } from "@/lib/api"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -14,6 +14,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ArrowLeft, Send, Package, X, Clock, Plus, Trash2, Camera, Search, Loader2 } from "lucide-react"
 import type { Company } from "@/types/auth"
+import { useAuthStore } from "@/lib/stores/auth"
 import { InterunitApiService } from "@/lib/interunitApiService"
 import { useToast } from "@/hooks/use-toast"
 import { useFormPersistence } from "@/hooks/useFormPersistence"
@@ -47,82 +48,37 @@ function MaterialTypeDropdown({
       setErrorState(null)
       
       try {
-        console.log("=== FETCHING MATERIAL TYPES ===")
-        console.log("Company:", company)
-        
-        const data = await dropdownApi.fetchDropdown({ 
-          company, 
-          limit: 1000 
-        })
-        
-        // Additional debugging - check if we're getting any data at all
-        console.log("=== API RESPONSE DEBUG ===")
-        console.log("Raw response:", data)
-        console.log("Response type:", typeof data)
-        console.log("Response keys:", Object.keys(data || {}))
-        if (data?.options) {
-          console.log("Options keys:", Object.keys(data.options))
-          console.log("Options values:", data.options)
-        }
-        console.log("=== END API RESPONSE DEBUG ===")
-        
-        console.log("Material Types API Response:", data)
-        console.log("Full API Response:", JSON.stringify(data, null, 2))
-        
-        // Debug: Check the structure of the response
-        console.log("Response structure check:")
-        console.log("- data:", typeof data, data)
-        console.log("- data.options:", typeof data?.options, data?.options)
-        console.log("- data.options.material_types:", typeof data?.options?.material_types, data?.options?.material_types)
-        console.log("- Array.isArray check:", Array.isArray(data?.options?.material_types))
-        
-        // Extract material types from the API response
+        const data = await dropdownApi.categorialDropdown({ limit: 1000 })
+
         if (data.options && data.options.material_types && Array.isArray(data.options.material_types)) {
-          console.log("Found material_types in API response:", data.options.material_types)
           const materialTypeOptions = data.options.material_types.map((type: string) => ({
             value: type,
             label: type
           }))
           setOptions(materialTypeOptions)
         } else {
-          // Fallback to hardcoded values if API doesn't return material_types
-          console.log("Using fallback material types - API response structure:")
-          console.log("- data.options exists:", !!data.options)
-          console.log("- data.options.material_types exists:", !!data.options?.material_types)
-          console.log("- data.options.material_types is array:", Array.isArray(data.options?.material_types))
-          
           const fallbackOptions = [
-            { value: "FINISHED", label: "FINISHED" },
-            { value: "RAW MATERIALS", label: "RAW MATERIALS" },
-            { value: "PACKAGING MATERIALS", label: "PACKAGING MATERIALS" },
-            { value: "SPARE PARTS", label: "SPARE PARTS" }
+            { value: "RM", label: "RM" },
+            { value: "PM", label: "PM" },
+            { value: "FG", label: "FG" }
           ]
           setOptions(fallbackOptions)
         }
-        
-        console.log("=== END MATERIAL TYPES FETCH ===")
       } catch (e: any) {
         console.error("Error fetching material types:", e)
-        // Fallback to hardcoded values on error
-        const fallbackOptions = [
-          { value: "FINISHED", label: "FINISHED" },
-          { value: "RAW MATERIALS", label: "RAW MATERIALS" },
-          { value: "PACKAGING MATERIALS", label: "PACKAGING MATERIALS" },
-          { value: "SPARE PARTS", label: "SPARE PARTS" }
-        ]
-        setOptions(fallbackOptions)
+        setOptions([
+          { value: "RM", label: "RM" },
+          { value: "PM", label: "PM" },
+          { value: "FG", label: "FG" }
+        ])
         setErrorState("Connection not available. Using default values.")
       } finally {
         setLoading(false)
       }
     }
 
-    if (company) {
-      fetchMaterialTypes()
-    }
-  }, [company])
-  
-  console.log("MaterialTypeDropdown render:", { value, optionsCount: options.length, options })
+    fetchMaterialTypes()
+  }, [])
   
   // Don't normalize - let SearchableSelect handle empty states
   const normalizedValue = value || ""
@@ -158,7 +114,7 @@ function ItemCategoryDropdown({
   error?: string
   disabled?: boolean
 }) {
-  const itemCategoriesHook = useItemCategories({ company, material_type: materialType })
+  const itemCategoriesHook = useCategorialItemCategories({ material_type: materialType })
   
   return (
     <SearchableSelect
@@ -195,17 +151,8 @@ function SubCategoryDropdown({
   disabled?: boolean
   materialType?: string
 }) {
-  const subCategoriesHook = useSubCategories(categoryId, { company, material_type: materialType })
-  
-  console.log("SubCategoryDropdown render:", { 
-    value, 
-    categoryId, 
-    materialType, 
-    optionsCount: subCategoriesHook.options.length,
-    options: subCategoriesHook.options,
-    matchingOption: subCategoriesHook.options.find(opt => opt.value === value)
-  })
-  
+  const subCategoriesHook = useCategorialSubCategories(categoryId, { material_type: materialType })
+
   return (
     <SearchableSelect
       value={value}
@@ -245,61 +192,18 @@ function ItemDescriptionDropdown({
   updateArticle?: (id: string, field: string, value: any) => void
   disabled?: boolean
 }) {
-  const itemDescriptionsHook = useItemDescriptions({ company, material_type: materialType, item_category: categoryId, sub_category: subCategoryId })
-  
-  console.log("ItemDescriptionDropdown render:", {
-    value,
-    categoryId,
-    subCategoryId,
-    materialType,
-    optionsCount: itemDescriptionsHook.options.length,
-    options: itemDescriptionsHook.options,
-    matchingOption: itemDescriptionsHook.options.find(opt => opt.value === value)
-  })
-  
+  const itemDescriptionsHook = useCategorialItemDescriptions({ material_type: materialType, item_category: categoryId, sub_category: subCategoryId })
+
   const handleValueChange = async (selectedValue: string) => {
     // Find the selected option to get the label
     const selectedOption = itemDescriptionsHook.options.find(option => option.value === selectedValue)
     if (selectedOption && updateArticle) {
       // Update item_description immediately
       updateArticle(articleId, "item_description", selectedOption.label)
-      
-      // Reset SKU ID while fetching
-      updateArticle(articleId, "sku_id", null)
 
-      // ✅ Directly call the statically imported API (typed)
-      try {
-        const skuResponse = await dropdownApi.fetchSkuId({
-          company,
-          item_description: selectedOption.label,
-          item_category: categoryId,
-          sub_category: subCategoryId,
-          material_type: materialType
-        })
-
-        // Extract SKU ID from various possible response formats
-        const skuId: number | undefined = Number(
-          skuResponse?.sku_id ??
-          skuResponse?.id ??
-          skuResponse?.ID ??
-          skuResponse?.SKU_ID
-        )
-        if (!skuId || Number.isNaN(skuId) || skuId <= 0) {
-          throw new Error("No valid sku_id returned from API")
-        }
-        updateArticle(articleId, "sku_id", skuId)
-        
-        // Extract and update material_type from the new payload structure
-        const responseMaterialType = skuResponse?.material_type
-        if (responseMaterialType) {
-          updateArticle(articleId, "material_type", responseMaterialType)
-        }
-      } catch (err) {
-        console.error("Error fetching SKU ID:", err)
-        // Show error to user but don't block form
-        alert(`Warning: Could not fetch SKU ID for "${selectedOption.label}". Please ensure this item exists in the database.`)
-        // Set SKU ID to null - will be resolved at submit time
-        updateArticle(articleId, "sku_id", null)
+      // Auto-fill unit_pack_size from categorial_inv uom
+      if ((selectedOption as any).uom != null) {
+        updateArticle(articleId, "unit_pack_size", Number((selectedOption as any).uom))
       }
     }
 
@@ -326,7 +230,8 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
   const router = useRouter()
   const searchParams = useSearchParams()
   const { toast } = useToast()
-  
+  const { user } = useAuthStore()
+
   // Get requestId from URL parameter
   const requestIdFromUrl = searchParams.get('requestId')
   
@@ -366,12 +271,12 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     id: string
     sku_id?: number | null
     material_type: string
+    item_description: string
     item_category: string
     sub_category: string
-    item_description: string
     quantity_units: number
     pack_size: number
-    package_size: number
+    unit_pack_size: number
     uom: string
     net_weight: number
     total_weight: number
@@ -395,9 +300,9 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       item_description: "",
       item_category: "",
       sub_category: "",
-      quantity_units: 0,
+      quantity_units: 1,
       pack_size: 0,
-      package_size: 0,
+      unit_pack_size: 0,
       uom: "",
       net_weight: 0,
       total_weight: 0,
@@ -435,6 +340,13 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
   // Processing flag to prevent duplicate scans
   const isProcessingRef = useRef(false)
 
+  // Quick Search state (per-article)
+  const [itemSearchQuery, setItemSearchQuery] = useState<Record<string, string>>({})
+  const [itemSearchResults, setItemSearchResults] = useState<Record<string, Array<{ id: number; item_description: string; material_type?: string; group?: string; sub_group?: string; uom?: number | null }>>>({})
+  const [itemSearchLoading, setItemSearchLoading] = useState<Record<string, boolean>>({})
+  const [itemSearchOpen, setItemSearchOpen] = useState<Record<string, boolean>>({})
+  const searchTimeoutRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+
   // Control high-performance QR scanner visibility
   const [showScanner, setShowScanner] = useState(false)
 
@@ -457,32 +369,14 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     loadedItems: { value: loadedItems, setter: setLoadedItems },
   })
 
-  // Use the same dropdown hooks as inward module with material_type
-  const { options: itemCategories, loading: categoriesLoading } = useItemCategories({ company, material_type: articles[0]?.material_type || "" })
-  const { options: subCategories, loading: subCategoriesLoading } = useSubCategories(articles[0]?.item_category || "", { company, material_type: articles[0]?.material_type || "" })
-  const { options: itemDescriptions, loading: descriptionsLoading } = useItemDescriptions({ 
-    company, 
+  // Use categorial_inv dropdown hooks for transfer
+  const { options: itemCategories, loading: categoriesLoading } = useCategorialItemCategories({ material_type: articles[0]?.material_type || "" })
+  const { options: subCategories, loading: subCategoriesLoading } = useCategorialSubCategories(articles[0]?.item_category || "", { material_type: articles[0]?.material_type || "" })
+  const { options: itemDescriptions, loading: descriptionsLoading } = useCategorialItemDescriptions({
     material_type: articles[0]?.material_type || "",
-    item_category: articles[0]?.item_category || "", 
-    sub_category: articles[0]?.sub_category || "" 
+    item_category: articles[0]?.item_category || "",
+    sub_category: articles[0]?.sub_category || ""
   })
-
-  // Debug: Log dropdown options when they change
-  useEffect(() => {
-    console.log('🔍 DROPDOWN OPTIONS DEBUG:')
-    console.log('📌 Article[0] State:', {
-      material_type: articles[0]?.material_type,
-      item_category: articles[0]?.item_category,
-      sub_category: articles[0]?.sub_category,
-      item_description: articles[0]?.item_description
-    })
-    console.log('📋 Category Options:', itemCategories.length, 'options')
-    console.log('📋 SubCategory Options:', subCategories.length, 'options', subCategories.map(o => o.value))
-    console.log('📋 Description Options:', itemDescriptions.length, 'options', itemDescriptions.map(o => o.value))
-    console.log('✅ Category Match:', itemCategories.find(o => o.value === articles[0]?.item_category))
-    console.log('✅ SubCategory Match:', subCategories.find(o => o.value === articles[0]?.sub_category))
-    console.log('✅ Description Match:', itemDescriptions.find(o => o.value === articles[0]?.item_description))
-  }, [articles[0]?.material_type, articles[0]?.item_category, articles[0]?.sub_category, articles[0]?.item_description, itemCategories, subCategories, itemDescriptions])
 
   // Fallback data when API is not available
   const fallbackCategories = [
@@ -550,30 +444,19 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       const prevRequestId = localStorage.getItem("draft-transfer-requestId")
       if (prevRequestId !== requestIdFromUrl) {
         setScannedBoxes([])
+        boxIdCounterRef.current = 1
         setLoadedItems([])
         clearSavedData()
       }
       localStorage.setItem("draft-transfer-requestId", requestIdFromUrl)
 
       try {
-        console.log('🔍 Loading request details for ID:', requestIdFromUrl)
 
         // Fetch single request by ID
         const request = await InterunitApiService.getRequest(parseInt(requestIdFromUrl))
-        
-        console.log('✅ Request found:', request)
-        console.log('📋 Request Details:', {
-          request_no: request.request_no,
-          request_date: request.request_date,
-          from_warehouse: request.from_warehouse,
-          to_warehouse: request.to_warehouse,
-          reason_description: request.reason_description,
-          lines_count: request.lines?.length
-        })
-        
+
         // Set original request number (REQ...)
         setRequestNo(request.request_no)
-        console.log('✅ Set requestNo:', request.request_no)
         
         // Normalize warehouse values to match dropdown options
         const normalizeWarehouse = (value: string) => {
@@ -589,18 +472,14 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
           requestDate: request.request_date,
           fromWarehouse: normalizeWarehouse(request.from_warehouse),
           toWarehouse: normalizeWarehouse(request.to_warehouse),
-          reason: "", // Will be set based on reason_description if needed
-          reasonDescription: request.reason_description === "No description provided" ? "" : request.reason_description
+          reason: "",
+          reasonDescription: request.reason_description || "",
         }
-        console.log('📝 Setting formData:', formDataToSet)
         setFormData(formDataToSet)
-        console.log('✅ FormData set successfully')
 
         // Populate article/item data from first line item (if exists)
         if (request.lines && request.lines.length > 0) {
           const firstItem = request.lines[0]
-          console.log('📦 First item from API:', firstItem)
-          console.log('📋 Full first item details:', JSON.stringify(firstItem, null, 2))
 
           // Normalize field values to match dropdown options
           const normalizeField = (value: string | undefined | null) => {
@@ -609,7 +488,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
             // Return the value as-is (backend now returns empty string instead of "N/A")
             // Keep original case - DO NOT convert to uppercase
             const trimmedValue = value.trim()
-            console.log(`  Normalizing: "${value}" → "${trimmedValue}"`)
             return trimmedValue
           }
           
@@ -646,7 +524,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
             // But keeps simple acronyms like "FG", "PM", "RM" as-is
             if (value === value.toUpperCase() && value !== value.toLowerCase() && (value.includes(' ') || value.includes('-') || value.includes('['))) {
               const camelCase = toCamelCase(value)
-              console.log(`  Converting case: "${value}" → "${camelCase}"`)
               return camelCase
             }
             return value
@@ -655,59 +532,19 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
           // Update the first article with the loaded data
           const updatedArticles = articles.map((art, index) => {
             if (index === 0) {
-              console.log('📝 ====== AUTO-FILLING ARTICLE FROM REQUEST ======')
-              console.log('  - material_type:', firstItem.material_type)
-              console.log('  - item_category:', firstItem.item_category)
-              console.log('  - sub_category:', firstItem.sub_category)
-              console.log('  - item_description:', firstItem.item_description)
-              console.log('  - quantity:', firstItem.quantity)
-              console.log('  - uom:', firstItem.uom)
-              console.log('  - pack_size:', firstItem.pack_size)
-              console.log('  - net_weight:', firstItem.net_weight)
-              console.log('  - sku_id:', firstItem.sku_id)
-              console.log('===============================================')
-
               return {
                 ...art,
-                // Auto-fill all item classification fields
-                // Keep values exactly as returned from API - DO NOT transform case
                 material_type: normalizeField(firstItem.material_type),
                 item_category: normalizeField(firstItem.item_category),
                 sub_category: normalizeField(firstItem.sub_category),
                 item_description: normalizeField(firstItem.item_description),
-
-                // Auto-fill quantity and measurement fields
-                quantity_units: parseInt(firstItem.quantity) || 0,
-                uom: normalizeField(firstItem.uom),
-                pack_size: parseFloat(firstItem.pack_size) || 0,
-                package_size: parseFloat(firstItem.package_size || "0") || 0,
-                net_weight: parseFloat(firstItem.net_weight) || 0,
-
-                // Auto-fill SKU ID if available (convert string to number)
-                sku_id: firstItem.sku_id ? parseInt(firstItem.sku_id) : null,
-
-                // Auto-fill batch/lot if available
-                batch_number: normalizeField((firstItem as any).batch_number) || "",
-                lot_number: normalizeField(firstItem.lot_number) || ""
               }
             }
             return art
           })
 
-          console.log('✅ Updated articles with auto-filled data:', updatedArticles)
-          console.log('🎯 First article after auto-fill:', updatedArticles[0])
-          console.log('⚠️  CASE PRESERVATION CHECK:')
-          console.log('   - material_type case:', updatedArticles[0]?.material_type, '(should match dropdown options exactly)')
-          console.log('   - item_category case:', updatedArticles[0]?.item_category, '(should match dropdown options exactly)')
-          console.log('   - sub_category case:', updatedArticles[0]?.sub_category, '(should match dropdown options exactly)')
-          console.log('   - item_description case:', updatedArticles[0]?.item_description, '(should match dropdown options exactly)')
           
           // Debug: Log raw API values for comparison
-          console.log('📊 RAW API VALUES from request.lines[0]:')
-          console.log('   - material_type (raw):', firstItem.material_type)
-          console.log('   - item_category (raw):', firstItem.item_category)
-          console.log('   - sub_category (raw):', firstItem.sub_category)
-          console.log('   - item_description (raw):', firstItem.item_description)
           
           setArticles(updatedArticles)
           
@@ -717,17 +554,10 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
             scanned_count: 0,
             pending: Math.max(0, (parseInt(it.quantity) || 0) - 0)
           })))
-          console.log('✅ All items stored:', request.lines.length, 'items')
-          console.log('📋 Items:', request.lines.map(l => ({
-            material_type: l.material_type,
-            item_description: l.item_description,
-            quantity: l.quantity
-          })))
         } else {
           console.warn('⚠️ No lines found in request!')
         }
 
-        console.log('✅ Form fully populated with request data')
 
         // Show success toast with auto-filled fields summary
         const autoFilledFields = request.lines && request.lines.length > 0 ? request.lines[0] : null
@@ -755,61 +585,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     loadRequestDetails()
   }, [requestIdFromUrl])
 
-  // Fetch SKU ID when article values are auto-filled from request
-  useEffect(() => {
-    const fetchSkuIdForAutoFilledArticle = async () => {
-      // Only fetch if we have all required fields and SKU ID is not already set
-      if (articles[0]?.material_type && 
-          articles[0]?.item_category && 
-          articles[0]?.sub_category && 
-          articles[0]?.item_description && 
-          !articles[0]?.sku_id &&
-          requestIdFromUrl) {
-        
-        console.log('🔍 Auto-fetching SKU ID for auto-filled article')
-        console.log('📋 Article values:', {
-          material_type: articles[0].material_type,
-          item_category: articles[0].item_category,
-          sub_category: articles[0].sub_category,
-          item_description: articles[0].item_description
-        })
-        
-        try {
-          const skuResponse = await dropdownApi.fetchSkuId({
-            company,
-            item_description: articles[0].item_description,
-            item_category: articles[0].item_category,
-            sub_category: articles[0].sub_category,
-            material_type: articles[0].material_type
-          })
-
-          console.log('📦 SKU Response:', skuResponse)
-
-          // Extract SKU ID from various possible response formats
-          const skuId: number | undefined = Number(
-            skuResponse?.sku_id ??
-            skuResponse?.id ??
-            skuResponse?.ID ??
-            skuResponse?.SKU_ID
-          )
-          
-          if (skuId && !Number.isNaN(skuId) && skuId > 0) {
-            console.log('✅ Found SKU ID:', skuId)
-            updateArticle(articles[0].id, "sku_id", skuId)
-          } else {
-            console.warn('⚠️ No valid SKU ID returned from API')
-          }
-        } catch (err) {
-          console.error("❌ Error fetching SKU ID:", err)
-        }
-      } else if (articles[0]?.sku_id && requestIdFromUrl) {
-        console.log('✅ SKU ID already set from request:', articles[0].sku_id)
-      }
-    }
-
-    fetchSkuIdForAutoFilledArticle()
-  }, [articles[0]?.material_type, articles[0]?.item_category, articles[0]?.sub_category, articles[0]?.item_description, articles[0]?.sku_id, requestIdFromUrl])
-
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({
       ...prev,
@@ -827,9 +602,9 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       item_description: "",
       item_category: "",
       sub_category: "",
-      quantity_units: 0,
+      quantity_units: 1,
       pack_size: 0,
-      package_size: 0,
+      unit_pack_size: 0,
       uom: "",
       net_weight: 0,
       total_weight: 0,
@@ -850,23 +625,55 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
   const removeArticle = (id: string) => {
     if (articles.length > 1) {
       setArticles(prev => prev.filter(article => article.id !== id))
+      toast({
+        title: "Article Removed",
+        description: "Article has been removed successfully.",
+      })
+    } else {
+      toast({
+        title: "Cannot Remove",
+        description: "At least one article is required.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  // Auto-calculate net weight (same logic as directtransferform)
+  const calculateNetWeight = (article: Article): number => {
+    const quantity = Number(article.quantity_units) || 1
+    const packSize = Number(article.pack_size) || 0
+
+    if (article.material_type === 'FG') {
+      // FG: (unitPackSize × packSize) × quantity → Kg
+      const packageSize = Number(article.unit_pack_size) || 1
+      const result = (packageSize * packSize) * quantity
+      return parseFloat(result.toFixed(3))
+    } else {
+      // RM/PM/RTV: quantity × packSize (Kg)
+      return parseFloat((quantity * packSize).toFixed(2))
     }
   }
 
   const updateArticle = (id: string, field: string, value: any) => {
-    console.log("updateArticle called:", { id, field, value })
     const updatedArticles = articles.map((article) => {
       if (article.id === id) {
         const updatedArticle = { ...article, [field]: value }
-        console.log("Updated article:", updatedArticle)
-        
+
+        // If material type actually changes, clear dependent fields + reset unit_pack_size
+        if (field === "material_type" && value !== article.material_type) {
+          updatedArticle.item_category = ""
+          updatedArticle.sub_category = ""
+          updatedArticle.item_description = ""
+          updatedArticle.sku_id = null
+          updatedArticle.unit_pack_size = 0
+        }
         // If category or sub category changes, nuke stale item selection + sku
-        if (field === "item_category") {
+        if (field === "item_category" && value !== article.item_category) {
           updatedArticle.sub_category = ""
           updatedArticle.item_description = ""
           updatedArticle.sku_id = null
         }
-        if (field === "sub_category") {
+        if (field === "sub_category" && value !== article.sub_category) {
           updatedArticle.item_description = ""
           updatedArticle.sku_id = null
         }
@@ -874,13 +681,74 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
           updatedArticle.total_amount = (Number(updatedArticle.unit_rate) || 0) * (Number(updatedArticle.quantity_units) || 0)
         }
 
+        // Auto-recalculate net weight when relevant fields change
+        if (["quantity_units", "pack_size", "unit_pack_size", "material_type"].includes(field)) {
+          updatedArticle.net_weight = calculateNetWeight(updatedArticle)
+        }
+
         return updatedArticle
       }
       return article
     })
 
-    console.log("Setting articles:", updatedArticles)
     setArticles(updatedArticles)
+  }
+
+  // ─── Quick Search for articles ───
+  const handleItemSearch = (articleId: string, query: string) => {
+    setItemSearchQuery(prev => ({ ...prev, [articleId]: query }))
+
+    if (searchTimeoutRef.current[articleId]) {
+      clearTimeout(searchTimeoutRef.current[articleId])
+    }
+
+    if (!query || query.trim().length < 2) {
+      setItemSearchResults(prev => ({ ...prev, [articleId]: [] }))
+      setItemSearchOpen(prev => ({ ...prev, [articleId]: false }))
+      return
+    }
+
+    searchTimeoutRef.current[articleId] = setTimeout(async () => {
+      setItemSearchLoading(prev => ({ ...prev, [articleId]: true }))
+      try {
+        const result = await dropdownApi.categorialSearch({
+          search: query.trim(),
+        })
+        setItemSearchResults(prev => ({ ...prev, [articleId]: result.items || [] }))
+        setItemSearchOpen(prev => ({ ...prev, [articleId]: true }))
+      } catch (error) {
+        console.error('Item search failed:', error)
+        setItemSearchResults(prev => ({ ...prev, [articleId]: [] }))
+      } finally {
+        setItemSearchLoading(prev => ({ ...prev, [articleId]: false }))
+      }
+    }, 300)
+  }
+
+  const handleItemSelect = (articleId: string, item: { id: number; item_description: string; material_type?: string; group?: string; sub_group?: string; uom?: number | null }) => {
+    const updatedArticles = articles.map((art) => {
+      if (art.id === articleId) {
+        return {
+          ...art,
+          material_type: item.material_type || "",
+          item_category: item.group || "",
+          sub_category: item.sub_group || "",
+          item_description: item.item_description || "",
+          unit_pack_size: item.uom != null ? item.uom : 0,
+        }
+      }
+      return art
+    })
+    setArticles(updatedArticles)
+
+    setItemSearchQuery(prev => ({ ...prev, [articleId]: "" }))
+    setItemSearchResults(prev => ({ ...prev, [articleId]: [] }))
+    setItemSearchOpen(prev => ({ ...prev, [articleId]: false }))
+
+    toast({
+      title: "Item Selected",
+      description: `${item.item_description} — fields auto-filled`,
+    })
   }
 
   const handleTransferInfoChange = (field: string, value: string) => {
@@ -891,48 +759,147 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
   }
 
   
-  // Handle removing a scanned box
-  const handleRemoveBox = (boxId: number) => {
-    console.log('🗑️ Removing box with ID:', boxId)
-    
-    // Find the box being removed
-    const boxToRemove = scannedBoxes.find(box => box.id === boxId)
-    
-    if (boxToRemove) {
-      console.log('📦 Box to remove:', boxToRemove)
-      
-      // Update loadedItems: decrement scanned_count and recalculate pending
-      setLoadedItems(prevItems => {
-        const itemsCopy = prevItems.map(it => ({ ...it }))
-        const matchIdx = itemsCopy.findIndex(it => 
-          String(it.sku_id) === String(boxToRemove.skuId) || 
-          it.item_description === boxToRemove.itemDescription
-        )
-        
-        if (matchIdx !== -1) {
-          const matched = itemsCopy[matchIdx]
-          const currentScanned = parseInt(matched.scanned_count || '0') || 0
-          matched.scanned_count = Math.max(0, currentScanned - 1) // Decrement but don't go below 0
-          const qty = parseInt(matched.quantity) || 0
-          matched.pending = Math.max(0, qty - matched.scanned_count)
-          console.log('✅ Updated item counts:', {
-            item: matched.item_description,
-            scanned: matched.scanned_count,
-            pending: matched.pending
-          })
-        }
-        
-        return itemsCopy
+  // Handle adding article to scanned boxes list (like directtransferform)
+  const handleAddArticleToList = (article: Article) => {
+    if (!article.item_description) {
+      toast({
+        title: "Missing Fields",
+        description: "Please fill in at least the Item Description before adding",
+        variant: "destructive",
+      })
+      return
+    }
+    const qty = article.quantity_units || 1
+    const casePack = article.unit_pack_size || 0
+    const netWeightKg = article.net_weight || 0
+    const totalWeightKg = article.total_weight || 0
+    const netWeightPerBox = qty > 0 ? netWeightKg / qty : 0
+    const totalWeightPerBox = qty > 0 ? totalWeightKg / qty : 0
+
+    const newEntries = []
+    const timeStamp = new Date().toLocaleTimeString()
+
+    for (let i = 0; i < qty; i++) {
+      const uniqueId = boxIdCounterRef.current
+      boxIdCounterRef.current += 1
+
+      newEntries.push({
+        id: uniqueId,
+        boxNumber: uniqueId,
+        boxId: article.sku_id ? String(article.sku_id) : 'N/A',
+        itemDescription: article.item_description || 'N/A',
+        skuId: article.sku_id || null,
+        transactionNo: 'DIRECT',
+        boxNumberInArray: uniqueId,
+        materialType: article.material_type || 'N/A',
+        itemCategory: article.item_category || 'N/A',
+        subCategory: article.sub_category || 'N/A',
+        netWeight: String(parseFloat(netWeightPerBox.toFixed(3))),
+        totalWeight: String(parseFloat(totalWeightPerBox.toFixed(3))),
+        batchNumber: article.batch_number || 'N/A',
+        lotNumber: article.lot_number || 'N/A',
+        manufacturingDate: article.manufacturing_date || 'N/A',
+        expiryDate: article.expiry_date || 'N/A',
+        packagingType: String(article.pack_size) || 'N/A',
+        packageSize: String(casePack),
+        quantityUnits: '1',
+        uom: article.uom || 'N/A',
+        itemCode: 'N/A',
+        hsnCode: 'N/A',
+        qualityGrade: 'N/A',
+        scannedAt: timeStamp,
+        rawData: article,
       })
     }
-    
-    // Remove box from scannedBoxes
-    setScannedBoxes(prev => prev.filter(box => box.id !== boxId))
-    
-    toast({
-      title: "Box Removed",
-      description: boxToRemove ? `Box #${boxToRemove.boxNumber} removed` : "Box removed",
+
+    setScannedBoxes(prev => [...prev, ...newEntries])
+
+    // Update loadedItems scanned counts
+    setLoadedItems(prevItems => {
+      const itemsCopy = prevItems.map(it => ({ ...it }))
+      const matchIdx = itemsCopy.findIndex(it =>
+        String(it.sku_id) === String(article.sku_id) ||
+        it.item_description === article.item_description
+      )
+      if (matchIdx !== -1) {
+        const matched = itemsCopy[matchIdx]
+        const currentScanned = parseInt(matched.scanned_count || '0') || 0
+        matched.scanned_count = currentScanned + qty
+        const totalQty = parseInt(matched.quantity) || 0
+        matched.pending = Math.max(0, totalQty - matched.scanned_count)
+      }
+      return itemsCopy
     })
+
+    toast({
+      title: "Added to Articles List",
+      description: `${qty} box(es) of ${article.item_description} added`,
+    })
+  }
+
+  // Handle removing a scanned box
+  const handleRemoveBox = (boxId: number) => {
+    // Use functional update to always work with latest state (avoids stale closure)
+    setScannedBoxes(prev => {
+      // Use loose equality (==) to handle potential string/number mismatch from localStorage
+      const boxToRemove = prev.find(box => box.id == boxId)
+
+      if (boxToRemove) {
+        // Update loadedItems: decrement scanned_count and recalculate pending
+        setLoadedItems(prevItems => {
+          const itemsCopy = prevItems.map(it => ({ ...it }))
+          const matchIdx = itemsCopy.findIndex(it =>
+            String(it.sku_id) === String(boxToRemove.skuId) ||
+            it.item_description === boxToRemove.itemDescription
+          )
+
+          if (matchIdx !== -1) {
+            const matched = itemsCopy[matchIdx]
+            const currentScanned = parseInt(matched.scanned_count || '0') || 0
+            matched.scanned_count = Math.max(0, currentScanned - 1)
+            const qty = parseInt(matched.quantity) || 0
+            matched.pending = Math.max(0, qty - matched.scanned_count)
+          }
+
+          return itemsCopy
+        })
+
+        toast({
+          title: "Box Removed",
+          description: `Box #${boxToRemove.boxNumber} removed`,
+        })
+      }
+
+      // Filter using loose equality to handle string/number mismatch
+      const filtered = prev.filter(box => box.id != boxId)
+
+      // If filter didn't work (same length), force remove by index as fallback
+      if (filtered.length === prev.length) {
+        const idx = prev.findIndex(box => String(box.id) === String(boxId))
+        if (idx !== -1) {
+          const copy = [...prev]
+          copy.splice(idx, 1)
+          return copy
+        }
+      }
+
+      return filtered
+    })
+  }
+
+  // Update a single scanned box field (for inline editing)
+  // When Case Pack (packagingType) changes, auto-recalculate Net Wt = casePack × unitPackSize
+  const updateScannedBox = (boxId: number, field: string, value: string) => {
+    setScannedBoxes(prev => prev.map(box => {
+      if (box.id !== boxId) return box
+      const updated = { ...box, [field]: value }
+      if (field === 'packagingType') {
+        const casePack = parseFloat(value) || 0
+        const unitPackSize = parseFloat(box.packageSize) || 0
+        updated.netWeight = String(parseFloat((casePack * unitPackSize).toFixed(3)))
+      }
+      return updated
+    }))
   }
 
   // Handle manual box entry - fetch box by box_number + transaction_no
@@ -976,7 +943,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       boxIdCounterRef.current += 1
 
       const materialType = boxData.material_type || ''
-      const isFG = materialType.toUpperCase().includes('FINISH')
       const netWeightRaw = parseFloat(boxData.net_weight || 0)
       const grossWeightRaw = parseFloat(boxData.gross_weight || 0)
 
@@ -991,8 +957,8 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         materialType: materialType || 'N/A',
         itemCategory: boxData.item_category || 'N/A',
         subCategory: boxData.sub_category || 'N/A',
-        netWeight: isFG ? String((netWeightRaw / 1000).toFixed(3)) : String(netWeightRaw),
-        totalWeight: isFG ? String((grossWeightRaw / 1000).toFixed(3)) : String(grossWeightRaw),
+        netWeight: String(netWeightRaw),
+        totalWeight: String(grossWeightRaw),
         batchNumber: boxData.batch_number || 'N/A',
         lotNumber: boxData.lot_number || 'N/A',
         manufacturingDate: boxData.manufacturing_date || 'N/A',
@@ -1032,12 +998,10 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
   const handleQRScanSuccess = async (decodedText: string) => {
     // Prevent duplicate processing
     if (isProcessingRef.current) {
-      console.log('⏭️ Already processing a scan, skipping...')
       return
     }
     
     isProcessingRef.current = true
-    console.log('📱 QR Code Scanned:', decodedText)
     
     // Close the scanner immediately after successful scan
     setShowScanner(false)
@@ -1045,19 +1009,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     try {
       // Try to parse JSON from QR code
       const qrData = JSON.parse(decodedText)
-      
-      console.log('📱 QR Data Received:', qrData)
-      console.log('🔍 Checking item_description fields:', {
-        item_description: qrData.item_description,
-        id: qrData.id,
-        it: qrData.it,
-        description: qrData.description,
-        article: qrData.article,
-        article_name: qrData.article_name,
-        item: qrData.item,
-        itemDescription: qrData.itemDescription
-      })
-      
+
       // Check if this is the NEW QR format: {"tx":"TR-...","bi":"..."}
       const isNewQRFormat = qrData.tx && qrData.bi
 
@@ -1072,14 +1024,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         const skuId = qrData.sku_id || qrData.sk || null
         const boxNumber = qrData.box_number || qrData.bx || null
 
-        console.log('🔍 Checking duplicate for:', { transactionNo, qrBoxId, skuId, boxNumber, isNewQRFormat })
-        console.log('📦 Current scanned boxes:', scannedBoxes.map(b => ({
-          transactionNo: b.transactionNo,
-          skuId: b.skuId,
-          boxId: b.boxId,
-          boxNumberInArray: b.boxNumberInArray
-        })))
-
         // Check for duplicate: for new QR format use tx + bi, otherwise use transaction_no + sku_id + box_number
         const isDuplicate = scannedBoxes.some(box => {
           if (isNewQRFormat) {
@@ -1088,15 +1032,9 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
           const match = box.transactionNo === transactionNo &&
                        box.skuId === skuId &&
                        box.boxNumberInArray === boxNumber
-          console.log(`Comparing with box ${box.boxNumber}:`, { match, box: {
-            transactionNo: box.transactionNo,
-            skuId: box.skuId,
-            boxNumberInArray: box.boxNumberInArray
-          }})
           return match
         })
 
-        console.log('🎯 Is duplicate?', isDuplicate)
 
         if (isDuplicate) {
           console.error('❌ DUPLICATE BOX DETECTED!')
@@ -1117,7 +1055,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         if (isNewQRFormat) {
           try {
             const apiUrl = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/interunit/box-lookup-by-id/${company}?box_id=${encodeURIComponent(qrBoxId)}&transaction_no=${encodeURIComponent(transactionNo)}`
-            console.log('🔍 New QR format - fetching box by box_id:', apiUrl)
 
             const response = await fetch(apiUrl)
             if (!response.ok) {
@@ -1127,7 +1064,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
 
             const data = await response.json()
             const fetchedBox = data.box
-            console.log('✅ Fetched box data:', fetchedBox)
 
             boxData = {
               ...qrData,
@@ -1163,8 +1099,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         else if (transactionNo.startsWith('TX') || transactionNo.startsWith('CONS')) {
           try {
             const apiUrl = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/inward/${company}/${encodeURIComponent(transactionNo)}`
-            console.log('🔍 Fetching transaction data from:', apiUrl)
-            console.log('🔍 Looking for - Transaction:', transactionNo, 'SKU:', skuId, 'Box:', boxNumber)
             
             const response = await fetch(apiUrl)
             if (!response.ok) {
@@ -1172,9 +1106,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
             }
             
             const fetchedData = await response.json()
-            console.log('✅ Fetched transaction data:', fetchedData)
-            console.log('📦 Available boxes:', fetchedData.boxes?.length)
-            console.log('📄 Available articles:', fetchedData.articles?.length)
             
             // Find the matching box - try multiple matching strategies
             let matchingBox = null
@@ -1199,7 +1130,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                 }
               }
               
-              console.log('🎯 Matching box found:', matchingBox)
             }
 
             // Find the matching article
@@ -1215,7 +1145,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
               // If no sku_id or no match, use the first article if only one exists
               if (!matchingArticle && fetchedData.articles.length === 1) {
                 matchingArticle = fetchedData.articles[0]
-                console.log('ℹ️ Using single article as default')
               }
               
               // If still no match, try matching by item_description from QR
@@ -1225,47 +1154,30 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                 )
               }
               
-              console.log('🎯 Matching article found:', matchingArticle)
             }
 
             // Merge data from API with QR data
             if (matchingBox || matchingArticle) {
               boxData = {
                 ...qrData,
-                // Basic identifiers - Enhanced item_description extraction
-                item_description: matchingArticle?.item_description || matchingBox?.article_description || matchingBox?.article || matchingBox?.article_name || qrData.item_description || qrData.id || qrData.it || qrData.description || qrData.article || qrData.article_name || qrData.item || qrData.itemDescription,
-                sku_id: matchingArticle?.sku_id || matchingBox?.sku_id || qrData.sku_id || qrData.sk || skuId,
-
-                // Category information
-                material_type: matchingArticle?.material_type || qrData.material_type || qrData.mt,
-                item_category: matchingArticle?.item_category || qrData.item_category || qrData.ic,
-                sub_category: matchingArticle?.sub_category || qrData.sub_category || qrData.sc,
-
-                // Weight information
-                net_weight: matchingBox?.net_weight || matchingArticle?.net_weight || qrData.net_weight || qrData.nw || qrData.netWeight,
-                total_weight: matchingBox?.gross_weight || matchingBox?.total_weight || matchingArticle?.total_weight || qrData.total_weight || qrData.gw || qrData.tw || qrData.wt || qrData.totalWeight || qrData.gross_weight,
-
-                // Batch and lot information
-                batch_number: matchingArticle?.batch_number || matchingBox?.batch_number || qrData.batch_number || qrData.bn || qrData.bt,
-                lot_number: matchingArticle?.lot_number || matchingBox?.lot_number || qrData.lot_number || qrData.ln || qrData.lot,
-
-                // Date information
-                manufacturing_date: matchingArticle?.manufacturing_date || qrData.manufacturing_date || qrData.mfg_date || qrData.md,
-                expiry_date: matchingArticle?.expiry_date || qrData.expiry_date || qrData.exp_date || qrData.ed,
-
-                // Packaging and quantity
-                pack_size: matchingArticle?.pack_size || qrData.pack_size || qrData.pt,
-                quantity_units: matchingArticle?.quantity_units || qrData.quantity_units || qrData.qty || qrData.quantity,
-                uom: matchingArticle?.uom || qrData.uom || qrData.unit,
-
-                // Additional article details
-                item_code: matchingArticle?.item_code || qrData.item_code || qrData.code,
-                hsn_code: matchingArticle?.hsn_code || qrData.hsn_code || qrData.hsn,
-                quality_grade: matchingArticle?.quality_grade || qrData.quality_grade || qrData.grade
+                item_description: matchingBox?.item_description || matchingBox?.article_description || matchingArticle?.item_description || qrData.item_description,
+                sku_id: matchingBox?.sku_id || matchingArticle?.sku_id || qrData.sku_id,
+                material_type: matchingArticle?.material_type || matchingBox?.material_type || qrData.material_type,
+                item_category: matchingArticle?.item_category || matchingBox?.item_category || qrData.item_category,
+                sub_category: matchingArticle?.sub_category || matchingBox?.sub_category || qrData.sub_category,
+                net_weight: matchingBox?.net_weight || qrData.net_weight,
+                gross_weight: matchingBox?.gross_weight || qrData.gross_weight,
+                batch_number: matchingBox?.batch_number || qrData.batch_number,
+                lot_number: matchingBox?.lot_number || qrData.lot_number,
+                uom: matchingArticle?.uom || matchingBox?.uom || qrData.uom,
+                manufacturing_date: matchingBox?.manufacturing_date || qrData.manufacturing_date,
+                expiry_date: matchingBox?.expiry_date || qrData.expiry_date,
+                quantity_units: matchingBox?.quantity_units || qrData.quantity_units,
+                pack_size: matchingBox?.pack_size || qrData.pack_size,
+                quality_grade: matchingBox?.quality_grade || qrData.quality_grade,
+                box_number: matchingBox?.box_number || qrData.box_number,
+                box_id: matchingBox?.box_id || qrData.box_id,
               }
-              console.log('✅ Merged box data with all available fields:', boxData)
-            } else {
-              console.log('⚠️ No matching box or article found, using QR data only')
             }
           } catch (fetchError) {
             console.error('❌ Failed to fetch transaction data:', fetchError)
@@ -1276,76 +1188,37 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         const uniqueId = boxIdCounterRef.current
         boxIdCounterRef.current += 1 // Increment for next box
 
+        const materialType = boxData.material_type || ''
+        const netWeightRaw = parseFloat(boxData.net_weight || 0)
+        const grossWeightRaw = parseFloat(boxData.gross_weight || 0)
+
         const newBox = {
-          id: uniqueId, // Unique ID for React key
-          boxNumber: uniqueId, // Display number (also unique)
-          boxId: qrBoxId || boxId || boxData.box_id || boxData.batch_number || boxData.bn || boxData.bt || 'N/A',
-
-          // Basic identification - Enhanced item_description with multiple fallbacks
-          itemDescription: boxData.item_description || boxData.id || boxData.it || boxData.description || boxData.article || boxData.article_name || boxData.item || boxData.itemDescription || 'N/A',
-          skuId: boxData.sku_id || boxData.sk || skuId,
-          transactionNo: transactionNo,
-          boxNumberInArray: boxData.box_number || boxNumber,
-
-          // Category information
-          materialType: boxData.material_type || boxData.mt || 'N/A',
-          itemCategory: boxData.item_category || boxData.ic || 'N/A',
-          subCategory: boxData.sub_category || boxData.sc || 'N/A',
-
-          // Weight information - Store always in KG (FG from grams; RM from grams if value >= 100 else kg)
-          netWeight: (() => {
-            const materialType = boxData.material_type || boxData.mt || ''
-            const raw = parseFloat(boxData.net_weight || boxData.nw || boxData.netWeight || '0')
-            const isFG = materialType.toUpperCase().includes('FINISH')
-            const kg = isFG ? raw / 1000 : (raw >= 100 ? raw / 1000 : raw)
-            return String(Number(kg.toFixed(3)))
-          })(),
-          totalWeight: (() => {
-            const materialType = boxData.material_type || boxData.mt || ''
-            const raw = parseFloat(boxData.total_weight || boxData.gw || boxData.tw || boxData.wt || boxData.totalWeight || boxData.gross_weight || '0')
-            const isFG = materialType.toUpperCase().includes('FINISH')
-            const kg = isFG ? raw / 1000 : (raw >= 100 ? raw / 1000 : raw)
-            return String(Number(kg.toFixed(3)))
-          })(),
-
-          // Batch and lot information
-          batchNumber: boxData.batch_number || boxData.bn || boxData.bt || 'N/A',
-          lotNumber: boxData.lot_number || boxData.ln || boxData.lot || 'N/A',
-
-          // Date information
-          manufacturingDate: boxData.manufacturing_date || boxData.mfg_date || boxData.md || 'N/A',
-          expiryDate: boxData.expiry_date || boxData.exp_date || boxData.ed || 'N/A',
-
-          // Packaging and quantity
-          packagingType: boxData.pack_size || boxData.pt || 'N/A',
-          quantityUnits: boxData.quantity_units || boxData.qty || boxData.quantity || 'N/A',
-          uom: boxData.uom || boxData.unit || 'N/A',
-
-          // Additional details
-          itemCode: boxData.item_code || boxData.code || 'N/A',
-          hsnCode: boxData.hsn_code || boxData.hsn || 'N/A',
-          qualityGrade: boxData.quality_grade || boxData.grade || 'N/A',
-
-          // Metadata
+          id: uniqueId,
+          boxNumber: uniqueId,
+          boxId: boxData.box_id || boxData.bi || 'N/A',
+          itemDescription: boxData.item_description || boxData.article_description || 'N/A',
+          skuId: boxData.sku_id || boxData.sk || null,
+          transactionNo: boxData.transaction_no || boxData.cn || boxData.tx || 'N/A',
+          boxNumberInArray: boxData.box_number || boxData.bx || 0,
+          materialType: materialType || 'N/A',
+          itemCategory: boxData.item_category || 'N/A',
+          subCategory: boxData.sub_category || 'N/A',
+          netWeight: String(netWeightRaw),
+          totalWeight: String(grossWeightRaw),
+          batchNumber: boxData.batch_number || 'N/A',
+          lotNumber: boxData.lot_number || 'N/A',
+          manufacturingDate: boxData.manufacturing_date || 'N/A',
+          expiryDate: boxData.expiry_date || 'N/A',
+          packagingType: boxData.pack_size || 'N/A',
+          quantityUnits: boxData.quantity_units || 'N/A',
+          uom: boxData.uom || 'N/A',
+          itemCode: 'N/A',
+          hsnCode: 'N/A',
+          qualityGrade: boxData.quality_grade || 'N/A',
           scannedAt: new Date().toLocaleTimeString(),
-          rawData: boxData
+          rawData: boxData,
         }
 
-        console.log('📦 Created box object with all fields:')
-        console.log('  - Item Description:', newBox.itemDescription)
-        console.log('  - SKU ID:', newBox.skuId)
-        console.log('  - Material Type:', newBox.materialType)
-        console.log('  - Category:', newBox.itemCategory)
-        console.log('  - Sub-Category:', newBox.subCategory)
-        console.log('  - Net Weight:', newBox.netWeight, newBox.materialType.toUpperCase().includes('FINISH') ? 'KG' : 'GM')
-        console.log('  - Total Weight:', newBox.totalWeight, newBox.materialType.toUpperCase().includes('FINISH') ? 'KG' : 'GM')
-        console.log('  - Batch Number:', newBox.batchNumber)
-        console.log('  - Lot Number:', newBox.lotNumber)
-        console.log('  - Manufacturing Date:', newBox.manufacturingDate)
-        console.log('  - Expiry Date:', newBox.expiryDate)
-        console.log('  - Transaction No:', newBox.transactionNo)
-        console.log('  - Box Number:', newBox.boxNumberInArray)
-        
         setScannedBoxes(prev => {
           const updatedBoxes = [...prev, newBox]
           
@@ -1401,7 +1274,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
           return updatedBoxes
         })
         
-        console.log('📦 Box added to list:', newBox)
       } else {
         // Regular request QR code - auto-fill form fields
         if (qrData.request_no) {
@@ -1427,7 +1299,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       }
     } catch (error) {
       // If not JSON, treat as plain text (maybe a box ID)
-      console.log('QR data is not JSON, treating as text:', decodedText)
       
       // Check if it looks like a box ID (starts with CONS or TR)
       if (decodedText.startsWith('CONS') || decodedText.startsWith('TR')) {
@@ -1435,20 +1306,34 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         boxIdCounterRef.current += 1 // Increment for next box
         
         const newBox = {
-          id: uniqueId, // Unique ID for React key
-          boxNumber: uniqueId, // Display number (also unique)
-          boxId: decodedText,
+          id: uniqueId,
+          boxNumber: uniqueId,
+          boxId: 'N/A',
           itemDescription: 'N/A',
+          skuId: null,
+          transactionNo: decodedText,
+          boxNumberInArray: 0,
+          materialType: 'N/A',
+          itemCategory: 'N/A',
+          subCategory: 'N/A',
           netWeight: '0',
           totalWeight: '0',
           batchNumber: 'N/A',
-          transactionNo: 'N/A',
+          lotNumber: 'N/A',
+          manufacturingDate: 'N/A',
+          expiryDate: 'N/A',
+          packagingType: 'N/A',
+          quantityUnits: 'N/A',
+          uom: 'N/A',
+          itemCode: 'N/A',
+          hsnCode: 'N/A',
+          qualityGrade: 'N/A',
           scannedAt: new Date().toLocaleTimeString(),
-          rawData: decodedText
+          rawData: { transaction_no: decodedText },
         }
-        
+
         setScannedBoxes(prev => [...prev, newBox])
-        
+
         toast({
           title: "Box ID Scanned",
           description: `Box #${newBox.boxNumber} - ${decodedText} added`,
@@ -1504,12 +1389,8 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     
-    console.log('🚀 ========== TRANSFER FORM SUBMISSION STARTED ==========')
-    console.log('📋 Transfer Number:', transferNo)
-    console.log('📋 Request Number:', requestNo)
     
     // Validation - collect all errors
-    console.log('✅ Step 1: Validating form data...')
     const errors: string[] = []
 
     // Request Header Validation
@@ -1559,9 +1440,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         errors.push(`Article ${index + 1}: Item description is required`)
       }
       
-      if (!article.quantity_units || article.quantity_units === 0) {
-        errors.push(`Article ${index + 1}: Quantity must be greater than 0`)
-      }
       
     })
 
@@ -1613,21 +1491,13 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     
     // Clear errors if validation passes
     setValidationErrors([])
-    console.log('✅ Step 1: Validation passed!')
     
     // Prepare payload
-    console.log('📦 Step 2: Preparing payload...')
     
     // Get driver name and approval authority
     const driverName = transferInfo.driverName === "other" ? transferInfo.driverNameOther : transferInfo.driverName
     const approvalAuthority = transferInfo.approvalAuthorityOther
     
-    console.log('🔍 Transfer Info Debug:')
-    console.log('  - transferInfo.driverName:', transferInfo.driverName)
-    console.log('  - transferInfo.driverNameOther:', transferInfo.driverNameOther)
-    console.log('  - transferInfo.approvalAuthorityOther:', transferInfo.approvalAuthorityOther)
-    console.log('  - Final driverName:', driverName)
-    console.log('  - Final approvalAuthority:', approvalAuthority)
     
     const payload = {
       header: {
@@ -1649,18 +1519,13 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         quantity: String(article.quantity_units),
         uom: article.uom,
         pack_size: String(article.pack_size),
-        package_size: article.material_type === "FG" ? String(article.package_size || 0) : null,
+        unit_pack_size: article.unit_pack_size ? String(article.unit_pack_size) : null,
         batch_number: null,
         lot_number: null
       })),
       boxes: scannedBoxes.map((box) => {
-        const isFG = box.materialType?.toUpperCase().includes('FINISH')
         const netVal = parseFloat(box.netWeight) || 0
         const grossVal = parseFloat(box.totalWeight) || 0
-        // FG: ensure we send kg to DB (convert grams to kg if value >= 1)
-        // FG: value is always in grams — divide by 1000 to get kg for DB
-        const netKg = isFG ? netVal / 1000 : netVal
-        const grossKg = isFG ? grossVal / 1000 : grossVal
         return {
           box_number: box.boxNumber,
           box_id: box.boxId || "",
@@ -1668,72 +1533,35 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
           lot_number: box.lotNumber || "",
           batch_number: box.batchNumber || "",
           transaction_no: box.transactionNo || "",
-          net_weight: String(Number(netKg.toFixed(3))),
-          gross_weight: String(Number(grossKg.toFixed(3)))
+          net_weight: String(Number(netVal.toFixed(3))),
+          gross_weight: String(Number(grossVal.toFixed(3)))
         }
       }),
       request_id: requestIdFromUrl ? parseInt(requestIdFromUrl) : null
     }
 
-    console.log('📦 Payload prepared:')
-    console.log('  - Challan No:', payload.header.challan_no)
-    console.log('  - Transfer Date:', payload.header.stock_trf_date)
-    console.log('  - From:', payload.header.from_warehouse, '→ To:', payload.header.to_warehouse)
-    console.log('  - Lines Count:', payload.lines.length)
-    console.log('  - Boxes Count:', payload.boxes.length)
-    console.log('  - Vehicle:', payload.header.vehicle_no)
-    console.log('  - Driver Name:', payload.header.driver_name)
-    console.log('  - Approved By:', payload.header.approved_by)
-    console.log('  - Reason:', payload.header.reason_code)
-    console.log('  - Request ID:', payload.request_id)
-    console.log('📄 Full Payload:', JSON.stringify(payload, null, 2))
     
     // Debug: Log scanned boxes details
     if (payload.boxes.length > 0) {
-      console.log('📦 ========== SCANNED BOXES DETAILS ==========')
       payload.boxes.forEach((box, index) => {
-        console.log(`Box ${index + 1}:`)
-        console.log(`  - Box Number: ${box.box_number}`)
-        console.log(`  - Article: ${box.article}`)
-        console.log(`  - Transaction No: ${box.transaction_no}`)
-        console.log(`  - Batch Number: ${box.batch_number}`)
-        console.log(`  - Lot Number: ${box.lot_number}`)
-        console.log(`  - Net Weight: ${box.net_weight} kg`)
-        console.log(`  - Gross Weight: ${box.gross_weight} kg`)
       })
-      console.log('='.repeat(50))
     } else {
-      console.log('⚠️ No boxes scanned for this transfer')
     }
     
     // Debug: Log the actual article values being sent
-    console.log('🔍 DEBUG: Article values being sent:')
     payload.lines.forEach((line, index) => {
-      console.log(`  Line ${index + 1}:`)
-      console.log(`    - material_type: "${line.material_type}"`)
-      console.log(`    - item_category: "${line.item_category}"`)
-      console.log(`    - sub_category: "${line.sub_category}"`)
-      console.log(`    - item_description: "${line.item_description}"`)
-      console.log(`    - uom: "${line.uom}"`)
     })
 
     try {
-      console.log('🌐 Step 3: Sending request to API...')
-      console.log('API Endpoint: POST /api/transfer/' + company)
       
-      const response = await InterunitApiService.submitTransfer(company, payload)
+      const response = await InterunitApiService.submitTransfer(company, payload, user?.name || user?.email || 'unknown')
       
-      console.log('✅ Step 3: API Response received!')
-      console.log('Response:', response)
       
       toast({
         title: "Transfer Submitted Successfully",
         description: `Transfer ${payload.header.challan_no} has been created successfully`,
       })
       
-      console.log('🎉 ========== TRANSFER FORM SUBMISSION COMPLETED ==========')
-      console.log('Transfer Status: Created')
-      console.log('Lines Submitted:', payload.lines.length)
 
       // Clear saved draft after successful submission
       clearSavedData()
@@ -1741,7 +1569,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
 
       // Redirect back to transfer list
       setTimeout(() => {
-        console.log('🔄 Redirecting to transfer list...')
         router.push(`/${company}/transfer`)
       }, 1500)
 
@@ -2167,7 +1994,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         {/* Articles */}
         <div className="space-y-6">
           {articles.map((article, index) => {
-            console.log("Rendering article:", { id: article.id, material_type: article.material_type, index })
             return (
             <div key={article.id} className="border rounded-lg p-4 space-y-4">
               <div className="flex items-center justify-between">
@@ -2191,6 +2017,65 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                 </div>
               </div>
 
+              {/* Quick Item Search */}
+              <div className="relative mb-4">
+                <Label className="text-xs font-medium text-gray-600 mb-1 block">
+                  <Search className="inline h-3 w-3 mr-1 -mt-0.5" />
+                  Quick Search Item
+                </Label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <Input
+                    type="text"
+                    placeholder="Type item name to search and auto-fill..."
+                    value={itemSearchQuery[article.id] || ""}
+                    onChange={(e) => handleItemSearch(article.id, e.target.value)}
+                    onFocus={() => {
+                      if (itemSearchResults[article.id]?.length > 0) {
+                        setItemSearchOpen(prev => ({ ...prev, [article.id]: true }))
+                      }
+                    }}
+                    onBlur={() => {
+                      setTimeout(() => setItemSearchOpen(prev => ({ ...prev, [article.id]: false })), 200)
+                    }}
+                    className="pl-9 h-9 text-sm"
+                  />
+                  {itemSearchLoading[article.id] && (
+                    <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-gray-400" />
+                  )}
+                </div>
+                {itemSearchOpen[article.id] && itemSearchResults[article.id]?.length > 0 && (
+                  <div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                    {itemSearchResults[article.id].map((item, i) => (
+                      <button
+                        key={`${item.id}-${i}`}
+                        type="button"
+                        className="w-full text-left px-3 py-2.5 hover:bg-gray-50 border-b border-gray-50 last:border-b-0 transition-colors"
+                        onMouseDown={(e) => { e.preventDefault(); handleItemSelect(article.id, item) }}
+                      >
+                        <div className="text-sm font-medium text-gray-800">{item.item_description}</div>
+                        <div className="flex gap-2 mt-0.5">
+                          {item.material_type && (
+                            <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">{item.material_type}</span>
+                          )}
+                          {item.group && (
+                            <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded">{item.group}</span>
+                          )}
+                          {item.sub_group && (
+                            <span className="text-[10px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded">{item.sub_group}</span>
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {itemSearchOpen[article.id] && itemSearchQuery[article.id]?.length >= 2 && !itemSearchLoading[article.id] && itemSearchResults[article.id]?.length === 0 && (
+                  <div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg px-3 py-3 text-sm text-gray-500 text-center">
+                    No items found
+                  </div>
+                )}
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 {/* Material Type */}
                 <div className="space-y-1">
@@ -2198,7 +2083,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                   <MaterialTypeDropdown
                     value={article.material_type}
                     onValueChange={(value) => {
-                      console.log("Material Type selected:", value, "for article:", article.id, "current material_type:", article.material_type)
                       // Update the article with new material type and clear dependent fields in a single operation
                       const updatedArticles = articles.map((art) => {
                         if (art.id === article.id) {
@@ -2213,14 +2097,10 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                         }
                         return art
                       })
-                      console.log("Updating articles with material_type:", updatedArticles)
                       setArticles(updatedArticles)
                     }}
                     company={company}
                   />
-                  {requestIdFromUrl && index === 0 && (
-                    <p className="text-xs text-gray-500 mt-1">🔒 Loaded from request</p>
-                  )}
                 </div>
 
                 {/* Item Category */}
@@ -2230,7 +2110,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                     materialType={article.material_type}
                     value={article.item_category}
                     onValueChange={(value) => {
-                      console.log("Item Category selected:", value, "for article:", article.id)
                       // Update the article with new category and clear dependent fields in a single operation
                       const updatedArticles = articles.map((art) => {
                         if (art.id === article.id) {
@@ -2247,11 +2126,8 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                       setArticles(updatedArticles)
                     }}
                     company={company}
-                    disabled={!article.material_type || !!(requestIdFromUrl && index === 0)}
+                    disabled={!article.material_type}
                   />
-                  {requestIdFromUrl && index === 0 && (
-                    <p className="text-xs text-gray-500 mt-1">🔒 Loaded from request</p>
-                  )}
                 </div>
 
                 {/* Sub Category */}
@@ -2262,7 +2138,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                     categoryId={article.item_category}
                     value={article.sub_category}
                     onValueChange={(value) => {
-                      console.log("Sub Category selected:", value, "for article:", article.id)
                       // Update the article with new sub category and clear dependent fields in a single operation
                       const updatedArticles = articles.map((art) => {
                         if (art.id === article.id) {
@@ -2278,12 +2153,9 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                       setArticles(updatedArticles)
                     }}
                     company={company}
-                    disabled={!article.material_type || !article.item_category || !!(requestIdFromUrl && index === 0)}
+                    disabled={!article.material_type || !article.item_category}
                     materialType={article.material_type}
                   />
-                  {requestIdFromUrl && index === 0 && (
-                    <p className="text-xs text-gray-500 mt-1">🔒 Loaded from request</p>
-                  )}
                 </div>
 
                 {/* Item Description */}
@@ -2295,40 +2167,25 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                     subCategoryId={article.sub_category}
                     materialType={article.material_type}
                     value={article.item_description}
-                    onValueChange={(value) => {
-                      console.log("Item Description selected:", value, "for article:", article.id)
-                      // Update the article with new item description in a single operation
-                      const updatedArticles = articles.map((art) => {
-                        if (art.id === article.id) {
-                          return {
-                            ...art,
-                            item_description: value
-                          }
-                        }
-                        return art
-                      })
-                      setArticles(updatedArticles)
-                    }}
+                    onValueChange={() => {}}
                     company={company}
                     updateArticle={updateArticle}
-                    disabled={!article.material_type || !article.item_category || !article.sub_category || !!(requestIdFromUrl && index === 0)}
+                    disabled={!article.material_type || !article.item_category || !article.sub_category}
                   />
-                  {requestIdFromUrl && index === 0 && (
-                    <p className="text-xs text-gray-500 mt-1">🔒 Loaded from request</p>
-                  )}
                 </div>
 
-                {/* Quantity Units */}
+                {/* Package Size */}
                 <div>
-                  <Label htmlFor={`quantity_units_${article.id}`}>Quantity Units *</Label>
+                  <Label htmlFor={`unit_pack_size_${article.id}`}>Unit Pack Size</Label>
                   <Input
-                    id={`quantity_units_${article.id}`}
+                    id={`unit_pack_size_${article.id}`}
                     type="number"
+                    step="any"
                     min="0"
-                    value={article.quantity_units}
-                    onChange={(e) => updateArticle(article.id, "quantity_units", Number(e.target.value))}
+                    value={article.unit_pack_size}
+                    onChange={(e) => updateArticle(article.id, "unit_pack_size", parseFloat(e.target.value) || 0)}
                     onWheel={(e) => e.currentTarget.blur()}
-                    placeholder="Enter quantity"
+                    placeholder="Enter package size"
                   />
                 </div>
 
@@ -2354,7 +2211,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
 
                 {/* Pack Size */}
                 <div>
-                  <Label htmlFor={`pack_size_${article.id}`}>Pack Size ({article.material_type === 'FG' ? 'gm' : 'Kg'})</Label>
+                  <Label htmlFor={`pack_size_${article.id}`}>Case Pack/Box Wt.</Label>
                   <Input
                     id={`pack_size_${article.id}`}
                     type="number"
@@ -2367,23 +2224,19 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                   />
                 </div>
 
-                {/* Package Size - Only for FG */}
-                {article.material_type === "FG" && (
-                  <div>
-                    <Label htmlFor={`package_size_${article.id}`}>Package Size (gm)</Label>
-                    <Input
-                      id={`package_size_${article.id}`}
-                      type="number"
-                      step="any"
-                      min="0"
-                      value={article.package_size}
-                      onChange={(e) => updateArticle(article.id, "package_size", parseFloat(e.target.value) || 0)}
-                      onWheel={(e) => e.currentTarget.blur()}
-                      placeholder="Enter package size"
-                      readOnly={!!(requestIdFromUrl)}
-                    />
-                  </div>
-                )}
+                {/* Quantity (Box/Bags) */}
+                <div>
+                  <Label htmlFor={`quantity_units_${article.id}`}>Quantity (Box/Bags)</Label>
+                  <Input
+                    id={`quantity_units_${article.id}`}
+                    type="number"
+                    min="0"
+                    value={article.quantity_units}
+                    onChange={(e) => updateArticle(article.id, "quantity_units", Number(e.target.value))}
+                    onWheel={(e) => e.currentTarget.blur()}
+                    placeholder="Enter quantity"
+                  />
+                </div>
 
                 {/* Net Weight */}
                 <div>
@@ -2399,6 +2252,32 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                     placeholder="Enter net weight"
                   />
                 </div>
+
+                {/* Lot Number */}
+                <div>
+                  <Label htmlFor={`lot_number_${article.id}`}>
+                    Lot Number <span className="text-gray-400 font-normal">(Optional)</span>
+                  </Label>
+                  <Input
+                    id={`lot_number_${article.id}`}
+                    type="text"
+                    value={article.lot_number}
+                    onChange={(e) => updateArticle(article.id, "lot_number", e.target.value)}
+                    placeholder="Enter lot number"
+                  />
+                </div>
+              </div>
+
+              {/* Add to List Button */}
+              <div className="flex justify-end pt-2 border-t border-gray-100">
+                <Button
+                  type="button"
+                  onClick={() => handleAddArticleToList(article)}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white h-10 sm:h-9 px-5 text-xs sm:text-sm w-full sm:w-auto"
+                >
+                  <Plus className="mr-2 h-3.5 w-3.5" />
+                  Add to Articles List
+                </Button>
               </div>
             </div>
           )
@@ -2491,8 +2370,8 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                           </div>
                           {item.material_type === "FG" && (
                             <div>
-                              <span className="text-gray-500">Package Size:</span>
-                              <span className="ml-1 text-gray-700 font-medium">{item.package_size || "N/A"}</span>
+                              <span className="text-gray-500">Unit Pack Size:</span>
+                              <span className="ml-1 text-gray-700 font-medium">{item.unit_pack_size || "N/A"}</span>
                             </div>
                           )}
                           <div>
@@ -2537,25 +2416,25 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                     <Package className="h-4 w-4 mr-2" />
                     Scanned Boxes ({scannedBoxes.length}) or Articles list
                   </CardTitle>
-                  {(articles[0]?.quantity_units || 0) > 0 && (
+                  {loadedItems.length > 0 && (
                     <div className="flex flex-wrap items-center gap-2 text-xs sm:text-sm">
                       <div className="hidden sm:block h-5 w-px bg-gray-300"></div>
                       <span className="text-gray-600">Qty:</span>
-                      <span className="font-semibold text-gray-800">{articles[0]?.quantity_units}</span>
+                      <span className="font-semibold text-gray-800">{loadedItems.reduce((sum, it) => sum + (parseInt(it.quantity) || 0), 0)}</span>
                       <span className="text-gray-400">|</span>
                       <span className="text-gray-600">Pending:</span>
                       <span className={`font-bold ${
-                        (articles[0]?.quantity_units || 0) - scannedBoxes.length > 0 
-                          ? 'text-orange-600' 
+                        loadedItems.reduce((sum, it) => sum + (parseInt(it.quantity) || 0), 0) - scannedBoxes.length > 0
+                          ? 'text-orange-600'
                           : 'text-green-600'
                       }`}>
-                        {(articles[0]?.quantity_units || 0) - scannedBoxes.length}
+                        {loadedItems.reduce((sum, it) => sum + (parseInt(it.quantity) || 0), 0) - scannedBoxes.length}
                       </span>
-                      {articles[0]?.item_description && (
+                      {loadedItems.length > 0 && (
                         <>
                           <span className="hidden sm:inline text-gray-400">•</span>
-                          <span className="text-gray-700 font-medium truncate max-w-[200px] sm:max-w-[300px]" title={articles[0]?.item_description}>
-                            {articles[0]?.item_description}
+                          <span className="text-gray-700 font-medium truncate max-w-[200px] sm:max-w-[300px]" title={loadedItems.map(it => it.item_description).join(', ')}>
+                            {loadedItems.length === 1 ? loadedItems[0].item_description : `${loadedItems.length} items`}
                           </span>
                         </>
                       )}
@@ -2571,7 +2450,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => setScannedBoxes([])}
+                  onClick={() => { setScannedBoxes([]); boxIdCounterRef.current = 1 }}
                   className="h-7 px-3 text-xs w-full sm:w-auto"
                 >
                   Clear All
@@ -2583,21 +2462,21 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
             {scannedBoxes.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-8 text-center">
                 <Package className="h-12 w-12 text-gray-300 mb-3" />
-                <p className="text-sm font-medium text-gray-700">No boxes scanned yet</p>
+                <p className="text-sm font-medium text-gray-700">No articles added yet</p>
                 <p className="text-xs text-gray-500 mt-1">
-                  Use the QR scanner to scan box labels
+                  Fill in article details above and click "Add to Articles List", or scan QR codes
                 </p>
               </div>
             ) : (
               <>
                 {/* Mobile Card View */}
                 <div className="md:hidden space-y-3 max-h-[400px] overflow-y-auto">
-                  {scannedBoxes.map((box) => (
+                  {scannedBoxes.map((box, index) => (
                     <div key={box.id} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
                       <div className="flex items-start justify-between mb-2">
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-bold text-blue-600 bg-blue-100 px-2 py-1 rounded">
-                            Box #{box.boxNumber}
+                            Box #{index + 1}
                           </span>
                           <span className="text-xs font-medium text-gray-600 bg-gray-200 px-2 py-1 rounded">
                             {box.materialType !== 'N/A' ? box.materialType : '-'}
@@ -2623,18 +2502,45 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                           <span className="text-gray-500">Category:</span>
                           <span className="ml-2 text-gray-700">{box.itemCategory !== 'N/A' ? box.itemCategory : '-'}</span>
                         </div>
-                        <div className="grid grid-cols-2 gap-2 pt-1">
+                        <div className="grid grid-cols-3 gap-2 pt-1">
                           <div>
-                            <span className="text-gray-500">Net Wt:</span>
-                            <span className="ml-1 text-gray-800 font-medium">
-                              {box.netWeight} kg
-                            </span>
+                            <span className="text-gray-500 block mb-0.5">Unit Pack Size</span>
+                            <Input
+                              type="number"
+                              step="any"
+                              min="0"
+                              value={box.packagingType || ""}
+                              onChange={(e) => updateScannedBox(box.id, "packagingType", e.target.value)}
+                              onWheel={(e) => e.currentTarget.blur()}
+                              className="h-7 text-xs px-1"
+                              placeholder="0"
+                            />
                           </div>
                           <div>
-                            <span className="text-gray-500">Total Wt:</span>
-                            <span className="ml-1 text-gray-800 font-medium">
-                              {box.totalWeight} kg
-                            </span>
+                            <span className="text-gray-500 block mb-0.5">Net Wt</span>
+                            <Input
+                              type="number"
+                              step="any"
+                              min="0"
+                              value={box.netWeight || ""}
+                              onChange={(e) => updateScannedBox(box.id, "netWeight", e.target.value)}
+                              onWheel={(e) => e.currentTarget.blur()}
+                              className="h-7 text-xs px-1"
+                              placeholder="0"
+                            />
+                          </div>
+                          <div>
+                            <span className="text-gray-500 block mb-0.5">Total Wt</span>
+                            <Input
+                              type="number"
+                              step="any"
+                              min="0"
+                              value={box.totalWeight || ""}
+                              onChange={(e) => updateScannedBox(box.id, "totalWeight", e.target.value)}
+                              onWheel={(e) => e.currentTarget.blur()}
+                              className="h-7 text-xs px-1"
+                              placeholder="0"
+                            />
                           </div>
                         </div>
                         <div>
@@ -2645,7 +2551,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                           <span className="text-gray-500">Transaction:</span>
                           <span className="ml-1 text-gray-800 font-mono font-medium">{box.transactionNo || 'N/A'}</span>
                         </div>
-                        <div className="text-gray-400 text-[10px] pt-1">{box.scannedAt}</div>
                       </div>
                     </div>
                   ))}
@@ -2660,19 +2565,19 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                         <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Item Description</th>
                         <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Material Type</th>
                         <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Category</th>
+                        <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Unit Pack Size</th>
                         <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Net Wt</th>
                         <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Total Wt</th>
                         <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Lot No</th>
                         <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Transaction No</th>
-                        <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Time</th>
                         <th className="text-center py-2 px-2 text-xs font-medium text-gray-700">Action</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {scannedBoxes.map((box) => (
+                      {scannedBoxes.map((box, index) => (
                         <tr key={box.id} className="border-b border-gray-100 hover:bg-gray-50">
                           <td className="py-2 px-2 text-xs text-gray-800 font-medium">
-                            #{box.boxNumber}
+                            #{index + 1}
                           </td>
                           <td className="py-2 px-2 text-xs text-gray-700">
                             <div className="max-w-[200px] truncate" title={box.itemDescription}>
@@ -2687,11 +2592,41 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                               {box.itemCategory !== 'N/A' ? box.itemCategory : '-'}
                             </div>
                           </td>
-                          <td className="py-2 px-2 text-xs text-gray-700">
-                            {box.netWeight} kg
+                          <td className="py-2 px-1">
+                            <Input
+                              type="number"
+                              step="any"
+                              min="0"
+                              value={box.packagingType || ""}
+                              onChange={(e) => updateScannedBox(box.id, "packagingType", e.target.value)}
+                              onWheel={(e) => e.currentTarget.blur()}
+                              className="h-7 w-20 text-xs px-1"
+                              placeholder="0"
+                            />
                           </td>
-                          <td className="py-2 px-2 text-xs text-gray-700">
-                            {box.totalWeight} kg
+                          <td className="py-2 px-1">
+                            <Input
+                              type="number"
+                              step="any"
+                              min="0"
+                              value={box.netWeight || ""}
+                              onChange={(e) => updateScannedBox(box.id, "netWeight", e.target.value)}
+                              onWheel={(e) => e.currentTarget.blur()}
+                              className="h-7 w-20 text-xs px-1"
+                              placeholder="0"
+                            />
+                          </td>
+                          <td className="py-2 px-1">
+                            <Input
+                              type="number"
+                              step="any"
+                              min="0"
+                              value={box.totalWeight || ""}
+                              onChange={(e) => updateScannedBox(box.id, "totalWeight", e.target.value)}
+                              onWheel={(e) => e.currentTarget.blur()}
+                              className="h-7 w-20 text-xs px-1"
+                              placeholder="0"
+                            />
                           </td>
                           <td className="py-2 px-2 text-xs">
                             <span className="font-mono text-gray-700">
@@ -2702,9 +2637,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                             <span className="font-mono text-gray-800 font-medium">
                               {box.transactionNo || 'N/A'}
                             </span>
-                          </td>
-                          <td className="py-2 px-2 text-xs text-gray-500">
-                            {box.scannedAt}
                           </td>
                           <td className="py-2 px-2 text-center">
                             <Button
@@ -2764,6 +2696,56 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
             )}
           </CardContent>
         </Card>
+
+        {/* ── Requested vs Actual Weight Comparison ── */}
+        {loadedItems.length > 0 && (
+          (() => {
+            const requestedNetWt = loadedItems.reduce((sum, it) => sum + (parseFloat(it.net_weight) || 0), 0)
+            const scannedNetWt = scannedBoxes.reduce((sum, box) => sum + (parseFloat(box.netWeight) || 0), 0)
+            const articlesNetWt = articles.reduce((sum, art) => sum + (art.net_weight || 0), 0)
+            const actualNetWt = scannedNetWt > 0 ? scannedNetWt : articlesNetWt
+            const diff = actualNetWt - requestedNetWt
+            const isMatch = Math.abs(diff) < 0.01
+            const isOver = diff > 0.01
+            const borderColor = isMatch ? 'border-l-emerald-500' : isOver ? 'border-l-orange-500' : 'border-l-amber-500'
+            const bgColor = isMatch ? 'bg-emerald-50' : isOver ? 'bg-orange-50' : 'bg-amber-50'
+            const textColor = isMatch ? 'text-emerald-700' : isOver ? 'text-orange-700' : 'text-amber-700'
+            return (
+              <Card className={`border-0 shadow-sm overflow-hidden border-l-4 ${borderColor}`}>
+                <CardHeader className={`pb-2 ${bgColor}`}>
+                  <CardTitle className={`text-sm font-semibold ${textColor} flex items-center gap-2`}>
+                    <Package className="h-4 w-4" />
+                    Weight Comparison — {isMatch ? 'Matched' : isOver ? 'Over by ' + diff.toFixed(3) + ' Kg' : 'Under by ' + Math.abs(diff).toFixed(3) + ' Kg'}
+                  </CardTitle>
+                  <p className={`text-xs ${textColor} opacity-80`}>
+                    {isMatch ? 'Actual weight matches requested weight' : 'Weight does not match — you can still submit'}
+                  </p>
+                </CardHeader>
+                <CardContent className={`pt-3 pb-4 ${bgColor}`}>
+                  <div className="grid grid-cols-3 gap-4 text-center">
+                    <div className="bg-white rounded-lg p-3 border">
+                      <p className="text-[10px] uppercase font-semibold text-gray-500 mb-1">Requested</p>
+                      <p className="text-lg font-bold text-blue-700">{requestedNetWt.toFixed(3)}</p>
+                      <p className="text-[10px] text-gray-400">Kg</p>
+                    </div>
+                    <div className="bg-white rounded-lg p-3 border">
+                      <p className="text-[10px] uppercase font-semibold text-gray-500 mb-1">Actual</p>
+                      <p className={`text-lg font-bold ${textColor}`}>{actualNetWt.toFixed(3)}</p>
+                      <p className="text-[10px] text-gray-400">Kg ({scannedNetWt > 0 ? 'from boxes' : 'from articles'})</p>
+                    </div>
+                    <div className="bg-white rounded-lg p-3 border">
+                      <p className="text-[10px] uppercase font-semibold text-gray-500 mb-1">Difference</p>
+                      <p className={`text-lg font-bold ${isMatch ? 'text-emerald-600' : 'text-red-600'}`}>
+                        {diff >= 0 ? '+' : ''}{diff.toFixed(3)}
+                      </p>
+                      <p className="text-[10px] text-gray-400">Kg</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )
+          })()
+        )}
 
         {/* Validation Errors Display */}
         {validationErrors.length > 0 && (

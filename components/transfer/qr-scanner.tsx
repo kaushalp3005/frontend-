@@ -45,9 +45,7 @@ export default function QRScanner({ onScanSuccess, onScanError }: QRScannerProps
       }
 
       // Get cameras with detailed logging
-      console.log('🎥 Requesting camera access...')
       const devices = await Html5Qrcode.getCameras()
-      console.log('📷 Available cameras:', devices)
       
       if (devices && devices.length > 0) {
         // Prefer back camera, fallback to first available
@@ -57,7 +55,6 @@ export default function QRScanner({ onScanSuccess, onScanError }: QRScannerProps
           device.label.toLowerCase().includes('environment')
         ) || devices[0]
 
-        console.log('✅ Selected camera:', backCamera.label)
 
         // Start scanning with optimized settings
         await scannerRef.current.start(
@@ -78,7 +75,6 @@ export default function QRScanner({ onScanSuccess, onScanError }: QRScannerProps
           },
           (decodedText, decodedResult) => {
             // Success callback
-            console.log('✅ QR Code detected:', decodedText)
             onScanSuccess(decodedText)
             stopScanning() // Auto-stop after successful scan
           },
@@ -92,7 +88,6 @@ export default function QRScanner({ onScanSuccess, onScanError }: QRScannerProps
 
         setIsScanning(true)
         setIsLoading(false)
-        console.log('📸 Camera started successfully')
       } else {
         throw new Error('No cameras found. Please check camera permissions.')
       }
@@ -115,7 +110,6 @@ export default function QRScanner({ onScanSuccess, onScanError }: QRScannerProps
         await scannerRef.current.stop()
         setIsScanning(false)
         setShowScanner(false)
-        console.log('📷 Camera stopped')
       }
     } catch (err) {
       console.error('Error stopping scanner:', err)
@@ -124,7 +118,6 @@ export default function QRScanner({ onScanSuccess, onScanError }: QRScannerProps
 
   const handleManualSubmit = () => {
     if (manualInput.trim()) {
-      console.log('⌨️ Manual input:', manualInput)
       onScanSuccess(manualInput.trim())
       setManualInput("")
       setShowManualInput(false)

@@ -25,13 +25,7 @@ export default function DCPage({ params }: DCPageProps) {
     const fetchTransferDetails = async () => {
       try {
         setLoading(true)
-        console.log('🔍 Fetching transfer details for ID:', transferId)
         const response = await InterunitApiService.getTransferById(company, transferId)
-        console.log('✅ DC Data received:', response)
-        console.log('📦 Items/Lines:', response.lines || response.items)
-        console.log('🚚 Vehicle:', response.vehicle_no || response.vehicle_number)
-        console.log('👤 Driver:', response.driver_name)
-        console.log('✓ Approved by:', response.approved_by || response.approval_authority)
         setTransferData(response)
       } catch (err: any) {
         console.error('❌ Error loading DC:', err)
@@ -76,9 +70,9 @@ export default function DCPage({ params }: DCPageProps) {
       approvalAuthority={transferData.approval_authority || transferData.approved_by || 'N/A'}
       reasonDescription={transferData.reason_code || transferData.remark || 'N/A'}
       items={transferData.lines || transferData.items || []}
-      totalQtyRequired={transferData.total_qty_required || 0}
-      boxesProvided={transferData.boxes_provided || transferData.boxes_count || 0}
-      boxesPending={transferData.boxes_pending || transferData.pending_items || 0}
+      totalQtyRequired={transferData.total_qty_required || (transferData.lines || []).reduce((s: number, l: any) => s + parseFloat(l.quantity || l.qty || 0), 0)}
+      boxesProvided={(transferData.boxes || []).length}
+      boxesPending={0}
       warehouseAddresses={WAREHOUSE_ADDRESSES}
     />
   )

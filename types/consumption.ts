@@ -358,6 +358,29 @@ export interface TransferHistoryEntry {
   created_by: string
 }
 
+export interface TransferUpdateRequest {
+  transfer_id: string
+  source_warehouse: string
+  destination_warehouse: string
+  lines: TransferLine[]
+}
+
+export interface TransferUpdateResponse {
+  success: boolean
+  message: string
+  data: {
+    transfer_id: string
+    source_warehouse: string
+    destination_warehouse: string
+    lines_processed: number
+    inventory_moves: string[]
+    cost_carryover: {
+      total_value: number
+      unit_cost: number
+    }
+  }
+}
+
 export interface TransferHistoryRequest {
   source_warehouse?: string
   destination_warehouse?: string

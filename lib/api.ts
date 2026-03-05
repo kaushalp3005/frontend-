@@ -162,9 +162,7 @@ export const authApi = {
     role: string
   }>> {
     try {
-      console.log("=== FETCHING COMPANIES FROM API ===")
       const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/auth/companies`
-      console.log("Companies API URL:", apiUrl)
       
       const response = await fetch(apiUrl, {
         method: 'GET',
@@ -176,8 +174,6 @@ export const authApi = {
       }
       
       const data = await response.json()
-      console.log("Companies API Response:", data)
-      console.log("=== END COMPANIES FETCH ===")
       
       return data.companies || data || []
     } catch (error) {
@@ -198,9 +194,7 @@ export const authApi = {
     }
   }> {
     try {
-      console.log("=== FETCHING DASHBOARD INFO FROM API ===")
       const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/auth/company/${companyCode}/dashboard-info`
-      console.log("Dashboard Info API URL:", apiUrl)
       
       const response = await fetch(apiUrl, {
         method: 'GET',
@@ -212,8 +206,6 @@ export const authApi = {
       }
       
       const data = await response.json()
-      console.log("Dashboard Info API Response:", data)
-      console.log("=== END DASHBOARD INFO FETCH ===")
       
       return data
     } catch (error) {
@@ -234,7 +226,6 @@ export const authApi = {
     try {
       // Use the correct endpoint: /auth/company/{companyCode}/dashboard-info
       const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/auth/company/${companyCode}/dashboard-info`
-      console.log("Dashboard Stats API URL:", apiUrl)
 
       const response = await fetch(apiUrl, {
         method: 'GET',
@@ -251,7 +242,6 @@ export const authApi = {
 
       if (response.ok) {
         const data = await response.json()
-        console.log("Dashboard Stats API Response:", data)
 
         // Extract stats from dashboard object in the response
         const stats = data.dashboard?.stats || {}
@@ -292,7 +282,6 @@ export const authApi = {
     try {
       // Use the same API endpoint as the inward module
       const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/inward/${companyCode}?per_page=${limit}&page=1`
-      console.log("Recent Inward API URL:", apiUrl)
       
       const response = await fetch(apiUrl, {
         method: 'GET',
@@ -307,7 +296,6 @@ export const authApi = {
       }
       
       const data = await response.json()
-      console.log("Recent Inward API Response:", data)
       
       // Transform the data to match dashboard format
       return (data.records || []).map((record: any) => ({
@@ -335,9 +323,8 @@ export const authApi = {
 
   async fetchRecentTransfers(companyCode: string, limit: number = 5): Promise<any[]> {
     try {
-      // Use the correct endpoint: /transfer/requests
-      const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/transfer/requests?per_page=${limit}&page=1`
-      console.log("Recent Transfers API URL:", apiUrl)
+      // Use interunit requests endpoint
+      const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/interunit/requests?per_page=${limit}&page=1`
 
       const response = await fetch(apiUrl, {
         method: 'GET',
@@ -357,16 +344,15 @@ export const authApi = {
       }
 
       const data = await response.json()
-      console.log("Recent Transfers API Response:", data)
 
       // Transform the data to match dashboard format
       return (data.records || []).map((record: any) => ({
-        id: record.transfer_id,
-        source_location: record.source_location || 'N/A',
-        destination_location: record.destination_location || 'N/A',
-        transfer_date: record.transfer_date || record.created_at || 'N/A',
-        status: record.status || 'Completed',
-        approved_by: record.approved_by || 'System'
+        id: record.id,
+        source_location: record.from_warehouse || 'N/A',
+        destination_location: record.to_warehouse || 'N/A',
+        transfer_date: record.request_date || record.created_ts || 'N/A',
+        status: record.status || 'Pending',
+        approved_by: record.created_by || 'System'
       }))
     } catch (error) {
       console.error("Error fetching recent transfers:", error)
@@ -379,7 +365,6 @@ export const authApi = {
     try {
       const today = new Date().toISOString().split('T')[0] // Format: YYYY-MM-DD
       const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/inward/${companyCode}?from_date=${today}&to_date=${today}&per_page=1000&page=1`
-      console.log("Today's Inward Summary API URL:", apiUrl)
 
       const response = await fetch(apiUrl, {
         method: 'GET',
@@ -394,7 +379,6 @@ export const authApi = {
       }
 
       const data = await response.json()
-      console.log("Today's Inward Summary API Response:", data)
 
       return {
         count: data.total || data.records?.length || 0,
@@ -410,7 +394,6 @@ export const authApi = {
     try {
       const today = new Date().toISOString().split('T')[0] // Format: YYYY-MM-DD
       const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/outward/${companyCode}?from_date=${today}&to_date=${today}&per_page=1000&page=1`
-      console.log("Today's Outward Summary API URL:", apiUrl)
 
       const response = await fetch(apiUrl, {
         method: 'GET',
@@ -429,7 +412,6 @@ export const authApi = {
       }
 
       const data = await response.json()
-      console.log("Today's Outward Summary API Response:", data)
 
       return {
         count: data.total || data.records?.length || 0,
@@ -444,8 +426,7 @@ export const authApi = {
   async fetchTodayTransferSummary(companyCode: string): Promise<{ count: number; total: number }> {
     try {
       const today = new Date().toISOString().split('T')[0] // Format: YYYY-MM-DD
-      const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/transfer/requests?from_date=${today}&to_date=${today}&per_page=1000&page=1`
-      console.log("Today's Transfer Summary API URL:", apiUrl)
+      const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/interunit/requests?per_page=1000&page=1`
 
       const response = await fetch(apiUrl, {
         method: 'GET',
@@ -464,7 +445,6 @@ export const authApi = {
       }
 
       const data = await response.json()
-      console.log("Today's Transfer Summary API Response:", data)
 
       return {
         count: data.total || data.records?.length || 0,
@@ -480,7 +460,6 @@ export const authApi = {
   async fetchAllTimeInwardTotal(companyCode: string): Promise<number> {
     try {
       const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/inward/${companyCode}?per_page=1&page=1`
-      console.log("All-Time Inward Total API URL:", apiUrl)
 
       const response = await fetch(apiUrl, {
         method: 'GET',
@@ -495,7 +474,6 @@ export const authApi = {
       }
 
       const data = await response.json()
-      console.log("All-Time Inward Total API Response:", data)
 
       return data.total || 0
     } catch (error) {
@@ -507,7 +485,6 @@ export const authApi = {
   async fetchAllTimeOutwardTotal(companyCode: string): Promise<number> {
     try {
       const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/outward/${companyCode}?per_page=1&page=1`
-      console.log("All-Time Outward Total API URL:", apiUrl)
 
       const response = await fetch(apiUrl, {
         method: 'GET',
@@ -526,7 +503,6 @@ export const authApi = {
       }
 
       const data = await response.json()
-      console.log("All-Time Outward Total API Response:", data)
 
       return data.total || 0
     } catch (error) {
@@ -537,8 +513,7 @@ export const authApi = {
 
   async fetchAllTimeTransferTotal(companyCode: string): Promise<number> {
     try {
-      const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/transfer/requests?per_page=1&page=1`
-      console.log("All-Time Transfer Total API URL:", apiUrl)
+      const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/interunit/requests?per_page=1&page=1`
 
       const response = await fetch(apiUrl, {
         method: 'GET',
@@ -557,7 +532,6 @@ export const authApi = {
       }
 
       const data = await response.json()
-      console.log("All-Time Transfer Total API Response:", data)
 
       return data.total || 0
     } catch (error) {
@@ -590,9 +564,7 @@ export const dropdownApi = {
     if (offset) query.append('offset', offset.toString())
     
     try {
-      console.log("=== CALLING REAL API ===")
       const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/inward/sku-dropdown?${query.toString()}`
-      console.log("API URL:", apiUrl)
       
       const response = await fetch(apiUrl, {
         method: 'GET',
@@ -607,8 +579,6 @@ export const dropdownApi = {
       }
       
       const data = await response.json()
-      console.log("API Response:", data)
-      console.log("=== END REAL API CALL ===")
       
       return data
     } catch (error) {
@@ -644,8 +614,6 @@ export const dropdownApi = {
   }): Promise<{ id?: number; sku_id?: number; ID?: number; SKU_ID?: number; material_type?: string; group?: string; sub_group?: string }> {
     const { company, item_description, item_category, sub_category, material_type } = params
     
-    console.log("=== FETCHING SKU ID FROM REAL API ===")
-    console.log("Fetching SKU ID for:", { company, item_description, item_category, sub_category, material_type })
     
     try {
       const query = new URLSearchParams()
@@ -656,7 +624,6 @@ export const dropdownApi = {
       if (material_type) query.append('material_type', material_type)
       
       const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/inward/sku-id?${query.toString()}`
-      console.log("SKU ID API URL:", apiUrl)
       
       const response = await fetch(apiUrl, {
         method: 'GET',
@@ -671,8 +638,6 @@ export const dropdownApi = {
       }
       
       const data = await response.json()
-      console.log("SKU ID API Response:", data)
-      console.log("=== END SKU ID FETCH ===")
       
       return {
         sku_id: data.sku_id ?? data.id,
@@ -789,15 +754,12 @@ export const dropdownApi = {
   }> {
     const { company } = params || {}
     
-    console.log("=== FETCHING CUSTOMERS FROM API ===")
-    console.log("Fetching customers for:", { company })
     
     try {
       const query = new URLSearchParams()
       if (company) query.append('company', company)
       
       const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/api/dropdown/customers?${query.toString()}`
-      console.log("Customers API URL:", apiUrl)
       
       const response = await fetch(apiUrl, {
         method: 'GET',
@@ -812,13 +774,87 @@ export const dropdownApi = {
       }
       
       const data = await response.json()
-      console.log("Customers API Response:", data)
-      console.log("=== END CUSTOMERS FETCH ===")
       
       return data
     } catch (error) {
       console.error("Error fetching customers:", error)
       throw error // Re-throw the error so calling code can handle it
     }
+  },
+
+  async categorialSearch(params: {
+    search: string
+    limit?: number
+    offset?: number
+  }): Promise<{ items: Array<{ id: number; item_description: string; material_type?: string; group?: string; sub_group?: string; uom?: number | null }>; meta: { total_items: number } }> {
+    const { search, limit = 200, offset = 0 } = params
+
+    const query = new URLSearchParams()
+    if (search) query.append('search', search)
+    query.append('limit', String(limit))
+    if (offset > 0) query.append('offset', String(offset))
+
+    const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/interunit/categorial-search?${query.toString()}`
+
+    const response = await fetch(apiUrl, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' }
+    })
+
+    if (!response.ok) {
+      throw new Error(`Categorial search API call failed: ${response.status} ${response.statusText}`)
+    }
+
+    return response.json()
+  },
+
+  async categorialDropdown(params: {
+    material_type?: string
+    item_category?: string
+    sub_category?: string
+    search?: string
+    limit?: number
+    offset?: number
+  }): Promise<{
+    selected: Record<string, string | null>
+    options: {
+      material_types: string[]
+      item_categories: string[]
+      sub_categories: string[]
+      item_descriptions: string[]
+      uom_values: (number | null)[]
+    }
+    meta: {
+      total_material_types: number
+      total_item_descriptions: number
+      total_categories: number
+      total_sub_categories: number
+      limit: number
+      offset: number
+      search: string | null
+    }
+  }> {
+    const { material_type, item_category, sub_category, search, limit, offset } = params
+
+    const query = new URLSearchParams()
+    if (material_type) query.append('material_type', material_type)
+    if (item_category) query.append('item_category', item_category)
+    if (sub_category) query.append('sub_category', sub_category)
+    if (search) query.append('search', search)
+    if (limit) query.append('limit', limit.toString())
+    if (offset) query.append('offset', offset.toString())
+
+    const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/interunit/categorial-dropdown?${query.toString()}`
+
+    const response = await fetch(apiUrl, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' }
+    })
+
+    if (!response.ok) {
+      throw new Error(`Categorial dropdown API call failed: ${response.status} ${response.statusText}`)
+    }
+
+    return response.json()
   }
 }
