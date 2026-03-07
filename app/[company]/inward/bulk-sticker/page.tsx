@@ -82,7 +82,7 @@ const emptyArticleForm = (): BulkArticleForm => ({
   unit_rate: "",
   total_amount: "",
   carton_weight: "",
-  box_count: "1",
+  box_count: "",
   box_net_weight: "",
   box_gross_weight: "",
 })
@@ -294,7 +294,7 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
           uom: a.uom || undefined,
           po_quantity: a.po_quantity ? parseFloat(a.po_quantity) : undefined,
           units: a.units || undefined,
-          quantity_units: a.quantity_units ? parseFloat(a.quantity_units) : undefined,
+          quantity_units: parseInt(a.box_count) || 1,
           net_weight: a.net_weight ? parseFloat(a.net_weight) : undefined,
           total_weight: a.total_weight ? parseFloat(a.total_weight) : undefined,
           po_weight: a.po_weight ? parseFloat(a.po_weight) : undefined,
@@ -305,7 +305,6 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
           total_amount: a.total_amount ? parseFloat(a.total_amount) : undefined,
           carton_weight: a.carton_weight ? parseFloat(a.carton_weight) : undefined,
           box_count: parseInt(a.box_count) || 1,
-          quantity_units: parseInt(a.box_count) || 1,
           box_net_weight: a.box_net_weight ? parseFloat(a.box_net_weight) : undefined,
           box_gross_weight: a.box_gross_weight ? parseFloat(a.box_gross_weight) : undefined,
         })),
@@ -1125,7 +1124,7 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-xs">Received Qty <span className="text-muted-foreground text-[9px]">(= boxes)</span></Label>
-                    <Input type="number" value={articleForms[idx]?.box_count || "1"} readOnly className="h-9 bg-muted" />
+                    <Input type="number" value={articleForms[idx]?.box_count || ""} readOnly className="h-9 bg-muted" />
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-xs">Net Weight</Label>
@@ -1168,7 +1167,7 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
                     <Input
                       type="number"
                       min="1"
-                      value={articleForms[idx]?.box_count || "1"}
+                      value={articleForms[idx]?.box_count || ""}
                       onChange={(e) => updateArticleForm(idx, "box_count", e.target.value)}
                       className="h-9"
                     />
