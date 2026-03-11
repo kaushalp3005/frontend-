@@ -45,13 +45,12 @@ export class InwardFormUtils {
         item_description: article.item_description,
         item_category: article.item_category,
         sub_category: article.sub_category,
+        material_type: article.material_type,
       })
       
       const sku = Number(
         res?.sku_id ??
-        res?.id ??
-        res?.ID ??
-        res?.SKU_ID
+        res?.id
       )
       
       if (!Number.isFinite(sku) || sku <= 0) {

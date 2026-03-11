@@ -15,7 +15,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
   Plus, Eye, Edit, Trash2, Search, X, ChevronLeft, ChevronRight,
-  FileCheck, Clock, CheckCircle2, Loader2, ArrowDownToLine, ClipboardCheck, ClipboardList, Download,
+  FileCheck, Clock, CheckCircle2, Loader2, ArrowDownToLine, ClipboardCheck, ClipboardList, Download, Snowflake,
 } from "lucide-react"
 import { format } from "date-fns"
 import {
@@ -177,12 +177,20 @@ export default function InwardListPage({ params }: InwardListPageProps) {
               Manage purchase order entries and approvals
             </p>
           </div>
-          <Button asChild size="sm" className="gap-1.5 flex-shrink-0">
-            <Link href={`/${company}/inward/new`}>
-              <Plus className="h-4 w-4" />
-              <span className="hidden xs:inline">New Entry</span>
-            </Link>
-          </Button>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <Button asChild size="sm" variant="outline" className="gap-1.5">
+              <Link href={`/${company}/inward/bulk-sticker`}>
+                <Snowflake className="h-4 w-4" />
+                <span className="hidden xs:inline">Bulk Sticker</span>
+              </Link>
+            </Button>
+            <Button asChild size="sm" className="gap-1.5">
+              <Link href={`/${company}/inward/new`}>
+                <Plus className="h-4 w-4" />
+                <span className="hidden xs:inline">New Entry</span>
+              </Link>
+            </Button>
+          </div>
         </div>
 
         {/* Status & GRN Tabs */}

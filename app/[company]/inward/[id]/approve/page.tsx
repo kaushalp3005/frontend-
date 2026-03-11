@@ -110,6 +110,12 @@ export default function ApprovePage({ params }: ApprovePageProps) {
   const [isServiceOrder, setIsServiceOrder] = useState(false)
   const [isRtv, setIsRtv] = useState(false)
 
+  // Bulk add boxes state
+  const [bulkAddArticle, setBulkAddArticle] = useState<string | null>(null)
+  const [bulkAddQty, setBulkAddQty] = useState("")
+  const [bulkAddNetWeight, setBulkAddNetWeight] = useState("")
+  const [bulkAddGrossWeight, setBulkAddGrossWeight] = useState("")
+
   // Box delete confirmation
   const [deleteBoxIdx, setDeleteBoxIdx] = useState<number | null>(null)
 
@@ -148,8 +154,14 @@ export default function ApprovePage({ params }: ApprovePageProps) {
         setSystemGrnDate(txn.system_grn_date || "")
         setServiceInvoiceNo(txn.service_invoice_number || "")
         setDnNumber(txn.dn_number || "")
-        setApprovalAuthority(txn.approval_authority || "")
+        const savedManager = txn.approval_authority || ""
+        const knownManagers = ["Vaibhav Kumkar", "Samal Kumar", "Sumit Baikar", "Ritesh Dighe", "Pankaj Ranga", "Vaishali Dhuri"]
+        if (savedManager && !knownManagers.includes(savedManager)) {
+          setIsOtherManager(true)
+        }
+        setApprovalAuthority(savedManager)
         setRemark(txn.remark || "")
+        setWarehouse(txn.warehouse || "")
 
         // Initialize existing boxes — create a default box per article if none exist
         const existingBoxes: BoxForm[] = detail.boxes.map((b) => ({
@@ -265,9 +277,82 @@ export default function ApprovePage({ params }: ApprovePageProps) {
         a.item_description === articleDesc
           ? {
               ...a,
-              quantity_units: boxCount > 0 ? String(boxCount) : "",
-              net_weight: totalNet > 0 ? String(totalNet) : "",
-              total_weight: totalGross > 0 ? String(totalGross) : "",
+              quantity_units: String(boxCount),
+              net_weight: totalNet > 0 ? String(parseFloat(totalNet.toFixed(3))) : "",
+              total_weight: totalGross > 0 ? String(parseFloat(totalGross.toFixed(3))) : "",
+            }
+          : a
+      )
+    )
+  }
+
+  const handleQuantityUnitsChange = (articleIdx: number, value: string) => {
+    const parsed = parseInt(value)
+    if (value !== "" && (isNaN(parsed) || parsed < 0)) return
+    const desired = value === "" ? 0 : parsed
+
+    const articleDesc = articleForms[articleIdx]?.item_description
+    if (!articleDesc) return
+
+    setArticleForms((prev) =>
+      prev.map((a, i) => (i === articleIdx ? { ...a, quantity_units: value } : a))
+    )
+
+    const currentBoxes = boxForms.filter((b) => b.article_description === articleDesc)
+    const currentCount = currentBoxes.length
+
+    if (desired > currentCount) {
+      const parentArticle = articleForms[articleIdx]
+      const newBlankBoxes: BoxForm[] = []
+      for (let i = currentCount; i < desired; i++) {
+        newBlankBoxes.push({
+          article_description: articleDesc,
+          box_number: i + 1,
+          net_weight: "",
+          gross_weight: "",
+          lot_number: parentArticle?.lot_number || "",
+          count: "",
+          box_id: undefined,
+          is_printed: false,
+        })
+      }
+      const updatedBoxes = [...boxForms, ...newBlankBoxes]
+      setBoxForms(updatedBoxes)
+      recomputeWeightsOnly(updatedBoxes, articleDesc)
+    } else if (desired < currentCount) {
+      let removed = 0
+      const toRemove = currentCount - desired
+      const updatedBoxes = [...boxForms]
+      for (let i = updatedBoxes.length - 1; i >= 0 && removed < toRemove; i--) {
+        if (updatedBoxes[i].article_description === articleDesc) {
+          updatedBoxes.splice(i, 1)
+          removed++
+        }
+      }
+      let boxNum = 1
+      const renumbered = updatedBoxes.map((b) => {
+        if (b.article_description === articleDesc) {
+          return { ...b, box_number: boxNum++ }
+        }
+        return b
+      })
+      setBoxForms(renumbered)
+      recomputeWeightsOnly(renumbered, articleDesc)
+    }
+  }
+
+  const recomputeWeightsOnly = (boxes: BoxForm[], articleDesc: string) => {
+    const articleBoxes = boxes.filter((b) => b.article_description === articleDesc)
+    const totalNet = articleBoxes.reduce((sum, b) => sum + (parseFloat(b.net_weight) || 0), 0)
+    const totalGross = articleBoxes.reduce((sum, b) => sum + (parseFloat(b.gross_weight) || 0), 0)
+
+    setArticleForms((prev) =>
+      prev.map((a) =>
+        a.item_description === articleDesc
+          ? {
+              ...a,
+              net_weight: totalNet > 0 ? String(parseFloat(totalNet.toFixed(3))) : "",
+              total_weight: totalGross > 0 ? String(parseFloat(totalGross.toFixed(3))) : "",
             }
           : a
       )
@@ -292,6 +377,47 @@ export default function ApprovePage({ params }: ApprovePageProps) {
     ]
     setBoxForms(newBoxes)
     recomputeArticleFromBoxes(newBoxes, articleDescription)
+  }
+
+  const addBulkBoxes = (articleDescription: string) => {
+    const qty = parseInt(bulkAddQty) || 0
+    if (qty < 1) return
+
+    const existing = boxForms.filter((b) => b.article_description === articleDescription)
+    const parentArticle = articleForms.find((a) => a.item_description === articleDescription)
+    const startNum = existing.length + 1
+    const carton = parseFloat(parentArticle?.carton_weight || "") || 0
+
+    const newBoxes: BoxForm[] = []
+    for (let i = 0; i < qty; i++) {
+      const grossVal = bulkAddGrossWeight
+      let netVal = bulkAddNetWeight
+      // Auto-calc net from gross - carton if carton is set and no net provided
+      if (!netVal && grossVal && carton > 0) {
+        const net = Math.max(0, (parseFloat(grossVal) || 0) - carton)
+        netVal = String(parseFloat(net.toFixed(3)))
+      }
+      newBoxes.push({
+        article_description: articleDescription,
+        box_number: startNum + i,
+        net_weight: netVal,
+        gross_weight: grossVal,
+        lot_number: parentArticle?.lot_number || "",
+        count: "",
+        box_id: undefined,
+        is_printed: false,
+      })
+    }
+
+    const updatedBoxes = [...boxForms, ...newBoxes]
+    setBoxForms(updatedBoxes)
+    recomputeArticleFromBoxes(updatedBoxes, articleDescription)
+
+    // Reset bulk add form
+    setBulkAddArticle(null)
+    setBulkAddQty("")
+    setBulkAddNetWeight("")
+    setBulkAddGrossWeight("")
   }
 
   const updateBox = (idx: number, field: keyof BoxForm, value: string | number) => {
@@ -506,6 +632,18 @@ export default function ApprovePage({ params }: ApprovePageProps) {
     try {
       setSubmitting(true)
       setSubmitError(null)
+
+      // Validate mandatory fields
+      const missing: string[] = []
+      if (!warehouse.trim()) missing.push("Warehouse")
+      if (!vehicleNumber.trim()) missing.push("Vehicle Number")
+      if (!transporterName.trim()) missing.push("Transporter")
+      if (!approvalAuthority.trim()) missing.push("Inward Manager")
+      if (missing.length > 0) {
+        setSubmitError(`Please fill in: ${missing.join(", ")}`)
+        setSubmitting(false)
+        return
+      }
 
       const payload: ApprovePayload = {
         approved_by: user?.name || user?.email || "unknown",
@@ -841,7 +979,14 @@ export default function ApprovePage({ params }: ApprovePageProps) {
                   )}
                   <div className="space-y-1">
                     <Label className="text-[11px]">Qty Units <span className="text-muted-foreground text-[9px]">(boxes)</span></Label>
-                    <Input type="number" value={article.quantity_units} readOnly className="h-8 text-xs bg-muted" />
+                    <Input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={article.quantity_units}
+                      onChange={(e) => handleQuantityUnitsChange(idx, e.target.value)}
+                      className="h-8 text-xs"
+                    />
                   </div>
                   <div className="space-y-1">
                     <Label className="text-[11px]">Net Wt <span className="text-muted-foreground text-[9px]">(sum)</span></Label>
@@ -884,15 +1029,95 @@ export default function ApprovePage({ params }: ApprovePageProps) {
                       <Box className="h-3 w-3" />
                       Boxes ({boxForms.filter((b) => b.article_description === article.item_description).length})
                     </p>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-6 text-xs gap-1"
-                      onClick={() => addBox(article.item_description)}
-                    >
-                      <Plus className="h-3 w-3" /> Add Box
-                    </Button>
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-6 text-xs gap-1"
+                        onClick={() => addBox(article.item_description)}
+                      >
+                        <Plus className="h-3 w-3" /> Add Box
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-6 text-xs gap-1"
+                        onClick={() => {
+                          if (bulkAddArticle === article.item_description) {
+                            setBulkAddArticle(null)
+                          } else {
+                            setBulkAddArticle(article.item_description)
+                            setBulkAddQty("")
+                            setBulkAddNetWeight("")
+                            setBulkAddGrossWeight("")
+                          }
+                        }}
+                      >
+                        <Plus className="h-3 w-3" /> Bulk Add
+                      </Button>
+                    </div>
                   </div>
+
+                  {/* Bulk Add Boxes Form */}
+                  {bulkAddArticle === article.item_description && (
+                    <div className="p-2.5 rounded-lg border bg-blue-50/50 space-y-2">
+                      <p className="text-[11px] font-semibold text-muted-foreground">Bulk Add Boxes</p>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="space-y-0.5">
+                          <Label className="text-[10px]">Quantity (boxes) <span className="text-destructive">*</span></Label>
+                          <Input
+                            type="number"
+                            min="1"
+                            value={bulkAddQty}
+                            onChange={(e) => setBulkAddQty(e.target.value)}
+                            placeholder="No. of boxes"
+                            className="h-7 text-xs"
+                          />
+                        </div>
+                        <div className="space-y-0.5">
+                          <Label className="text-[10px]">Net Weight (per box)</Label>
+                          <Input
+                            type="number"
+                            step="0.001"
+                            value={bulkAddNetWeight}
+                            onChange={(e) => setBulkAddNetWeight(e.target.value)}
+                            placeholder="kg"
+                            className="h-7 text-xs"
+                          />
+                        </div>
+                        <div className="space-y-0.5">
+                          <Label className="text-[10px]">Gross Weight (per box)</Label>
+                          <Input
+                            type="number"
+                            step="0.001"
+                            value={bulkAddGrossWeight}
+                            onChange={(e) => setBulkAddGrossWeight(e.target.value)}
+                            placeholder="kg"
+                            className="h-7 text-xs"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          className="h-6 text-xs gap-1"
+                          onClick={() => addBulkBoxes(article.item_description)}
+                          disabled={!bulkAddQty || parseInt(bulkAddQty) < 1}
+                        >
+                          <Plus className="h-3 w-3" />
+                          Add {parseInt(bulkAddQty) || 0} Boxes
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 text-xs"
+                          onClick={() => setBulkAddArticle(null)}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                   {boxForms
                     .map((box, boxIdx) => ({ box, boxIdx }))
                     .filter(({ box }) => box.article_description === article.item_description)
@@ -941,8 +1166,8 @@ export default function ApprovePage({ params }: ApprovePageProps) {
                               placeholder="Net wt"
                               value={box.net_weight}
                               onChange={(e) => updateBox(boxIdx, "net_weight", e.target.value)}
-                              readOnly={isLocked || !!parseFloat(article.carton_weight)}
-                              className={cn("h-7 text-xs flex-1 min-w-0", (isLocked || parseFloat(article.carton_weight)) ? "bg-muted" : "", isEdited(box.box_id, "net_weight") && "ring-2 ring-red-300 bg-red-50")}
+                              readOnly={isLocked}
+                              className={cn("h-7 text-xs flex-1 min-w-0", isLocked ? "bg-muted" : "", isEdited(box.box_id, "net_weight") && "ring-2 ring-red-300 bg-red-50")}
                             />
                             <Input
                               type="number"
@@ -998,8 +1223,8 @@ export default function ApprovePage({ params }: ApprovePageProps) {
                               type="number"
                               value={box.net_weight}
                               onChange={(e) => updateBox(boxIdx, "net_weight", e.target.value)}
-                              readOnly={isLocked || !!parseFloat(article.carton_weight)}
-                              className={cn("h-8 text-xs", (isLocked || parseFloat(article.carton_weight)) ? "bg-muted" : "", isEdited(box.box_id, "net_weight") && "ring-2 ring-red-300 bg-red-50")}
+                              readOnly={isLocked}
+                              className={cn("h-8 text-xs", isLocked ? "bg-muted" : "", isEdited(box.box_id, "net_weight") && "ring-2 ring-red-300 bg-red-50")}
                             />
                           </div>
                           <div className="space-y-0.5">

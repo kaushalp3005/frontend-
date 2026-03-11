@@ -188,6 +188,12 @@ export interface CreateInwardPayload {
     discount_amount?: number
     po_quantity?: number
     currency?: string
+    vehicle_number?: string
+    transporter_name?: string
+    lr_number?: string
+    challan_number?: string
+    invoice_number?: string
+    grn_number?: string
   }
   articles: Array<{
     transaction_no: string
@@ -197,6 +203,9 @@ export interface CreateInwardPayload {
     material_type?: string
     item_category?: string
     sub_category?: string
+    unit_rate?: number
+    total_amount?: number
+    carton_weight?: number
   }>
   boxes: Array<{
     transaction_no: string
@@ -255,6 +264,77 @@ export interface ApprovePayload {
   }>
 }
 
+
+// POST /inward/bulk-sticker — Bulk sticker creation
+export interface BulkStickerArticle {
+  transaction_no: string
+  item_description: string
+  sku_id?: number
+  item_category?: string
+  sub_category?: string
+  material_type?: string
+  quality_grade?: string
+  uom?: string
+  po_quantity?: number
+  units?: string
+  quantity_units: number
+  net_weight?: number
+  total_weight?: number
+  po_weight?: number
+  lot_number?: string
+  manufacturing_date?: string
+  expiry_date?: string
+  unit_rate?: number
+  total_amount?: number
+  carton_weight?: number
+  box_count: number
+  box_net_weight?: number
+  box_gross_weight?: number
+}
+
+export interface BulkStickerPayload {
+  company: Company
+  transaction: CreateInwardPayload["transaction"] & {
+    warehouse?: string
+    transporter_name?: string
+    vehicle_number?: string
+    lr_number?: string
+    challan_number?: string
+    invoice_number?: string
+    grn_number?: string
+    grn_quantity?: number
+    system_grn_date?: string
+    service_invoice_number?: string
+    dn_number?: string
+    approval_authority?: string
+    remark?: string
+  }
+  articles: BulkStickerArticle[]
+}
+
+export interface BulkStickerBox {
+  box_number: number
+  box_id: string
+  article_description: string
+  net_weight?: number
+  gross_weight?: number
+  lot_number?: string
+}
+
+export interface BulkStickerArticleResponse {
+  article_description: string
+  box_ids: string[]
+  boxes: BulkStickerBox[]
+}
+
+export interface BulkStickerResponse {
+  status: string
+  transaction_no: string
+  company: string
+  articles_count: number
+  total_boxes_created: number
+  articles_with_boxes: BulkStickerArticleResponse[]
+}
 
 // PUT /inward/{company}/{txn} — Update (pending only)
 export interface UpdateInwardPayload {
@@ -512,6 +592,16 @@ class InwardApiService {
     return handleResponse<{ message: string }>(response)
   }
 
+  // ── 5b. POST /inward/bulk-sticker ─────────────────────
+  async createBulkSticker(payload: BulkStickerPayload): Promise<BulkStickerResponse> {
+    const response = await fetch(`${API_BASE}/inward/bulk-sticker`, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(payload),
+    })
+    return handleResponse<BulkStickerResponse>(response)
+  }
+
   // ── 9. PUT /inward/{company}/{txn}/box ──────────────────
   async upsertBox(
     company: Company,
@@ -588,6 +678,7 @@ export const extractPO = inwardApiService.extractPO.bind(inwardApiService)
 export const skuLookup = inwardApiService.skuLookup.bind(inwardApiService)
 export const getInwardList = inwardApiService.getInwardList.bind(inwardApiService)
 export const createInward = inwardApiService.createInward.bind(inwardApiService)
+export const createBulkSticker = inwardApiService.createBulkSticker.bind(inwardApiService)
 export const approveOrReject = inwardApiService.approveOrReject.bind(inwardApiService)
 export const getInwardDetail = inwardApiService.getInwardDetail.bind(inwardApiService)
 export const updateInward = inwardApiService.updateInward.bind(inwardApiService)

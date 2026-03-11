@@ -1,68 +1,254 @@
-export type RTVStatus = "pending" | "approved" | "rejected" | "completed" | "cancelled"
-export type RTVType = "quality_issue" | "damaged" | "expired" | "excess_quantity" | "wrong_item" | "other"
-export type MaterialType = "RM" | "PM" | "FG"
+// types/rtv.ts — RTV (Return to Vendor) module types
+// Matches backend API spec: /rtv/{company}
 
-export interface RTVItem {
-  item_id?: number // Backend DB ID
-  rtv_number?: string
-  transaction_no: string
-  box_number: number
+export type RTVStatus = "Pending" | "Approved"
+
+// ─── Header ────────────────────────────────────────────────────────
+
+export interface RTVHeader {
+  id: number
+  rtv_id: string              // Format: RTV-YYYYMMDDHHmmSS
+  rtv_date: string | null
+  factory_unit: string
+  customer: string
+  invoice_number: string | null
+  challan_no: string | null
+  dn_no: string | null
+  sales_poc: string | null
+  remark: string | null
+  status: RTVStatus
+  created_by: string | null
+  created_ts: string | null
+  updated_at: string | null
+}
+
+export interface RTVHeaderCreate {
+  factory_unit: string
+  customer: string
+  invoice_number?: string
+  challan_no?: string
+  dn_no?: string
+  sales_poc?: string
+  remark?: string
+}
+
+export interface RTVHeaderUpdate {
+  factory_unit?: string
+  customer?: string
+  invoice_number?: string
+  challan_no?: string
+  dn_no?: string
+  sales_poc?: string
+  remark?: string
+  status?: RTVStatus
+}
+
+// ─── Lines ─────────────────────────────────────────────────────────
+
+export interface RTVLine {
+  id: number
+  header_id: number
+  material_type: string
+  item_category: string
   sub_category: string
   item_description: string
-  net_weight: number
-  gross_weight: number
-  price: number
-  reason: string
-  qr_data?: any
-  created_at?: string
-  updated_at?: string
-  // Legacy fields (optional for backward compatibility)
-  id?: string
-  material_code?: string
-  material_name?: string
-  quantity?: number
-  unit?: string
-  batch_number?: string
-  estimated_value?: number
+  sale_group: string | null
+  uom: string
+  qty: string
+  rate: string
+  value: string
+  conversion: string | null
+  carton_weight: string | null
+  net_weight: string | null
+  created_at: string | null
+  updated_at: string | null
 }
 
-export interface RTVRecord {
-  id?: string // Optional for backward compatibility
-  rtv_number: string
-  customer_name: string
-  customer_code: string
-  rtv_type: RTVType
-  other_reason?: string | null
-  rtv_date: string
-  invoice_number: string
-  dc_number: string
-  notes: string
-  created_by: string
-  total_value: number
-  total_boxes: number
-  status: RTVStatus
-  company_code?: string
-  created_at: string
-  updated_at: string
-  items: RTVItem[]
-  // Legacy fields (optional for backward compatibility)
-  vendor_name?: string
-  vendor_code?: string
-  material_type?: MaterialType
-  created_date?: string
-  approved_by?: string
-  approved_date?: string
-  rejection_reason?: string
-  grn_reference?: string
+export interface RTVLineCreate {
+  material_type: string
+  item_category: string
+  sub_category: string
+  item_description: string
+  sale_group?: string
+  uom: string
+  qty?: string
+  rate?: string
+  value?: string
+  conversion?: string
+  carton_weight?: string
+  net_weight?: string
 }
 
-export interface RTVFormData {
-  vendor_name: string
-  vendor_code: string
-  rtv_type: RTVType
-  material_type: MaterialType
-  grn_reference?: string
-  dc_number?: string
-  notes?: string
-  items: Omit<RTVItem, "id">[]
+// ─── Boxes ─────────────────────────────────────────────────────────
+
+export interface RTVBox {
+  id: number
+  header_id: number
+  rtv_line_id: number | null
+  box_number: number
+  box_id: string | null       // NULL until printed
+  article_description: string
+  lot_number: string | null
+  uom: string | null
+  conversion: string | null
+  net_weight: string
+  gross_weight: string
+  count: number | null
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface RTVBoxUpsertRequest {
+  article_description: string
+  box_number: number
+  uom?: string
+  conversion?: string
+  net_weight?: string
+  gross_weight?: string
+  lot_number?: string
+  count?: number
+}
+
+export interface RTVBoxUpsertResponse {
+  status: "inserted" | "updated"
+  box_id: string
+  rtv_id: string
+  article_description: string
+  box_number: number
+}
+
+// ─── Composite types ───────────────────────────────────────────────
+
+export interface RTVWithDetails extends RTVHeader {
+  lines: RTVLine[]
+  boxes: RTVBox[]
+}
+
+// ─── Create ────────────────────────────────────────────────────────
+
+export interface RTVCreateRequest {
+  company: string
+  header: RTVHeaderCreate
+  lines: RTVLineCreate[]
+}
+
+// ─── List ──────────────────────────────────────────────────────────
+
+export interface RTVListItem extends RTVHeader {
+  items_count: number
+  boxes_count: number
+  total_qty: number
+}
+
+export interface RTVListResponse {
+  records: RTVListItem[]
+  total: number
+  page: number
+  per_page: number
+  total_pages: number
+}
+
+export interface RTVListParams {
+  page?: number
+  per_page?: number
+  status?: string
+  factory_unit?: string
+  customer?: string
+  from_date?: string          // DD-MM-YYYY
+  to_date?: string            // DD-MM-YYYY
+  sort_by?: string
+  sort_order?: "asc" | "desc"
+}
+
+// ─── Lines Update ──────────────────────────────────────────────────
+
+export interface RTVLinesUpdateRequest {
+  lines: RTVLineCreate[]
+}
+
+export interface RTVLinesUpdateResponse {
+  status: string
+  rtv_id: string
+  lines_count: number
+}
+
+// ─── Approve ───────────────────────────────────────────────────────
+
+export interface RTVApprovalHeaderFields {
+  factory_unit?: string
+  customer?: string
+  invoice_number?: string
+  challan_no?: string
+  dn_no?: string
+  sales_poc?: string
+  remark?: string
+}
+
+export interface RTVApprovalLineFields {
+  item_description: string    // key field
+  qty?: string
+  rate?: string
+  value?: string
+  conversion?: string
+  carton_weight?: string
+  net_weight?: string
+  uom?: string
+  material_type?: string
+  item_category?: string
+  sub_category?: string
+  sale_group?: string
+}
+
+export interface RTVApprovalBoxFields {
+  article_description: string
+  box_number: number
+  uom?: string
+  conversion?: string
+  net_weight?: string
+  gross_weight?: string
+  lot_number?: string
+  count?: number
+}
+
+export interface RTVApprovalRequest {
+  approved_by: string
+  header?: RTVApprovalHeaderFields
+  lines?: RTVApprovalLineFields[]
+  boxes?: RTVApprovalBoxFields[]
+}
+
+export interface RTVApprovalResponse {
+  status: string
+  rtv_id: string
+  company: string
+  approved_by: string
+  approved_at: string
+}
+
+// ─── Delete ────────────────────────────────────────────────────────
+
+export interface RTVDeleteResponse {
+  success: boolean
+  message: string
+  rtv_id: string
+}
+
+// ─── Box edit log ──────────────────────────────────────────────────
+
+export interface RTVBoxEditChange {
+  field_name: string
+  old_value?: string
+  new_value?: string
+}
+
+export interface RTVBoxEditLogRequest {
+  email_id: string
+  box_id: string
+  rtv_id: string              // The RTV-YYYYMMDD... string
+  changes: RTVBoxEditChange[]
+}
+
+export interface RTVBoxEditLogResponse {
+  status: string
+  entries: number
 }
