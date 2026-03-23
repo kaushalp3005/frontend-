@@ -193,7 +193,7 @@ function ItemDescriptionDropdown({
   updateArticle?: (id: string, field: string, value: any) => void
   disabled?: boolean
 }) {
-  const itemDescriptionsHook = useCategorialItemDescriptions({ material_type: materialType, item_category: categoryId, sub_category: subCategoryId })
+  const itemDescriptionsHook = useItemDescriptions({ company, material_type: materialType, item_category: categoryId, sub_category: subCategoryId })
 
   const handleValueChange = async (selectedValue: string) => {
     // Find the selected option to get the label
@@ -202,15 +202,15 @@ function ItemDescriptionDropdown({
       // Update item_description immediately
       updateArticle(articleId, "item_description", selectedOption.label)
 
-      // Auto-fill unit_pack_size from categorial_inv uom
-      if (selectedOption.uom != null) {
-        updateArticle(articleId, "unit_pack_size", Number(selectedOption.uom))
-      }
-
       // Reset SKU ID while fetching
       updateArticle(articleId, "sku_id", null)
 
-      // Fetch SKU ID from API
+      // If the option already has an ID from the dropdown API, use it as sku_id
+      if (selectedOption.id && selectedOption.id > 0) {
+        updateArticle(articleId, "sku_id", selectedOption.id)
+      }
+
+      // Fetch SKU ID from API to get full details
       try {
         const skuResponse = await dropdownApi.fetchSkuId({
           company,
@@ -239,7 +239,10 @@ function ItemDescriptionDropdown({
         }
       } catch (err) {
         console.error("Error fetching SKU ID:", err)
-        updateArticle(articleId, "sku_id", null)
+        // Keep the dropdown ID if SKU fetch fails
+        if (!selectedOption.id || selectedOption.id <= 0) {
+          updateArticle(articleId, "sku_id", null)
+        }
       }
     }
 
