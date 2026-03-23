@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useCallback, useEffect, useRef } from "react"
+import { useState, useMemo, useCallback, useEffect, useRef, Fragment } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -42,9 +42,9 @@ export default function TransferInPage({ params }: TransferInPageProps) {
   const [showScanner, setShowScanner] = useState(false)
   const [boxesMatchMap, setBoxesMatchMap] = useState<Record<number, boolean>>({})
   const [linesMatchMap, setLinesMatchMap] = useState<Record<number, boolean>>({})
-  const [linesIssueMap, setLinesIssueMap] = useState<Record<number, { actual_qty: number; actual_total_weight: number; remarks: string }>>({})
+  const [linesIssueMap, setLinesIssueMap] = useState<Record<number, { remarks: string; net_weight?: string; total_weight?: string; case_pack?: string }>>({})
   const [issueOpenIndex, setIssueOpenIndex] = useState<number | null>(null)
-  const [issueForm, setIssueForm] = useState({ actual_qty: "", actual_total_weight: "", remarks: "" })
+  const [issueForm, setIssueForm] = useState({ remarks: "", net_weight: "", total_weight: "", case_pack: "" })
   const [boxCondition, setBoxCondition] = useState("Good")
   const [conditionRemarks, setConditionRemarks] = useState("")
 
@@ -343,7 +343,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
           // Restore acknowledged/issue state from saved boxes
           const savedBoxes = pendingResult.header.boxes || []
           const restoredLineMap: Record<number, boolean> = {}
-          const restoredIssueMap: Record<number, { actual_qty: number; actual_total_weight: number; remarks: string }> = {}
+          const restoredIssueMap: Record<number, { remarks: string; net_weight?: string; total_weight?: string; case_pack?: string }> = {}
           const restoredBoxMap: Record<number, boolean> = {}
 
           savedBoxes.forEach((sb: any) => {
@@ -353,9 +353,10 @@ export default function TransferInPage({ params }: TransferInPageProps) {
               } else if (sb.issue) {
                 const issueData = typeof sb.issue === "string" ? JSON.parse(sb.issue) : sb.issue
                 restoredIssueMap[sb.line_index] = {
-                  actual_qty: issueData.actual_qty || 0,
-                  actual_total_weight: issueData.actual_total_weight || 0,
                   remarks: issueData.remarks || "",
+                  net_weight: issueData.net_weight || undefined,
+                  total_weight: issueData.total_weight || undefined,
+                  case_pack: issueData.case_pack || undefined,
                 }
               }
             } else if (sb.transfer_out_box_id) {
@@ -592,32 +593,42 @@ export default function TransferInPage({ params }: TransferInPageProps) {
   // ── Issue handlers ──
   const handleOpenIssue = (lineIndex: number) => {
     const line = lines[lineIndex]
+    const w = lineWeights[lineIndex] || {}
     setIssueOpenIndex(lineIndex)
     setIssueForm({
-      actual_qty: String(line.qty || line.quantity || ""),
-      actual_total_weight: String(line.total_weight || ""),
       remarks: "",
+      net_weight: String(w.net_weight ?? line.net_weight ?? ""),
+      total_weight: String(w.total_weight ?? line.total_weight ?? ""),
+      case_pack: String(line.pack_size || ""),
     })
   }
 
   const handleSubmitIssue = async (lineIndex: number) => {
-    const actualQty = parseFloat(issueForm.actual_qty)
-    const actualWeight = parseFloat(issueForm.actual_total_weight)
-    if (isNaN(actualQty) && isNaN(actualWeight)) {
-      toast({ title: "Error", description: "Enter at least actual quantity or actual total weight", variant: "destructive" })
-      return
-    }
-
     const headerId = await ensurePendingHeader()
     if (!headerId) return
 
     const line = lines[lineIndex]
-    const w = lineWeights[lineIndex] || {}
     const boxRef = lineBoxDataMap[line.id] || {}
+    const issueNetWt = issueForm.net_weight.trim()
+    const issueTotalWt = issueForm.total_weight.trim()
+    const issueCasePack = issueForm.case_pack.trim()
+
     const issueData = {
-      actual_qty: isNaN(actualQty) ? 0 : actualQty,
-      actual_total_weight: isNaN(actualWeight) ? 0 : actualWeight,
       remarks: issueForm.remarks.trim(),
+      net_weight: issueNetWt || undefined,
+      total_weight: issueTotalWt || undefined,
+      case_pack: issueCasePack || undefined,
+    }
+
+    // Update lineWeights from issue form values
+    if (issueNetWt || issueTotalWt) {
+      setLineWeights(prev => ({
+        ...prev,
+        [lineIndex]: {
+          net_weight: issueNetWt || prev[lineIndex]?.net_weight || "",
+          total_weight: issueTotalWt || prev[lineIndex]?.total_weight || "",
+        },
+      }))
     }
 
     try {
@@ -628,8 +639,8 @@ export default function TransferInPage({ params }: TransferInPageProps) {
         batch_number: line.batch_number || null,
         lot_number: getColdLotNo(articleName) || line.lot_number || null,
         transaction_no: line.transaction_no || boxRef.transaction_no || null,
-        net_weight: w.net_weight ? Number(w.net_weight) : (line.net_weight ? Number(line.net_weight) : null),
-        gross_weight: w.total_weight ? Number(w.total_weight) : (line.total_weight ? Number(line.total_weight) : null),
+        net_weight: issueNetWt ? Number(issueNetWt) : (line.net_weight ? Number(line.net_weight) : null),
+        gross_weight: issueTotalWt ? Number(issueTotalWt) : (line.total_weight ? Number(line.total_weight) : null),
         is_matched: false,
         issue: issueData,
         line_index: lineIndex,
@@ -642,7 +653,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
         return next
       })
       setIssueOpenIndex(null)
-      setIssueForm({ actual_qty: "", actual_total_weight: "", remarks: "" })
+      setIssueForm({ remarks: "", net_weight: "", total_weight: "", case_pack: "" })
       toast({ title: "Issue Reported", description: `Discrepancy noted for ${line?.item_desc_raw || `Line ${lineIndex + 1}`}` })
     } catch (err: any) {
       toast({ title: "Error", description: err.message || "Failed to save issue", variant: "destructive" })
@@ -651,7 +662,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
 
   const handleCancelIssue = () => {
     setIssueOpenIndex(null)
-    setIssueForm({ actual_qty: "", actual_total_weight: "", remarks: "" })
+    setIssueForm({ remarks: "", net_weight: "", total_weight: "", case_pack: "" })
   }
 
   // ── Acknowledge all ──
@@ -1078,9 +1089,10 @@ export default function TransferInPage({ params }: TransferInPageProps) {
               gross_weight: w.total_weight ? Number(w.total_weight) : (line.total_weight ? Number(line.total_weight) : null),
               is_matched: false,
               issue: {
-                actual_qty: linesIssueMap[i].actual_qty,
-                actual_total_weight: linesIssueMap[i].actual_total_weight,
                 remarks: linesIssueMap[i].remarks || null,
+                net_weight: linesIssueMap[i].net_weight || null,
+                total_weight: linesIssueMap[i].total_weight || null,
+                case_pack: linesIssueMap[i].case_pack || null,
               },
             }
           })
@@ -1551,7 +1563,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                           <th className="text-left py-2.5 px-3 min-w-[220px]">Item Name</th>
                           {isColdStorageFrom && <th className="text-left py-2.5 px-3 w-[130px]">Transaction No</th>}
                           {isColdStorageFrom && <th className="text-left py-2.5 px-3 w-[120px]">Box ID</th>}
-                          <th className="text-right py-2.5 px-3 w-[90px]">Pack Size</th>
+                          <th className="text-right py-2.5 px-3 w-[90px]">Case Pack</th>
                           <th className="text-right py-2.5 px-3 w-[80px]">Qty</th>
                           <th className="text-right py-2.5 px-3 w-[100px]">Net Wt</th>
                           <th className="text-right py-2.5 px-3 w-[100px]">Total Wt</th>
@@ -1584,67 +1596,101 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                             })
                           }
 
+                          const totalCols = 7 + (isColdStorageFrom ? 2 : 0) + (hasBatchData ? 1 : 0)
+
                           return (
-                            <tr key={index} className={`${matched ? "bg-emerald-50/40" : issued ? "bg-red-50/30" : "hover:bg-gray-50/50"} transition-colors`}>
-                              <td className="py-2.5 px-2 text-center text-gray-500 font-medium tabular-nums">{index + 1}</td>
-                              <td className="py-2.5 px-3 font-semibold text-gray-900 max-w-[220px]">
-                                <span className="block truncate" title={line.item_desc_raw || line.item_description}>
-                                  {line.item_desc_raw || line.item_description || `Article ${index + 1}`}
-                                </span>
-                              </td>
-                              {isColdStorageFrom && <td className="py-2.5 px-3 text-gray-600 font-mono text-xs truncate">{line.transaction_no || boxData.transaction_no || "-"}</td>}
-                              {isColdStorageFrom && <td className="py-2.5 px-3 text-gray-600 font-mono text-xs truncate">{line.box_id || boxData.box_id || "-"}</td>}
-                              <td className="py-2.5 px-3 text-gray-600 text-right tabular-nums">{line.pack_size || "-"}</td>
-                              <td className="py-2.5 px-3 text-right font-bold text-blue-600 tabular-nums whitespace-nowrap">{line.qty || line.quantity || 0} <span className="text-gray-400 font-normal text-xs">{line.uom || ""}</span></td>
-                              <td className="py-2.5 px-3 text-right">
-                                <Input
-                                  type="number"
-                                  step="any"
-                                  value={lineWeights[index]?.net_weight ?? line.net_weight ?? ""}
-                                  onChange={(e) => updateLineWeight(index, "net_weight", e.target.value)}
-                                  className="h-7 w-[90px] text-xs text-right tabular-nums bg-white border-gray-200 ml-auto"
-                                />
-                              </td>
-                              <td className="py-2.5 px-3 text-right">
-                                <Input
-                                  type="number"
-                                  step="any"
-                                  value={lineWeights[index]?.total_weight ?? line.total_weight ?? ""}
-                                  onChange={(e) => updateLineWeight(index, "total_weight", e.target.value)}
-                                  className="h-7 w-[90px] text-xs text-right tabular-nums bg-white border-gray-200 ml-auto"
-                                />
-                              </td>
-                              {hasBatchData && <td className="py-2.5 px-3 text-gray-600 font-mono text-xs truncate">{line.batch_number || "-"}</td>}
-                              <td className="py-2.5 px-3 text-gray-600 font-mono text-xs truncate">{coldStorageItems[line.item_desc_raw || line.item_description || ""]?.lot_no?.trim() || line.lot_number || "-"}</td>
-                              <td className="py-2.5 px-3 sticky right-0 bg-inherit">
-                                <div className="flex items-center justify-end gap-1.5">
-                                  {matched ? (
-                                    <Badge variant="outline" className="text-xs bg-emerald-50 text-emerald-700 border-emerald-200 cursor-pointer hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors" onClick={() => handleUnacknowledgeLine(index)}>
-                                      <CheckCircle className="h-3.5 w-3.5 mr-1" /> Acknowledged
-                                    </Badge>
-                                  ) : issued ? (
-                                    <Badge variant="outline" className="text-xs bg-red-50 text-red-600 border-red-200">
-                                      <AlertTriangle className="h-3.5 w-3.5 mr-1" /> Issue
-                                    </Badge>
-                                  ) : (
-                                    <>
-                                      {isColdStorageFrom ? (
-                                        <Button variant="outline" size="sm" onClick={() => handlePrintQR(index)} className="text-xs text-blue-700 border-blue-200 hover:bg-blue-50 h-7 px-3">
-                                          <Printer className="h-3 w-3 mr-1" /> Print QR
+                            <Fragment key={index}>
+                              <tr className={`${matched ? "bg-emerald-50/40" : issued ? "bg-red-50/30" : "hover:bg-gray-50/50"} transition-colors`}>
+                                <td className="py-2.5 px-2 text-center text-gray-500 font-medium tabular-nums">{index + 1}</td>
+                                <td className="py-2.5 px-3 font-semibold text-gray-900 max-w-[220px]">
+                                  <span className="block truncate" title={line.item_desc_raw || line.item_description}>
+                                    {line.item_desc_raw || line.item_description || `Article ${index + 1}`}
+                                  </span>
+                                </td>
+                                {isColdStorageFrom && <td className="py-2.5 px-3 text-gray-600 font-mono text-xs truncate">{line.transaction_no || boxData.transaction_no || "-"}</td>}
+                                {isColdStorageFrom && <td className="py-2.5 px-3 text-gray-600 font-mono text-xs truncate">{line.box_id || boxData.box_id || "-"}</td>}
+                                <td className={`py-2.5 px-3 text-right tabular-nums ${issued && linesIssueMap[index]?.case_pack ? "text-red-600 font-bold" : "text-gray-600"}`}>{(issued && linesIssueMap[index]?.case_pack) || line.pack_size || "-"}</td>
+                                <td className="py-2.5 px-3 text-right font-bold text-blue-600 tabular-nums whitespace-nowrap">{line.qty || line.quantity || 0} <span className="text-gray-400 font-normal text-xs">{line.uom || ""}</span></td>
+                                <td className={`py-2.5 px-3 text-right tabular-nums ${issued && linesIssueMap[index]?.net_weight ? "text-red-600 font-bold" : "text-gray-600"}`}>{(issued && linesIssueMap[index]?.net_weight) || lineWeights[index]?.net_weight || line.net_weight || "-"}</td>
+                                <td className={`py-2.5 px-3 text-right tabular-nums ${issued && linesIssueMap[index]?.total_weight ? "text-red-600 font-bold" : "text-gray-600"}`}>{(issued && linesIssueMap[index]?.total_weight) || lineWeights[index]?.total_weight || line.total_weight || "-"}</td>
+                                {hasBatchData && <td className="py-2.5 px-3 text-gray-600 font-mono text-xs truncate">{line.batch_number || "-"}</td>}
+                                <td className="py-2.5 px-3 text-gray-600 font-mono text-xs truncate">{coldStorageItems[line.item_desc_raw || line.item_description || ""]?.lot_no?.trim() || line.lot_number || "-"}</td>
+                                <td className="py-2.5 px-3 sticky right-0 bg-inherit">
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    {matched ? (
+                                      <Badge variant="outline" className="text-xs bg-emerald-50 text-emerald-700 border-emerald-200 cursor-pointer hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors" onClick={() => handleUnacknowledgeLine(index)}>
+                                        <CheckCircle className="h-3.5 w-3.5 mr-1" /> Acknowledged
+                                      </Badge>
+                                    ) : issued ? (
+                                      <Badge variant="outline" className="text-xs bg-red-50 text-red-600 border-red-200">
+                                        <AlertTriangle className="h-3.5 w-3.5 mr-1" /> Issue
+                                      </Badge>
+                                    ) : (
+                                      <>
+                                        {isColdStorageFrom ? (
+                                          <Button variant="outline" size="sm" onClick={() => handlePrintQR(index)} className="text-xs text-blue-700 border-blue-200 hover:bg-blue-50 h-7 px-3">
+                                            <Printer className="h-3 w-3 mr-1" /> Print QR
+                                          </Button>
+                                        ) : (
+                                          <Button variant="outline" size="sm" onClick={() => handleAcknowledgeLine(index)} className="text-xs text-teal-700 border-teal-200 hover:bg-teal-50 h-7 px-3">
+                                            Acknowledge
+                                          </Button>
+                                        )}
+                                        <Button variant="outline" size="sm" onClick={() => handleOpenIssue(index)} className="text-xs text-red-600 border-red-200 hover:bg-red-50 h-7 px-3">
+                                          <AlertTriangle className="h-3 w-3 mr-1" /> Issue
                                         </Button>
-                                      ) : (
-                                        <Button variant="outline" size="sm" onClick={() => handleAcknowledgeLine(index)} className="text-xs text-teal-700 border-teal-200 hover:bg-teal-50 h-7 px-3">
-                                          Acknowledge
-                                        </Button>
-                                      )}
-                                      <Button variant="outline" size="sm" onClick={() => handleOpenIssue(index)} className="text-xs text-red-600 border-red-200 hover:bg-red-50 h-7 px-3">
-                                        <AlertTriangle className="h-3 w-3 mr-1" /> Issue
-                                      </Button>
-                                    </>
-                                  )}
-                                </div>
-                              </td>
-                            </tr>
+                                      </>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                              {isIssueOpen && (
+                                <tr>
+                                  <td colSpan={totalCols} className="p-0">
+                                    <div className="px-4 py-3 bg-red-50/30">
+                                      <div className="border-2 border-red-200 rounded-lg bg-red-50/50 p-4 space-y-3">
+                                        <div className="flex items-center justify-between">
+                                          <div className="flex items-center gap-2">
+                                            <AlertTriangle className="h-4 w-4 text-red-500" />
+                                            <span className="text-sm font-semibold text-red-800">Report Issue — {line.item_desc_raw || line.item_description || `Article ${index + 1}`}</span>
+                                          </div>
+                                          <Button variant="ghost" size="sm" onClick={handleCancelIssue} className="h-7 w-7 p-0 text-gray-400 hover:text-gray-600">
+                                            <X className="h-4 w-4" />
+                                          </Button>
+                                        </div>
+                                        <p className="text-xs text-red-600">
+                                          Expected: Qty <span className="font-bold">{line.qty || line.quantity || 0} {line.uom || ""}</span>, Total Weight <span className="font-bold">{line.total_weight || "-"}</span>
+                                        </p>
+                                        <div className="grid grid-cols-3 gap-3">
+                                          <div className="space-y-1">
+                                            <Label className="text-xs font-medium text-red-700">Case Pack</Label>
+                                            <Input type="number" step="any" value={issueForm.case_pack} onChange={(e) => setIssueForm(prev => ({ ...prev, case_pack: e.target.value }))} placeholder="e.g. 10" className="h-9 bg-white border-red-200 focus-visible:ring-red-300 text-sm" />
+                                          </div>
+                                          <div className="space-y-1">
+                                            <Label className="text-xs font-medium text-red-700">Net Weight</Label>
+                                            <Input type="number" step="any" value={issueForm.net_weight} onChange={(e) => setIssueForm(prev => ({ ...prev, net_weight: e.target.value }))} placeholder="e.g. 500" className="h-9 bg-white border-red-200 focus-visible:ring-red-300 text-sm" />
+                                          </div>
+                                          <div className="space-y-1">
+                                            <Label className="text-xs font-medium text-red-700">Total Weight</Label>
+                                            <Input type="number" step="any" value={issueForm.total_weight} onChange={(e) => setIssueForm(prev => ({ ...prev, total_weight: e.target.value }))} placeholder="e.g. 550" className="h-9 bg-white border-red-200 focus-visible:ring-red-300 text-sm" />
+                                          </div>
+                                          <div className="space-y-1">
+                                            <Label className="text-xs font-medium text-red-700">Remarks</Label>
+                                            <Input type="text" value={issueForm.remarks} onChange={(e) => setIssueForm(prev => ({ ...prev, remarks: e.target.value }))} placeholder="Damage, shortage, etc." className="h-9 bg-white border-red-200 focus-visible:ring-red-300 text-sm" />
+                                          </div>
+                                        </div>
+                                        <div className="flex gap-2 justify-end">
+                                          <Button variant="outline" size="sm" onClick={handleCancelIssue} className="h-8 px-3 text-xs text-gray-600 border-gray-300">Cancel</Button>
+                                          <Button size="sm" onClick={() => handleSubmitIssue(index)} className="h-8 px-4 text-xs bg-red-600 hover:bg-red-700 text-white">
+                                            <AlertTriangle className="h-3 w-3 mr-1" /> Submit Issue
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </Fragment>
                           )
                         })}
                       </tbody>
@@ -1692,16 +1738,10 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                               )}
                             </div>
                             <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs pl-1">
-                              <div><span className="text-gray-500">Pack Size:</span> <span className="font-medium">{line.pack_size || "-"}</span></div>
+                              <div><span className="text-gray-500">Case Pack:</span> <span className={`font-medium ${issued && linesIssueMap[index]?.case_pack ? "text-red-600 font-bold" : ""}`}>{(issued && linesIssueMap[index]?.case_pack) || line.pack_size || "-"}</span></div>
                               <div><span className="text-gray-500">Qty:</span> <span className="font-bold text-blue-600">{line.qty || line.quantity || 0}</span> <span className="text-gray-500">{line.uom || ""}</span></div>
-                              <div className="flex items-center gap-1">
-                                <span className="text-gray-500">Net Wt:</span>
-                                <Input type="number" step="any" value={lineWeights[index]?.net_weight ?? line.net_weight ?? ""} onChange={(e) => updateLineWeight(index, "net_weight", e.target.value)} className="h-6 w-[70px] text-xs bg-white border-gray-200 px-1" />
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <span className="text-gray-500">Total Wt:</span>
-                                <Input type="number" step="any" value={lineWeights[index]?.total_weight ?? line.total_weight ?? ""} onChange={(e) => updateLineWeight(index, "total_weight", e.target.value)} className="h-6 w-[70px] text-xs bg-white border-gray-200 px-1" />
-                              </div>
+                              <div><span className="text-gray-500">Net Wt:</span> <span className={`font-medium ${issued && linesIssueMap[index]?.net_weight ? "text-red-600 font-bold" : ""}`}>{(issued && linesIssueMap[index]?.net_weight) || lineWeights[index]?.net_weight || line.net_weight || "-"}</span></div>
+                              <div><span className="text-gray-500">Total Wt:</span> <span className={`font-medium ${issued && linesIssueMap[index]?.total_weight ? "text-red-600 font-bold" : ""}`}>{(issued && linesIssueMap[index]?.total_weight) || lineWeights[index]?.total_weight || line.total_weight || "-"}</span></div>
                               {isColdStorageFrom && <div><span className="text-gray-500">Trans No:</span> <span className="font-mono font-medium">{line.transaction_no || mobileBoxData.transaction_no || "-"}</span></div>}
                               {isColdStorageFrom && <div><span className="text-gray-500">Box ID:</span> <span className="font-mono font-medium">{line.box_id || mobileBoxData.box_id || "-"}</span></div>}
                               {line.batch_number && <div><span className="text-gray-500">Batch:</span> <span className="font-mono font-medium">{line.batch_number}</span></div>}
@@ -1711,9 +1751,10 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                             {issued && linesIssueMap[index] && (
                               <div className="mt-1.5 p-2 bg-red-50 border border-red-200 rounded text-xs space-y-0.5">
                                 <p className="font-semibold text-red-700">Discrepancy Reported:</p>
-                                <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
-                                  <div><span className="text-red-500">Actual Qty:</span> <span className="font-bold text-red-700">{linesIssueMap[index].actual_qty}</span></div>
-                                  <div><span className="text-red-500">Actual Wt:</span> <span className="font-bold text-red-700">{linesIssueMap[index].actual_total_weight}</span></div>
+                                <div className="grid grid-cols-3 gap-x-3 gap-y-0.5">
+                                  {linesIssueMap[index].case_pack && <div><span className="text-red-500">Case Pack:</span> <span className="font-bold text-red-700">{linesIssueMap[index].case_pack}</span></div>}
+                                  {linesIssueMap[index].net_weight && <div><span className="text-red-500">Net Wt:</span> <span className="font-bold text-red-700">{linesIssueMap[index].net_weight}</span></div>}
+                                  {linesIssueMap[index].total_weight && <div><span className="text-red-500">Total Wt:</span> <span className="font-bold text-red-700">{linesIssueMap[index].total_weight}</span></div>}
                                 </div>
                                 {linesIssueMap[index].remarks && <p className="text-red-600">Remarks: {linesIssueMap[index].remarks}</p>}
                               </div>
@@ -1738,12 +1779,16 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                                 </p>
                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                                   <div className="space-y-1">
-                                    <Label className="text-xs font-medium text-red-700">Actual Qty Received *</Label>
-                                    <Input type="number" step="any" value={issueForm.actual_qty} onChange={(e) => setIssueForm(prev => ({ ...prev, actual_qty: e.target.value }))} placeholder="e.g. 8" className="h-9 bg-white border-red-200 focus-visible:ring-red-300 text-sm" />
+                                    <Label className="text-xs font-medium text-red-700">Case Pack</Label>
+                                    <Input type="number" step="any" value={issueForm.case_pack} onChange={(e) => setIssueForm(prev => ({ ...prev, case_pack: e.target.value }))} placeholder="e.g. 10" className="h-9 bg-white border-red-200 focus-visible:ring-red-300 text-sm" />
                                   </div>
                                   <div className="space-y-1">
-                                    <Label className="text-xs font-medium text-red-700">Actual Total Weight *</Label>
-                                    <Input type="number" step="any" value={issueForm.actual_total_weight} onChange={(e) => setIssueForm(prev => ({ ...prev, actual_total_weight: e.target.value }))} placeholder="e.g. 450" className="h-9 bg-white border-red-200 focus-visible:ring-red-300 text-sm" />
+                                    <Label className="text-xs font-medium text-red-700">Net Weight</Label>
+                                    <Input type="number" step="any" value={issueForm.net_weight} onChange={(e) => setIssueForm(prev => ({ ...prev, net_weight: e.target.value }))} placeholder="e.g. 500" className="h-9 bg-white border-red-200 focus-visible:ring-red-300 text-sm" />
+                                  </div>
+                                  <div className="space-y-1">
+                                    <Label className="text-xs font-medium text-red-700">Total Weight</Label>
+                                    <Input type="number" step="any" value={issueForm.total_weight} onChange={(e) => setIssueForm(prev => ({ ...prev, total_weight: e.target.value }))} placeholder="e.g. 550" className="h-9 bg-white border-red-200 focus-visible:ring-red-300 text-sm" />
                                   </div>
                                   <div className="space-y-1">
                                     <Label className="text-xs font-medium text-red-700">Remarks</Label>
@@ -1764,51 +1809,6 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                     })}
                   </div>
 
-                  {/* Issue form for desktop - rendered outside the table */}
-                  {issueOpenIndex !== null && (
-                    <div className="hidden md:block px-4 pb-3">
-                      {(() => {
-                        const line = lines[issueOpenIndex]
-                        if (!line) return null
-                        return (
-                          <div className="border-2 border-red-200 rounded-lg bg-red-50/50 p-4 space-y-3">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <AlertTriangle className="h-4 w-4 text-red-500" />
-                                <span className="text-sm font-semibold text-red-800">Report Issue — {line.item_desc_raw || line.item_description || `Article ${issueOpenIndex + 1}`}</span>
-                              </div>
-                              <Button variant="ghost" size="sm" onClick={handleCancelIssue} className="h-7 w-7 p-0 text-gray-400 hover:text-gray-600">
-                                <X className="h-4 w-4" />
-                              </Button>
-                            </div>
-                            <p className="text-xs text-red-600">
-                              Expected: Qty <span className="font-bold">{line.qty || line.quantity || 0} {line.uom || ""}</span>, Total Weight <span className="font-bold">{line.total_weight || "-"}</span>
-                            </p>
-                            <div className="grid grid-cols-3 gap-3">
-                              <div className="space-y-1">
-                                <Label className="text-xs font-medium text-red-700">Actual Qty Received *</Label>
-                                <Input type="number" step="any" value={issueForm.actual_qty} onChange={(e) => setIssueForm(prev => ({ ...prev, actual_qty: e.target.value }))} placeholder="e.g. 8" className="h-9 bg-white border-red-200 focus-visible:ring-red-300 text-sm" />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs font-medium text-red-700">Actual Total Weight *</Label>
-                                <Input type="number" step="any" value={issueForm.actual_total_weight} onChange={(e) => setIssueForm(prev => ({ ...prev, actual_total_weight: e.target.value }))} placeholder="e.g. 450" className="h-9 bg-white border-red-200 focus-visible:ring-red-300 text-sm" />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs font-medium text-red-700">Remarks</Label>
-                                <Input type="text" value={issueForm.remarks} onChange={(e) => setIssueForm(prev => ({ ...prev, remarks: e.target.value }))} placeholder="Damage, shortage, etc." className="h-9 bg-white border-red-200 focus-visible:ring-red-300 text-sm" />
-                              </div>
-                            </div>
-                            <div className="flex gap-2 justify-end">
-                              <Button variant="outline" size="sm" onClick={handleCancelIssue} className="h-8 px-3 text-xs text-gray-600 border-gray-300">Cancel</Button>
-                              <Button size="sm" onClick={() => handleSubmitIssue(issueOpenIndex)} className="h-8 px-4 text-xs bg-red-600 hover:bg-red-700 text-white">
-                                <AlertTriangle className="h-3 w-3 mr-1" /> Submit Issue
-                              </Button>
-                            </div>
-                          </div>
-                        )
-                      })()}
-                    </div>
-                  )}
                 </div>
               )}
 
