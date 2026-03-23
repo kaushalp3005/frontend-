@@ -228,7 +228,8 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
   // Use categorial_inv dropdown hooks for transfer/request
   const { options: itemCategories, loading: categoriesLoading } = useItemCategories({ company, material_type: articleData.materialType })
   const { options: subCategories, loading: subCategoriesLoading } = useSubCategories(articleData.itemCategory, { company, material_type: articleData.materialType })
-  const { options: itemDescriptions, loading: descriptionsLoading } = useCategorialItemDescriptions({
+  const { options: itemDescriptions, loading: descriptionsLoading } = useItemDescriptions({
+    company,
     material_type: articleData.materialType,
     item_category: articleData.itemCategory,
     sub_category: articleData.subCategory
