@@ -310,6 +310,13 @@ export interface BulkStickerPayload {
     remark?: string
   }
   articles: BulkStickerArticle[]
+  boxes: Array<{
+    article_description: string
+    box_number: number
+    net_weight?: number
+    gross_weight?: number
+    lot_number?: string
+  }>
 }
 
 export interface BulkStickerBox {
