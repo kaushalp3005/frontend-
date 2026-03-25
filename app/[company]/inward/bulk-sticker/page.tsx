@@ -186,6 +186,12 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
     setShowVendorDropdown(false)
   }, [])
 
+  const r3 = (v: string | number | undefined | null) => {
+    if (v == null || v === "") return undefined
+    const n = typeof v === "number" ? v : parseFloat(v)
+    return isNaN(n) ? undefined : parseFloat(n.toFixed(3))
+  }
+
   // Transaction number helper
   const generateTxnNo = (d: Date) =>
     `TR-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}${String(d.getHours()).padStart(2, "0")}${String(d.getMinutes()).padStart(2, "0")}${String(d.getSeconds()).padStart(2, "0")}`
@@ -266,10 +272,10 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
           destination_location: destination || undefined,
           po_number: poNumber || undefined,
           purchased_by: purchasedBy || undefined,
-          total_amount: totalAmount ? parseFloat(totalAmount) : undefined,
-          tax_amount: taxAmount ? parseFloat(taxAmount) : undefined,
-          discount_amount: discountAmount ? parseFloat(discountAmount) : undefined,
-          po_quantity: poQuantity ? parseFloat(poQuantity) : undefined,
+          total_amount: r3(totalAmount),
+          tax_amount: r3(taxAmount),
+          discount_amount: r3(discountAmount),
+          po_quantity: r3(poQuantity),
           currency: currency || undefined,
           warehouse: warehouse || undefined,
           vehicle_number: vehicleNumber || undefined,
@@ -278,7 +284,7 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
           challan_number: challanNumber || undefined,
           invoice_number: invoiceNumber || undefined,
           grn_number: grnNumber || undefined,
-          grn_quantity: grnQuantity ? parseFloat(grnQuantity) : undefined,
+          grn_quantity: r3(grnQuantity),
           system_grn_date: systemGrnDate || undefined,
           approval_authority: approvalAuthority || undefined,
           remark: remark || undefined,
@@ -292,22 +298,32 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
           material_type: articles.find((ar) => ar.item_description === a.item_description)?.material_type,
           quality_grade: a.quality_grade || undefined,
           uom: a.uom || undefined,
-          po_quantity: a.po_quantity ? parseFloat(a.po_quantity) : undefined,
+          po_quantity: r3(a.po_quantity),
           units: a.units || undefined,
           quantity_units: parseInt(a.box_count) || 1,
-          net_weight: a.net_weight ? parseFloat(a.net_weight) : undefined,
-          total_weight: a.total_weight ? parseFloat(a.total_weight) : undefined,
-          po_weight: a.po_weight ? parseFloat(a.po_weight) : undefined,
+          net_weight: r3(a.net_weight),
+          total_weight: r3(a.total_weight),
+          po_weight: r3(a.po_weight),
           lot_number: a.lot_number || undefined,
           manufacturing_date: a.manufacturing_date || undefined,
           expiry_date: a.expiry_date || undefined,
-          unit_rate: a.unit_rate ? parseFloat(a.unit_rate) : undefined,
-          total_amount: a.total_amount ? parseFloat(a.total_amount) : undefined,
-          carton_weight: a.carton_weight ? parseFloat(a.carton_weight) : undefined,
+          unit_rate: r3(a.unit_rate),
+          total_amount: r3(a.total_amount),
+          carton_weight: r3(a.carton_weight),
           box_count: parseInt(a.box_count) || 1,
-          box_net_weight: a.box_net_weight ? parseFloat(a.box_net_weight) : undefined,
-          box_gross_weight: a.box_gross_weight ? parseFloat(a.box_gross_weight) : undefined,
+          box_net_weight: r3(a.box_net_weight),
+          box_gross_weight: r3(a.box_gross_weight),
         })),
+        boxes: articleForms.flatMap((a) => {
+          const count = parseInt(a.box_count) || 1
+          return Array.from({ length: count }, (_, i) => ({
+            article_description: a.item_description,
+            box_number: i + 1,
+            net_weight: r3(a.box_net_weight),
+            gross_weight: r3(a.box_gross_weight),
+            lot_number: a.lot_number || undefined,
+          }))
+        }),
       }
 
       const response = await inwardApiService.createBulkSticker(payload)
@@ -570,15 +586,15 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
         const res = await inwardApiService.upsertBox(company as Company, result.transaction_no, {
           article_description: articleGroup.article_description,
           box_number: boxNumber,
-          net_weight: addMoreNetWeight ? parseFloat(addMoreNetWeight) : undefined,
-          gross_weight: addMoreGrossWeight ? parseFloat(addMoreGrossWeight) : undefined,
+          net_weight: r3(addMoreNetWeight),
+          gross_weight: r3(addMoreGrossWeight),
         })
         newBoxes.push({
           box_number: boxNumber,
           box_id: res.box_id,
           article_description: articleGroup.article_description,
-          net_weight: addMoreNetWeight ? parseFloat(addMoreNetWeight) : undefined,
-          gross_weight: addMoreGrossWeight ? parseFloat(addMoreGrossWeight) : undefined,
+          net_weight: r3(addMoreNetWeight),
+          gross_weight: r3(addMoreGrossWeight),
         })
       }
 
@@ -985,11 +1001,10 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
                     <SelectValue placeholder="Select warehouse" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="W202">W202</SelectItem>
-                    <SelectItem value="A185">A185</SelectItem>
-                    <SelectItem value="A68">A68</SelectItem>
-                    <SelectItem value="A101">A101</SelectItem>
-                    <SelectItem value="F53">F53</SelectItem>
+                    <SelectItem value="rishi">Rishi</SelectItem>
+                    <SelectItem value="old_savla">Old Savla</SelectItem>
+                    <SelectItem value="new_savla">New Savla</SelectItem>
+                    <SelectItem value="supreme">Supreme</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -1132,7 +1147,9 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-xs">Total Weight</Label>
-                    <Input type="number" value={articleForms[idx]?.total_weight || ""} onChange={(e) => updateArticleForm(idx, "total_weight", e.target.value)} className="h-9" />
+                    <Input type="number" step="0.001" value={articleForms[idx]?.total_weight || ""} onChange={(e) => {
+                      const v = e.target.value; const dot = v.indexOf('.'); if (dot !== -1 && v.length - dot - 1 > 3) return; updateArticleForm(idx, "total_weight", v);
+                    }} className="h-9" />
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-xs">Lot Number</Label>
@@ -1189,7 +1206,9 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
                       type="number"
                       step="0.001"
                       value={articleForms[idx]?.box_gross_weight || ""}
-                      onChange={(e) => updateArticleForm(idx, "box_gross_weight", e.target.value)}
+                      onChange={(e) => {
+                        const v = e.target.value; const dot = v.indexOf('.'); if (dot !== -1 && v.length - dot - 1 > 3) return; updateArticleForm(idx, "box_gross_weight", v);
+                      }}
                       placeholder="kg per box"
                       className="h-9"
                     />
