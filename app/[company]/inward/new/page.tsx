@@ -465,6 +465,12 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
   const generateTxnNo = (d: Date) =>
     `TR-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}${String(d.getHours()).padStart(2, "0")}${String(d.getMinutes()).padStart(2, "0")}${String(d.getSeconds()).padStart(2, "0")}`
 
+  const r3 = (v: string | number | undefined | null) => {
+    if (v == null || v === "") return undefined
+    const n = typeof v === "number" ? v : parseFloat(v)
+    return isNaN(n) ? undefined : parseFloat(n.toFixed(3))
+  }
+
   // ── Helper: ensure entry is created (reused by submit and print) ──
   const ensureEntryCreated = async (): Promise<string> => {
     if (createdTxnNo) return createdTxnNo
@@ -484,10 +490,10 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
         destination_location: destination || undefined,
         po_number: poNumber || undefined,
         purchased_by: purchasedBy || undefined,
-        total_amount: totalAmount ? parseFloat(totalAmount) : undefined,
-        tax_amount: taxAmount ? parseFloat(taxAmount) : undefined,
-        discount_amount: discountAmount ? parseFloat(discountAmount) : undefined,
-        po_quantity: poQuantity ? parseFloat(poQuantity) : undefined,
+        total_amount: r3(totalAmount),
+        tax_amount: r3(taxAmount),
+        discount_amount: r3(discountAmount),
+        po_quantity: r3(poQuantity),
         currency: currency || undefined,
         vehicle_number: vehicleNumber || undefined,
         transporter_name: transporterName || undefined,
@@ -508,7 +514,7 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
           sub_category: a.sub_category,
           unit_rate: a.unit_rate,
           total_amount: a.total_amount,
-          carton_weight: approvalForm?.carton_weight ? parseFloat(approvalForm.carton_weight) : undefined,
+          carton_weight: r3(approvalForm?.carton_weight),
         }
       }),
       boxes: articles.map((a, idx) => ({
@@ -543,7 +549,7 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
             challan_number: challanNumber || undefined,
             invoice_number: invoiceNumber || undefined,
             grn_number: grnNumber || undefined,
-            grn_quantity: grnQuantity ? parseFloat(grnQuantity) : undefined,
+            grn_quantity: r3(grnQuantity),
             system_grn_date: systemGrnDate || undefined,
             ...(isServiceOrder ? { service_invoice_number: serviceInvoiceNo || undefined } : {}),
             ...((isServiceOrder || isRtv) ? { dn_number: dnNumber || undefined } : {}),
@@ -556,23 +562,23 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
             item_description: a.item_description,
             quality_grade: a.quality_grade || undefined,
             uom: a.uom || undefined,
-            po_quantity: a.po_quantity ? parseFloat(a.po_quantity) : undefined,
-            units: isRtv && a.units ? parseFloat(a.units) : undefined,
-            quantity_units: a.quantity_units ? parseFloat(a.quantity_units) : undefined,
-            net_weight: a.net_weight ? parseFloat(a.net_weight) : undefined,
-            total_weight: a.total_weight ? parseFloat(a.total_weight) : undefined,
+            po_quantity: r3(a.po_quantity),
+            units: isRtv ? r3(a.units) : undefined,
+            quantity_units: r3(a.quantity_units),
+            net_weight: r3(a.net_weight),
+            total_weight: r3(a.total_weight),
             lot_number: a.lot_number || undefined,
             manufacturing_date: a.manufacturing_date || undefined,
             expiry_date: a.expiry_date || undefined,
-            unit_rate: a.unit_rate ? parseFloat(a.unit_rate) : undefined,
-            total_amount: a.total_amount ? parseFloat(a.total_amount) : undefined,
-            carton_weight: a.carton_weight ? parseFloat(a.carton_weight) : undefined,
+            unit_rate: r3(a.unit_rate),
+            total_amount: r3(a.total_amount),
+            carton_weight: r3(a.carton_weight),
           })),
           boxes: boxForms.map((b) => ({
             article_description: b.article_description,
             box_number: b.box_number,
-            net_weight: b.net_weight ? parseFloat(b.net_weight) : undefined,
-            gross_weight: b.gross_weight ? parseFloat(b.gross_weight) : undefined,
+            net_weight: r3(b.net_weight),
+            gross_weight: r3(b.gross_weight),
             lot_number: b.lot_number || undefined,
             count: b.count ? parseInt(b.count) : undefined,
           })),
@@ -638,10 +644,10 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
             destination_location: po.destination_location || undefined,
             po_number: po.po_number || undefined,
             purchased_by: po.purchased_by || undefined,
-            total_amount: po.total_amount ? parseFloat(po.total_amount) : undefined,
-            tax_amount: po.tax_amount ? parseFloat(po.tax_amount) : undefined,
-            discount_amount: po.discount_amount ? parseFloat(po.discount_amount) : undefined,
-            po_quantity: po.po_quantity ? parseFloat(po.po_quantity) : undefined,
+            total_amount: r3(po.total_amount),
+            tax_amount: r3(po.tax_amount),
+            discount_amount: r3(po.discount_amount),
+            po_quantity: r3(po.po_quantity),
             currency: po.currency || undefined,
             vehicle_number: vehicleNumber || undefined,
             transporter_name: transporterName || undefined,
@@ -976,8 +982,8 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
       const upsertResult = await inwardApiService.upsertBox(company, txnNo, {
         article_description: box.article_description,
         box_number: box.box_number,
-        net_weight: box.net_weight ? parseFloat(box.net_weight) : undefined,
-        gross_weight: box.gross_weight ? parseFloat(box.gross_weight) : undefined,
+        net_weight: r3(box.net_weight),
+        gross_weight: r3(box.gross_weight),
         lot_number: box.lot_number || undefined,
         count: box.count ? parseInt(box.count) : undefined,
       })
@@ -1867,11 +1873,10 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
                         <SelectValue placeholder="Select warehouse" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="W202">W202</SelectItem>
-                        <SelectItem value="A185">A185</SelectItem>
-                        <SelectItem value="A68">A68</SelectItem>
-                        <SelectItem value="A101">A101</SelectItem>
-                        <SelectItem value="F53">F53</SelectItem>
+                        <SelectItem value="rishi">Rishi</SelectItem>
+                        <SelectItem value="old_savla">Old Savla</SelectItem>
+                        <SelectItem value="new_savla">New Savla</SelectItem>
+                        <SelectItem value="supreme">Supreme</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
