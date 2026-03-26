@@ -1001,9 +1001,9 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
                     <SelectValue placeholder="Select warehouse" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="rishi">Rishi</SelectItem>
                     <SelectItem value="old_savla">Old Savla</SelectItem>
                     <SelectItem value="new_savla">New Savla</SelectItem>
+                    <SelectItem value="rishi">Rishi</SelectItem>
                     <SelectItem value="supreme">Supreme</SelectItem>
                   </SelectContent>
                 </Select>
