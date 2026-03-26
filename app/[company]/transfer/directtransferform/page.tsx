@@ -624,6 +624,18 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     loadedItems: { value: loadedItems, setter: setLoadedItems },
   })
 
+  // Always reset transfer date and transfer number to current values on mount
+  // This prevents stale cached dates from localStorage overriding today's date
+  useEffect(() => {
+    if (!isEditMode) {
+      const freshNow = new Date()
+      const freshDate = `${String(freshNow.getDate()).padStart(2, '0')}-${String(freshNow.getMonth() + 1).padStart(2, '0')}-${freshNow.getFullYear()}`
+      setFormData(prev => ({ ...prev, requestDate: freshDate }))
+      setTransferNo(generateTransferNo())
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // Use categorial_inv dropdown hooks for transfer
   const { options: itemCategories, loading: categoriesLoading } = useItemCategories({ company, material_type: articles[0]?.material_type || "" })
   const { options: subCategories, loading: subCategoriesLoading } = useSubCategories(articles[0]?.item_category || "", { company, material_type: articles[0]?.material_type || "" })
