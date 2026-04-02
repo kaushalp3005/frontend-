@@ -15,7 +15,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
   Plus, Eye, Edit, Trash2, Search, X, ChevronLeft, ChevronRight,
-  FileCheck, Clock, CheckCircle2, Loader2, ArrowDownToLine, ClipboardCheck, ClipboardList, Download, Snowflake,
+  FileCheck, Clock, CheckCircle2, Loader2, ArrowDownToLine, ClipboardCheck, ClipboardList, Download, Snowflake, BarChart3,
 } from "lucide-react"
 import { format } from "date-fns"
 import {
@@ -182,6 +182,12 @@ export default function InwardListPage({ params }: InwardListPageProps) {
               <Link href={`/${company}/inward/bulk-sticker`}>
                 <Snowflake className="h-4 w-4" />
                 <span className="hidden xs:inline">Bulk Sticker</span>
+              </Link>
+            </Button>
+            <Button asChild variant="outline" size="sm" className="gap-1.5">
+              <Link href={`/${company}/inward/dashboard`}>
+                <BarChart3 className="h-4 w-4" />
+                <span className="hidden xs:inline">View Summary</span>
               </Link>
             </Button>
             <Button asChild size="sm" className="gap-1.5">
