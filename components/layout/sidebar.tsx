@@ -1,6 +1,6 @@
 "use client"
 
-import React from "react"
+import React, { useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
@@ -13,6 +13,7 @@ import {
   LayoutDashboard,
   ArrowDownToLine,
   ArrowRightLeft,
+  ArrowRight,
   Package,
   RotateCcw,
   ArrowUpFromLine,
@@ -22,19 +23,36 @@ import {
   Utensils,
   Snowflake,
   Settings,
+  ChevronDown,
 } from "lucide-react"
+
+interface SubNavItem {
+  title: string
+  href: string
+  icon: React.ComponentType<{ className?: string }>
+}
 
 interface NavItem {
   title: string
   href: string
   icon: React.ComponentType<{ className?: string }>
   module: Module
+  children?: SubNavItem[]
 }
 
 const navItems: NavItem[] = [
   { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard, module: "dashboard" },
   { title: "Inward", href: "/inward", icon: ArrowDownToLine, module: "inward" },
-  { title: "Transfer", href: "/transfer", icon: ArrowRightLeft, module: "transfer" },
+  {
+    title: "Transfer",
+    href: "/transfer",
+    icon: ArrowRightLeft,
+    module: "transfer",
+    children: [
+      { title: "Interunit-transfer", href: "/transfer", icon: ArrowRightLeft },
+      { title: "Job Work", href: "/transfer/job-work", icon: ArrowRight },
+    ],
+  },
   { title: "Consumption", href: "/consumption", icon: Utensils, module: "consumption" },
   { title: "Inventory", href: "/inventory-ledger", icon: Package, module: "inventory-ledger" },
   { title: "Cold Storage", href: "/cold-storage", icon: Snowflake, module: "cold-storage" },
@@ -53,6 +71,28 @@ interface SidebarProps {
 export function Sidebar({ company, collapsed: isCollapsed, onCollapsedChange }: SidebarProps) {
   const pathname = usePathname()
   const { user, currentCompany, hasPermission } = useAuthStore()
+  const [expandedItems, setExpandedItems] = useState<string[]>([])
+
+  // Auto-expand parent if a child route is active
+  React.useEffect(() => {
+    navItems.forEach((item) => {
+      if (item.children) {
+        const childActive = item.children.some((child) => {
+          const childHref = `/${company}${child.href}`
+          return pathname === childHref || pathname.startsWith(childHref + "/")
+        })
+        if (childActive && !expandedItems.includes(item.title)) {
+          setExpandedItems((prev) => [...prev, item.title])
+        }
+      }
+    })
+  }, [pathname, company])
+
+  const toggleExpanded = (title: string) => {
+    setExpandedItems((prev) =>
+      prev.includes(title) ? prev.filter((t) => t !== title) : [...prev, title]
+    )
+  }
 
   const toggleCollapsed = () => {
     const next = !isCollapsed
@@ -101,7 +141,10 @@ export function Sidebar({ company, collapsed: isCollapsed, onCollapsedChange }: 
               const isActive = pathname === href || pathname.startsWith(href + "/")
               const hasAccess = user && currentCompany && hasPermission && hasPermission(item.module, "view")
               const isLocked = !hasAccess
+              const hasChildren = item.children && item.children.length > 0
+              const isExpanded = expandedItems.includes(item.title)
 
+              // For items with children, clicking toggles the dropdown
               const NavButton = (
                 <Button
                   key={item.title}
@@ -113,8 +156,9 @@ export function Sidebar({ company, collapsed: isCollapsed, onCollapsedChange }: 
                     !isActive && "text-muted-foreground hover:text-foreground hover:bg-muted/60",
                     isLocked && "opacity-40 cursor-not-allowed",
                   )}
-                  asChild={!isLocked}
+                  asChild={!isLocked && !hasChildren}
                   disabled={isLocked}
+                  onClick={hasChildren && !isLocked ? () => toggleExpanded(item.title) : undefined}
                 >
                   {isLocked ? (
                     <div className="flex items-center w-full">
@@ -123,6 +167,19 @@ export function Sidebar({ company, collapsed: isCollapsed, onCollapsedChange }: 
                         <>
                           <span className="flex-1 text-sm truncate">{item.title}</span>
                           <Lock className="h-3 w-3 flex-shrink-0 ml-1" />
+                        </>
+                      )}
+                    </div>
+                  ) : hasChildren ? (
+                    <div className="flex items-center w-full">
+                      <item.icon className={cn("h-4 w-4 flex-shrink-0", !isCollapsed && "mr-2.5")} />
+                      {!isCollapsed && (
+                        <>
+                          <span className="flex-1 text-sm truncate text-left">{item.title}</span>
+                          <ChevronDown className={cn(
+                            "h-3.5 w-3.5 flex-shrink-0 ml-1 transition-transform duration-200",
+                            isExpanded && "rotate-180"
+                          )} />
                         </>
                       )}
                     </div>
@@ -149,7 +206,41 @@ export function Sidebar({ company, collapsed: isCollapsed, onCollapsedChange }: 
                 )
               }
 
-              return NavButton
+              return (
+                <div key={item.title}>
+                  {NavButton}
+                  {/* Sub-items dropdown */}
+                  {hasChildren && isExpanded && !isCollapsed && !isLocked && (
+                    <div className="ml-4 mt-0.5 space-y-0.5 border-l border-border/50 pl-2">
+                      {item.children!.map((child) => {
+                        const childHref = `/${company}${child.href}`
+                        const isChildActive = pathname === childHref || pathname.startsWith(childHref + "/")
+
+                        return (
+                          <Button
+                            key={child.title}
+                            variant="ghost"
+                            className={cn(
+                              "w-full h-8 justify-start px-2.5 transition-colors",
+                              isChildActive && "bg-primary/10 text-primary font-semibold hover:bg-primary/15",
+                              !isChildActive && "text-muted-foreground hover:text-foreground hover:bg-muted/60",
+                            )}
+                            asChild
+                          >
+                            <Link href={childHref} className="flex items-center w-full">
+                              <child.icon className="h-3.5 w-3.5 flex-shrink-0 mr-2" />
+                              <span className="text-xs truncate">{child.title}</span>
+                              {isChildActive && (
+                                <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 bg-primary rounded-r-full" />
+                              )}
+                            </Link>
+                          </Button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )
             })}
           </TooltipProvider>
         </nav>
