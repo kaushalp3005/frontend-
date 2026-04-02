@@ -13,7 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import Link from "next/link"
 import {
   Plus, Eye, Trash2, Search, X, ChevronLeft, ChevronRight,
-  Loader2, Package, Printer,
+  Loader2, Package, Printer, BarChart3,
 } from "lucide-react"
 import { format } from "date-fns"
 import { bulkEntryApi } from "@/lib/api/bulkEntryApiService"
@@ -119,6 +119,12 @@ export default function ColdStorageListPage({ params }: ColdStorageListPageProps
             </p>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
+            <Button asChild size="sm" className="gap-1.5 bg-blue-600 hover:bg-blue-700 text-white">
+              <Link href={`/${company}/cold-storage/dashboard`}>
+                <BarChart3 className="h-4 w-4" />
+                <span>View Dashboard</span>
+              </Link>
+            </Button>
             <Button asChild size="sm" className="gap-1.5">
               <Link href={`/${company}/cold-storage/bulk-sticker`}>
                 <Plus className="h-4 w-4" />

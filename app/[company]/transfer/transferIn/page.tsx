@@ -14,7 +14,7 @@ import {
   CheckCircle, ClipboardCheck, CheckCheck, Hash, FileText,
   AlertTriangle, X, Building2, Snowflake, Printer
 } from "lucide-react"
-import { useToast } from "@/hooks/use-toast"
+import { toast } from "sonner"
 import { InterunitApiService } from "@/lib/interunitApiService"
 import { ColdStorageApiService } from "@/lib/api/coldStorageApiService"
 import { useAuthStore } from "@/lib/stores/auth"
@@ -33,13 +33,11 @@ export default function TransferInPage({ params }: TransferInPageProps) {
   const { company } = params
   const router = useRouter()
   const searchParams = useSearchParams()
-  const { toast } = useToast()
   const { user } = useAuthStore()
 
   const [transferNumber, setTransferNumber] = useState("")
   const [loading, setLoading] = useState(false)
   const [transferData, setTransferData] = useState<any>(null)
-  const [showScanner, setShowScanner] = useState(false)
   const [boxesMatchMap, setBoxesMatchMap] = useState<Record<number, boolean>>({})
   const [linesMatchMap, setLinesMatchMap] = useState<Record<number, boolean>>({})
   const [linesIssueMap, setLinesIssueMap] = useState<Record<number, { remarks: string; net_weight?: string; total_weight?: string; case_pack?: string }>>({})
@@ -47,6 +45,8 @@ export default function TransferInPage({ params }: TransferInPageProps) {
   const [issueForm, setIssueForm] = useState({ remarks: "", net_weight: "", total_weight: "", case_pack: "" })
   const [boxCondition, setBoxCondition] = useState("Good")
   const [conditionRemarks, setConditionRemarks] = useState("")
+  const [showAckScanner, setShowAckScanner] = useState(false)
+  const [scanResult, setScanResult] = useState<{ type: "match" | "no-match" | "already" | "error"; message: string } | null>(null)
 
   // ── Cold storage per-item details (Savla / Rishi) — keyed by unique item name ──
   const [coldStorageItems, setColdStorageItems] = useState<Record<string, {
@@ -99,7 +99,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
   const allMatched = totalItems > 0 && totalMatched === totalItems
 
   // ── Cold storage check ──
-  const COLD_STORAGE_WAREHOUSES = ["Rishi cold", "Savla D-39 cold", "Savla D-514 cold"]
+  const COLD_STORAGE_WAREHOUSES = ["Cold Storage", "Rishi cold", "Savla D-39 cold", "Savla D-514 cold"]
   const fromWarehouse = transferData?.from_warehouse || transferData?.from_site || ""
   const toWarehouse = transferData?.to_warehouse || transferData?.to_site || ""
   const isColdStorageFrom = COLD_STORAGE_WAREHOUSES.some(w => w.toLowerCase() === fromWarehouse.toLowerCase())
@@ -199,7 +199,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
   // Load transfer details by transfer number
   const loadTransferDetails = async (transferNo: string) => {
     if (!transferNo.trim()) {
-      toast({ title: "Error", description: "Please enter a transfer number", variant: "destructive" })
+      toast.error("Please enter a transfer number")
       return
     }
 
@@ -267,7 +267,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
           seenItems.add(name)
           coldMap[name] = {
             inward_dt: today, vakkal: "", lot_no: "", rate: "",
-            exporter: "", storage_location: "", item_mark: "",
+            exporter: "", storage_location: toWarehouse, item_mark: "",
             group_name: line.item_category || "",
             item_subgroup: line.sub_category || "",
             cold_company: (company || "cfpl").toLowerCase(), spl_remarks: "",
@@ -328,10 +328,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
 
       const boxCount = (response.boxes || []).length
       const lineCount = (response.lines || []).length
-      toast({
-        title: "Transfer Loaded",
-        description: `Transfer ${response.transfer_no || response.challan_no} loaded with ${boxCount} boxes and ${lineCount} article lines`,
-      })
+      toast.success(`Transfer ${response.transfer_no || response.challan_no} loaded with ${boxCount} boxes and ${lineCount} article lines`)
 
       // Check for existing pending transfer-in (resume flow)
       try {
@@ -370,14 +367,14 @@ export default function TransferInPage({ params }: TransferInPageProps) {
             setBoxesMatchMap(prev => ({ ...prev, ...restoredBoxMap }))
           }
 
-          toast({ title: "Resuming", description: `Resuming pending GRN ${pendingResult.header.grn_number}` })
+          toast.success(`Resuming pending GRN ${pendingResult.header.grn_number}`)
         }
       } catch (e) {
         console.warn("Could not check for pending transfer-in:", e)
       }
     } catch (error: any) {
       console.error("Failed to load transfer:", error)
-      toast({ title: "Error", description: error.message || "Failed to load transfer details", variant: "destructive" })
+      toast.error(error.message || "Failed to load transfer details")
       setTransferData(null)
     } finally {
       setLoading(false)
@@ -425,7 +422,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
         setPendingGrnNumber(header.grn_number || grnNumber)
         return header.id
       } catch (err: any) {
-        toast({ title: "Error", description: err.message || "Failed to create pending transfer", variant: "destructive" })
+        toast.error(err.message || "Failed to create pending transfer")
         return null
       } finally {
         pendingHeaderPromiseRef.current = null
@@ -434,22 +431,6 @@ export default function TransferInPage({ params }: TransferInPageProps) {
 
     pendingHeaderPromiseRef.current = promise
     return promise
-  }
-
-  // ── Handler: Transfer number scanner ──
-  const handleTransferQRScan = (decodedText: string) => {
-    setShowScanner(false)
-    try {
-      const qrData = JSON.parse(decodedText)
-      if (qrData.transfer_no || qrData.challan_no) {
-        const transferNo = qrData.transfer_no || qrData.challan_no
-        setTransferNumber(transferNo)
-        loadTransferDetails(transferNo)
-        return
-      }
-    } catch { /* Not JSON — treat as raw */ }
-    setTransferNumber(decodedText)
-    loadTransferDetails(decodedText)
   }
 
   // ── Box handlers ──
@@ -473,9 +454,9 @@ export default function TransferInPage({ params }: TransferInPageProps) {
         is_matched: true,
       })
       setBoxesMatchMap((prev) => ({ ...prev, [boxId]: true }))
-      toast({ title: "Box Acknowledged", description: `Box #${boxId} acknowledged` })
+      toast.success(`Box #${boxId} acknowledged`)
     } catch (err: any) {
-      toast({ title: "Error", description: err.message || "Failed to acknowledge box", variant: "destructive" })
+      toast.error(err.message || "Failed to acknowledge box")
     }
   }
 
@@ -483,7 +464,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
     if (!pendingHeaderId) {
       // No pending header means nothing was saved to DB yet — just clear local state
       setBoxesMatchMap((prev) => { const next = { ...prev }; delete next[boxId]; return next })
-      toast({ title: "Box Unacknowledged", description: `Box #${boxId} unacknowledged` })
+      toast.success(`Box #${boxId} unacknowledged`)
       return
     }
     const box = boxes.find((b: any) => b.id === boxId)
@@ -497,9 +478,9 @@ export default function TransferInPage({ params }: TransferInPageProps) {
         delete next[boxId]
         return next
       })
-      toast({ title: "Box Unacknowledged", description: `Box #${boxId} unacknowledged` })
+      toast.success(`Box #${boxId} unacknowledged`)
     } catch (err: any) {
-      toast({ title: "Error", description: err.message || "Failed to unacknowledge box", variant: "destructive" })
+      toast.error(err.message || "Failed to unacknowledge box")
     }
   }
 
@@ -531,9 +512,9 @@ export default function TransferInPage({ params }: TransferInPageProps) {
       const newMap = { ...boxesMatchMap }
       articleBoxes.forEach((b: any) => { newMap[b.id] = true })
       setBoxesMatchMap(newMap)
-      toast({ title: "Article Boxes Acknowledged", description: `All ${articleBoxes.length} boxes for "${articleName}" acknowledged` })
+      toast.success(`All ${articleBoxes.length} boxes for "${articleName}" acknowledged`)
     } catch (err: any) {
-      toast({ title: "Error", description: err.message || "Failed to acknowledge boxes", variant: "destructive" })
+      toast.error(err.message || "Failed to acknowledge boxes")
     }
   }
 
@@ -559,9 +540,9 @@ export default function TransferInPage({ params }: TransferInPageProps) {
         line_index: lineIndex,
       })
       setLinesMatchMap((prev) => ({ ...prev, [lineIndex]: true }))
-      toast({ title: "Article Acknowledged", description: `${articleName || `Line ${lineIndex + 1}`} acknowledged` })
+      toast.success(`${articleName || "Line " + (lineIndex + 1)} acknowledged`)
     } catch (err: any) {
-      toast({ title: "Error", description: err.message || "Failed to save acknowledgment", variant: "destructive" })
+      toast.error(err.message || "Failed to save acknowledgment")
     }
   }
 
@@ -570,7 +551,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
       // No pending header means nothing was saved to DB yet — just clear local state
       setLinesMatchMap((prev) => { const next = { ...prev }; delete next[lineIndex]; return next })
       const l = lines[lineIndex]
-      toast({ title: "Article Unacknowledged", description: `${l?.item_desc_raw || l?.item_description || `Line ${lineIndex + 1}`} unacknowledged` })
+      toast.success(`${l?.item_desc_raw || l?.item_description || "Line " + (lineIndex + 1)} unacknowledged`)
       return
     }
     const line = lines[lineIndex]
@@ -584,9 +565,9 @@ export default function TransferInPage({ params }: TransferInPageProps) {
         delete next[lineIndex]
         return next
       })
-      toast({ title: "Article Unacknowledged", description: `${line?.item_desc_raw || line?.item_description || `Line ${lineIndex + 1}`} unacknowledged` })
+      toast.success(`${line?.item_desc_raw || line?.item_description || "Line " + (lineIndex + 1)} unacknowledged`)
     } catch (err: any) {
-      toast({ title: "Error", description: err.message || "Failed to remove acknowledgment", variant: "destructive" })
+      toast.error(err.message || "Failed to remove acknowledgment")
     }
   }
 
@@ -654,9 +635,9 @@ export default function TransferInPage({ params }: TransferInPageProps) {
       })
       setIssueOpenIndex(null)
       setIssueForm({ remarks: "", net_weight: "", total_weight: "", case_pack: "" })
-      toast({ title: "Issue Reported", description: `Discrepancy noted for ${line?.item_desc_raw || `Line ${lineIndex + 1}`}` })
+      toast.success(`Discrepancy noted for ${line?.item_desc_raw || "Line " + (lineIndex + 1)}`)
     } catch (err: any) {
-      toast({ title: "Error", description: err.message || "Failed to save issue", variant: "destructive" })
+      toast.error(err.message || "Failed to save issue")
     }
   }
 
@@ -709,7 +690,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
     })
 
     if (batchItems.length === 0) {
-      toast({ title: "All Acknowledged", description: "All items already acknowledged" })
+      toast.success("All items already acknowledged")
       return
     }
 
@@ -726,9 +707,9 @@ export default function TransferInPage({ params }: TransferInPageProps) {
       })
       setLinesMatchMap(newLineMap)
 
-      toast({ title: "All Acknowledged", description: `${batchItems.length} items acknowledged successfully` })
+      toast.success(`${batchItems.length} items acknowledged successfully`)
     } catch (err: any) {
-      toast({ title: "Error", description: err.message || "Failed to batch acknowledge", variant: "destructive" })
+      toast.error(err.message || "Failed to batch acknowledge")
     }
   }
 
@@ -758,7 +739,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
     })
 
     if (batchBoxes.length === 0) {
-      toast({ title: "All Articles Acknowledged", description: "All lines already acknowledged" })
+      toast.success("All lines already acknowledged")
       return
     }
 
@@ -769,9 +750,9 @@ export default function TransferInPage({ params }: TransferInPageProps) {
         if (!linesIssueMap[i]) newMap[i] = true
       })
       setLinesMatchMap(newMap)
-      toast({ title: "All Articles Acknowledged", description: `${batchBoxes.length} article lines acknowledged` })
+      toast.success(`${batchBoxes.length} article lines acknowledged`)
     } catch (err: any) {
-      toast({ title: "Error", description: err.message || "Failed to batch acknowledge", variant: "destructive" })
+      toast.error(err.message || "Failed to batch acknowledge")
     }
   }
 
@@ -795,7 +776,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
       }))
 
     if (batchItems.length === 0) {
-      toast({ title: "All Boxes Acknowledged", description: "All boxes already acknowledged" })
+      toast.success("All boxes already acknowledged")
       return
     }
 
@@ -804,15 +785,116 @@ export default function TransferInPage({ params }: TransferInPageProps) {
       const newMap = { ...boxesMatchMap }
       boxes.forEach((b: any) => { newMap[b.id] = true })
       setBoxesMatchMap(newMap)
-      toast({ title: "All Boxes Acknowledged", description: `${batchItems.length} boxes acknowledged` })
+      toast.success(`${batchItems.length} boxes acknowledged`)
     } catch (err: any) {
-      toast({ title: "Error", description: err.message || "Failed to acknowledge boxes", variant: "destructive" })
+      toast.error(err.message || "Failed to acknowledge boxes")
     }
   }
 
   const handleQRScanError = (error: string) => {
     console.error("QR Scan Error:", error)
-    toast({ title: "Scanner Error", description: error, variant: "destructive" })
+    toast.error(error)
+  }
+
+  // ── Scan to Acknowledge handler ──
+  // Matches scanned QR (box_id + transaction_no) against DB entries and auto-acknowledges
+  const handleAckQRScan = async (decodedText: string) => {
+    let scannedBoxId = ""
+    let scannedTransactionNo = ""
+
+    // Parse QR data — supports formats: {tx, bi}, {transaction_no, box_id}, {cn, ...}
+    try {
+      const qrData = JSON.parse(decodedText)
+      scannedTransactionNo = String(qrData.tx || qrData.transaction_no || qrData.cn || "").trim()
+      scannedBoxId = String(qrData.bi || qrData.box_id || qrData.boxId || "").trim()
+    } catch {
+      scannedBoxId = decodedText.trim()
+    }
+
+    if (!scannedBoxId && !scannedTransactionNo) {
+      setScanResult({ type: "error", message: "Invalid QR — no box_id or transaction_no found" })
+      return
+    }
+
+    // Match using transaction_no AND box_id from DB
+    const isMatch = (bBoxId: string, bTxnNo: string) => {
+      if (scannedBoxId && scannedTransactionNo) {
+        return bBoxId === scannedBoxId && bTxnNo === scannedTransactionNo
+      }
+      if (scannedTransactionNo) return bTxnNo === scannedTransactionNo
+      if (scannedBoxId) return bBoxId === scannedBoxId
+      return false
+    }
+
+    // Match scanned QR against transfer boxes from DB (using box_id + transaction_no)
+    const matchedBox = boxes.find((b: any) =>
+      isMatch(String(b.box_id || "").trim(), String(b.transaction_no || "").trim())
+    )
+
+    if (matchedBox) {
+      const article = matchedBox.article || "Unknown"
+
+      // When boxes cover all lines, the UI shows lines (not boxes).
+      // So we must acknowledge the corresponding LINE for the count to update.
+      if (allLinesCoveredByBoxes) {
+        // Find the line that corresponds to this box via lineBoxDataMap
+        let lineIdx = lines.findIndex((l: any) => {
+          const boxRef = lineBoxDataMap[l.id] || {}
+          return String(boxRef.box_id || "").trim() === String(matchedBox.box_id || "").trim()
+            && String(boxRef.transaction_no || "").trim() === String(matchedBox.transaction_no || "").trim()
+        })
+        // Fallback: match by transfer_line_id
+        if (lineIdx < 0) {
+          lineIdx = lines.findIndex((l: any) => l.id === matchedBox.transfer_line_id)
+        }
+        // Fallback: match by index position (box[i] = line[i])
+        if (lineIdx < 0) {
+          const boxIdx = boxes.findIndex((b: any) => b.id === matchedBox.id)
+          if (boxIdx >= 0 && boxIdx < lines.length) lineIdx = boxIdx
+        }
+
+        if (lineIdx >= 0) {
+          if (linesMatchMap[lineIdx]) {
+            setScanResult({ type: "already", message: `Already Acknowledged — ${article} | Box ID: ${scannedBoxId || "N/A"} | Transaction: ${scannedTransactionNo || "N/A"}` })
+            return
+          }
+          await handleAcknowledgeLine(lineIdx)
+          setScanResult({ type: "match", message: `Matched — ${article} | Box ID: ${scannedBoxId || "N/A"} | Transaction: ${scannedTransactionNo || "N/A"}` })
+          return
+        }
+      }
+
+      // Normal flow: acknowledge the box directly
+      if (boxesMatchMap[matchedBox.id]) {
+        setScanResult({ type: "already", message: `Already Acknowledged — ${article} | Box ID: ${scannedBoxId || "N/A"} | Transaction: ${scannedTransactionNo || "N/A"}` })
+        return
+      }
+      await handleAcknowledgeBox(matchedBox.id)
+      setScanResult({ type: "match", message: `Matched — ${article} | Box ID: ${scannedBoxId || "N/A"} | Transaction: ${scannedTransactionNo || "N/A"}` })
+      return
+    }
+
+    // Match against lines via lineBoxDataMap (box_id + transaction_no from DB)
+    const matchedLineIndex = lines.findIndex((l: any) => {
+      const boxRef = lineBoxDataMap[l.id] || {}
+      const lBoxId = String(l.box_id || boxRef.box_id || "").trim()
+      const lTxnNo = String(l.transaction_no || boxRef.transaction_no || "").trim()
+      return isMatch(lBoxId, lTxnNo)
+    })
+
+    if (matchedLineIndex >= 0) {
+      const line = lines[matchedLineIndex]
+      const articleName = line.item_desc_raw || line.item_description || "Unknown"
+      if (linesMatchMap[matchedLineIndex]) {
+        setScanResult({ type: "already", message: `Already Acknowledged — ${articleName} | Box ID: ${scannedBoxId || "N/A"} | Transaction: ${scannedTransactionNo || "N/A"}` })
+        return
+      }
+      await handleAcknowledgeLine(matchedLineIndex)
+      setScanResult({ type: "match", message: `Matched — ${articleName} | Box ID: ${scannedBoxId || "N/A"} | Transaction: ${scannedTransactionNo || "N/A"}` })
+      return
+    }
+
+    setScanResult({ type: "no-match", message: `Not Matched — Box ID: ${scannedBoxId || "N/A"} | Transaction: ${scannedTransactionNo || "N/A"}` })
   }
 
   // ── Print QR & auto-acknowledge (for cold storage FROM transfers) ──
@@ -841,11 +923,11 @@ export default function TransferInPage({ params }: TransferInPageProps) {
         setLinesMatchMap(prev => ({ ...prev, [lineIndex]: true }))
       } catch (err: any) {
         console.warn("Failed to persist QR acknowledge:", err)
-        toast({ title: "Warning", description: "QR printed but failed to save acknowledgment to server", variant: "destructive" })
+        toast.error("QR printed but failed to save acknowledgment to server")
         return // Don't print QR if acknowledge failed
       }
     } else {
-      toast({ title: "Error", description: "Could not create pending transfer. QR not printed.", variant: "destructive" })
+      toast.error("Could not create pending transfer. QR not printed.")
       return // Don't print QR if no pending header
     }
 
@@ -951,10 +1033,10 @@ export default function TransferInPage({ params }: TransferInPageProps) {
         }
       }, 30000)
 
-      toast({ title: "QR Printed & Acknowledged", description: `${itemName} — Box #${boxNum} acknowledged` })
+      toast.success(`${itemName} — Box #${boxNum} acknowledged`)
     } catch (err) {
       console.error("QR generation failed:", err)
-      toast({ title: "Error", description: "Failed to generate QR code", variant: "destructive" })
+      toast.error("Failed to generate QR code")
     }
   }, [lines, lineBoxDataMap, lineWeights, transferData, company, toast])
 
@@ -1025,10 +1107,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
 
         await InterunitApiService.finalizeTransferIn(pendingHeaderId, finalizePayload)
 
-        toast({
-          title: "Transfer IN Created",
-          description: `GRN ${pendingGrnNumber} finalized successfully.`,
-        })
+        toast.success(`GRN ${pendingGrnNumber} finalized successfully.`)
       } else {
         // ── Fallback: original bulk-create path (no pending header) ──
         const scannedBoxes = boxes
@@ -1117,10 +1196,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
 
         await InterunitApiService.createTransferIn(payload)
 
-        toast({
-          title: "Transfer IN Created",
-          description: `GRN ${grnNumber} created successfully with ${allScannedBoxes.length} items.`,
-        })
+        toast.success(`GRN ${grnNumber} created successfully with ${allScannedBoxes.length} items.`)
       }
 
       setTimeout(() => {
@@ -1128,7 +1204,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
       }, 2000)
     } catch (error: any) {
       console.error("Failed to confirm transfer:", error)
-      toast({ title: "Error", description: error.message || "Failed to confirm transfer receipt", variant: "destructive" })
+      toast.error(error.message || "Failed to confirm transfer receipt")
     } finally {
       setLoading(false)
     }
@@ -1159,7 +1235,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
       <Card className="border-0 shadow-sm overflow-hidden">
         <CardHeader className="pb-3 bg-gradient-to-r from-teal-50 to-emerald-50 border-b">
           <CardTitle className="text-sm sm:text-base font-semibold text-gray-800">Find Transfer</CardTitle>
-          <p className="text-xs text-muted-foreground">Enter the transfer number or scan QR code</p>
+          <p className="text-xs text-muted-foreground">Enter the transfer number</p>
         </CardHeader>
         <CardContent className="p-3 sm:p-5">
           <div className="space-y-4">
@@ -1184,27 +1260,8 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                 >
                   {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Search className="h-4 w-4 mr-1.5" /><span>Search</span></>}
                 </Button>
-                <Button
-                  onClick={() => setShowScanner(true)}
-                  variant="outline"
-                  className="h-10 px-4 bg-white border-gray-200"
-                >
-                  <Camera className="h-4 w-4 mr-1.5" /><span className="sm:hidden">Scan</span>
-                </Button>
               </div>
             </div>
-
-            {showScanner && (
-              <div className="border-2 border-teal-200 rounded-lg overflow-hidden">
-                <div className="w-full max-w-2xl mx-auto">
-                  <HighPerformanceQRScanner
-                    onScanSuccess={handleTransferQRScan}
-                    onScanError={handleQRScanError}
-                    onClose={() => setShowScanner(false)}
-                  />
-                </div>
-              </div>
-            )}
           </div>
         </CardContent>
       </Card>
@@ -1247,7 +1304,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
               <CardContent className="p-0">
                 <div className="divide-y divide-gray-200">
                   {uniqueColdItems.map((item, idx) => {
-                    const ci = coldStorageItems[item.name] || { inward_dt: "", vakkal: "", lot_no: "", rate: "", exporter: "", storage_location: "", item_mark: "", group_name: "" }
+                    const ci = coldStorageItems[item.name] || { inward_dt: "", vakkal: "", lot_no: "", rate: "", exporter: "", storage_location: toWarehouse, item_mark: "", group_name: "" }
                     const itemRate = parseFloat(ci.rate) || 0
                     const itemValue = item.totalQty * itemRate
 
@@ -1387,7 +1444,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                   )}
                 </div>
               </div>
-              {!allMatched && totalItems > 0 && (
+              {!allMatched && totalItems > 0 && ["b.hrithik@candorfoods.in", "yash@candorfoods.in"].includes(user?.email?.toLowerCase() || "") && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -1526,6 +1583,65 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                       </div>
                     )
                   })}
+                </div>
+              )}
+
+              {/* ──── SCAN BOX TO ACKNOWLEDGE ──── */}
+              {totalLines > 0 && !allMatched && (
+                <div className="px-3 sm:px-4 py-3 border-b border-gray-200 bg-blue-50/40">
+                  {!showAckScanner ? (
+                    <div className="py-2 text-center">
+                      <Button
+                        type="button"
+                        onClick={() => { setShowAckScanner(true); setScanResult(null) }}
+                        className="bg-blue-600 hover:bg-blue-700 text-white h-10 px-6 w-full sm:w-auto"
+                      >
+                        <Camera className="h-4 w-4 mr-2" /> Start Camera Scan
+                      </Button>
+                      <p className="text-xs text-gray-500 mt-2">
+                        Scan QR codes to auto-acknowledge boxes
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="py-2">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-medium text-blue-700 flex items-center gap-2">
+                          <Camera className="h-4 w-4" /> Scanning...
+                        </span>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => { setShowAckScanner(false); setScanResult(null) }}
+                          className="h-8 px-3 text-xs"
+                        >
+                          <X className="h-3.5 w-3.5 mr-1" /> Close
+                        </Button>
+                      </div>
+                      <div className="w-full max-w-2xl mx-auto rounded-lg overflow-hidden">
+                        <HighPerformanceQRScanner
+                          onScanSuccess={handleAckQRScan}
+                          onScanError={handleQRScanError}
+                          onClose={() => setShowAckScanner(false)}
+                          continuous={true}
+                        />
+                      </div>
+                      {scanResult && (
+                        <div className={`mt-3 p-3 rounded-lg text-sm font-medium flex items-center gap-2 ${
+                          scanResult.type === "match" ? "bg-emerald-50 text-emerald-800 border border-emerald-200" :
+                          scanResult.type === "already" ? "bg-amber-50 text-amber-800 border border-amber-200" :
+                          scanResult.type === "no-match" ? "bg-red-50 text-red-800 border border-red-200" :
+                          "bg-red-50 text-red-800 border border-red-200"
+                        }`}>
+                          {scanResult.type === "match" && <CheckCircle className="h-4 w-4 shrink-0" />}
+                          {scanResult.type === "already" && <AlertTriangle className="h-4 w-4 shrink-0" />}
+                          {scanResult.type === "no-match" && <X className="h-4 w-4 shrink-0" />}
+                          {scanResult.type === "error" && <AlertTriangle className="h-4 w-4 shrink-0" />}
+                          {scanResult.message}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 

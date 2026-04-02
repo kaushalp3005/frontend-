@@ -244,6 +244,23 @@ function ItemDescriptionDropdown({
           updateArticle(articleId, "sku_id", null)
         }
       }
+
+      // Fetch unit_pack_size from categorial_inv
+      try {
+        const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/interunit/categorial-search?search=${encodeURIComponent(selectedOption.label)}&limit=1`
+        const res = await fetch(apiUrl, { headers: { 'Accept': 'application/json' } })
+        if (res.ok) {
+          const data = await res.json()
+          const match = (data.items || []).find((it: any) =>
+            it.item_description?.toUpperCase() === selectedOption.label.toUpperCase()
+          )
+          if (match?.uom != null) {
+            updateArticle(articleId, "unit_pack_size", match.uom)
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching unit_pack_size:", err)
+      }
     }
 
     onValueChange(selectedValue)
@@ -374,7 +391,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
   const [scannedBoxes, setScannedBoxes] = useState<any[]>([])
 
   // Cold transfer summary popup
-  const COLD_STORAGE_WAREHOUSES = ["Rishi cold", "Savla D-39 cold", "Savla D-514 cold"]
+  const COLD_STORAGE_WAREHOUSES = ["Cold Storage", "Savla D-39 cold", "Savla D-514 cold", "Rishi cold"]
   const [coldTransferPopup, setColdTransferPopup] = useState<{ open: boolean; message: string }>({ open: false, message: "" })
   const [popupCopied, setPopupCopied] = useState(false)
   
@@ -1832,9 +1849,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                   <SelectItem value="A101">A101</SelectItem>
                   <SelectItem value="A68">A68</SelectItem>
                   <SelectItem value="F53">F53</SelectItem>
-                  <SelectItem value="Rishi cold">Rishi cold</SelectItem>
-                  <SelectItem value="Savla D-39 cold">Savla D-39 cold</SelectItem>
-                  <SelectItem value="Savla D-514 cold">Savla D-514 cold</SelectItem>
+                  <SelectItem value="Cold Storage">Cold Storage</SelectItem>
 
                 </SelectContent>
 
@@ -1854,9 +1869,9 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
 
               </Label>
 
-              <Select 
+              <Select
 
-                value={formData.toWarehouse} 
+                value={formData.toWarehouse}
 
                 onValueChange={(value) => handleInputChange('toWarehouse', value)}
 
@@ -1880,11 +1895,9 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
 
                   <SelectItem value="F53">F53</SelectItem>
 
-                  <SelectItem value="Rishi cold">Rishi cold</SelectItem>
-
-                  <SelectItem value="Savla D-39 cold">Savla D-39 cold</SelectItem>
-
-                  <SelectItem value="Savla D-514 cold">Savla D-514 cold</SelectItem>
+                  <SelectItem value="Savla D-39 cold">Savla D-39</SelectItem>
+                  <SelectItem value="Savla D-514 cold">Savla D-514</SelectItem>
+                  <SelectItem value="Rishi cold">Rishi Cold</SelectItem>
 
                 </SelectContent>
 
