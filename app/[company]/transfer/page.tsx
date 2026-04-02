@@ -4,12 +4,13 @@ import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
-  Plus, Trash2, Loader2, RefreshCw, CheckCircle, Clock,
+  Plus, Trash2, Loader2, RefreshCw, CheckCircle, Clock, Search, X,
   Truck, ArrowRightLeft, PackageCheck, FileText, ArrowRight,
-  Package, ClipboardList, Send, Inbox, Eye, Printer, Pencil, Download
+  Package, ClipboardList, Send, Inbox, Eye, Printer, Pencil, Download, BarChart3
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { InterunitApiService, RequestResponse } from "@/lib/interunitApiService"
@@ -59,6 +60,11 @@ export default function TransferPage({ params }: TransferPageProps) {
   const [transferInsPage, setTransferInsPage] = useState(1)
   const [transferInsTotalPages, setTransferInsTotalPages] = useState(1)
   const [transferInsTotal, setTransferInsTotal] = useState(0)
+
+  // Search state for each tab
+  const [transferOutSearch, setTransferOutSearch] = useState("")
+  const [requestSearch, setRequestSearch] = useState("")
+  const [transferInSearch, setTransferInSearch] = useState("")
 
   // Load requests data
   const loadRequests = async (page: number = 1) => {
@@ -150,6 +156,26 @@ export default function TransferPage({ params }: TransferPageProps) {
   const handleTransfersPageChange = (page: number) => { if (page >= 1 && page <= transfersTotalPages) loadTransfers(page) }
   const handleTransferInsPageChange = (page: number) => { if (page >= 1 && page <= transferInsTotalPages) loadTransferIns(page) }
   const handleInnerColdPageChange = (page: number) => { if (page >= 1 && page <= innerColdTotalPages) loadInnerColdTransfers(page) }
+
+  // Client-side search filter helper
+  const searchMatch = (record: any, query: string, fields: string[]) => {
+    if (!query.trim()) return true
+    const q = query.toLowerCase()
+    return fields.some(f => {
+      const val = record[f]
+      return val && String(val).toLowerCase().includes(q)
+    })
+  }
+
+  const filteredTransfers = transfers.filter(t =>
+    searchMatch(t, transferOutSearch, ["challan_no", "from_warehouse", "to_warehouse", "stock_trf_date", "status", "vehicle_no"])
+  )
+  const filteredRequests = requests.filter(r =>
+    searchMatch(r, requestSearch, ["request_no", "from_warehouse", "to_warehouse", "request_date", "status"])
+  )
+  const filteredTransferIns = transferIns.filter(t =>
+    searchMatch(t, transferInSearch, ["grn_number", "transfer_out_no", "receiving_warehouse", "received_by", "status", "grn_date"])
+  )
 
   const handleApproveRequest = (requestId: number) => {
     router.push(`/${company}/transfer/transferform?requestId=${requestId}`)
@@ -390,13 +416,31 @@ export default function TransferPage({ params }: TransferPageProps) {
           </h1>
           <p className="text-sm text-muted-foreground mt-1">Manage stock transfers between warehouses</p>
         </div>
-        <Button
-          className="w-full sm:w-auto bg-gray-900 hover:bg-gray-800 text-white h-10 px-5 text-sm shadow-sm"
-          onClick={() => router.push(`/${company}/transfer/request`)}
-        >
-          <Plus className="h-4 w-4 mr-2" />
-          New Request
-        </Button>
+        <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+          <Button
+            variant="outline"
+            className="flex-1 sm:flex-initial h-10 px-4 text-sm shadow-sm"
+            onClick={() => router.push(`/${company}/transfer/dashboard`)}
+          >
+            <BarChart3 className="h-4 w-4 mr-2" />
+            View Summary
+          </Button>
+          <Button
+            variant="outline"
+            className="flex-1 sm:flex-initial h-10 px-4 text-sm shadow-sm"
+            onClick={() => router.push(`/${company}/transfer/jobwork/dashboard`)}
+          >
+            <ArrowRightLeft className="h-4 w-4 mr-2" />
+            Jobwork Summary
+          </Button>
+          <Button
+            className="flex-1 sm:flex-initial bg-gray-900 hover:bg-gray-800 text-white h-10 px-5 text-sm shadow-sm"
+            onClick={() => router.push(`/${company}/transfer/request`)}
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            New Request
+          </Button>
+        </div>
       </div>
 
       {/* ── Stat Cards ── */}
@@ -433,15 +477,33 @@ export default function TransferPage({ params }: TransferPageProps) {
             <SectionHeader title="Transfer Requests" count={totalRecords}
               onRefresh={() => loadRequests(currentPage)} isLoading={loading} />
 
-            {loading ? <LoadingSkeleton /> : requests.length === 0 ? (
-              <EmptyState icon={FileText} title="No requests yet"
-                subtitle="Create your first transfer request to get started."
-                action={() => router.push(`/${company}/transfer/request`)} actionLabel="Create Request" />
+            <div className="px-4 sm:px-5 py-2 border-b bg-gray-50/50">
+              <div className="relative max-w-sm">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+                <Input
+                  value={requestSearch}
+                  onChange={(e) => setRequestSearch(e.target.value)}
+                  placeholder="Search request no, date, warehouse, status..."
+                  className="h-8 pl-8 pr-8 text-xs bg-white"
+                />
+                {requestSearch && (
+                  <button type="button" onClick={() => setRequestSearch("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {loading ? <LoadingSkeleton /> : filteredRequests.length === 0 ? (
+              <EmptyState icon={FileText} title={requestSearch ? "No matching requests" : "No requests yet"}
+                subtitle={requestSearch ? "Try a different search term." : "Create your first transfer request to get started."}
+                action={requestSearch ? undefined : () => router.push(`/${company}/transfer/request`)} actionLabel="Create Request" />
             ) : (
               <>
                 {/* Mobile card list */}
                 <div className="md:hidden divide-y">
-                  {requests.map((req) => (
+                  {filteredRequests.map((req) => (
                     <div key={req.id} className="p-4 space-y-3">
                       <div className="flex items-start justify-between">
                         <div>
@@ -500,7 +562,7 @@ export default function TransferPage({ params }: TransferPageProps) {
                       </tr>
                     </thead>
                     <tbody className="divide-y">
-                      {requests.map((req) => (
+                      {filteredRequests.map((req) => (
                         <tr key={req.id} className="hover:bg-gray-50/50 transition-colors">
                           <td className="py-3 px-4">
                             <span className="text-sm font-medium text-gray-900">{req.request_no}</span>
@@ -574,14 +636,32 @@ export default function TransferPage({ params }: TransferPageProps) {
               </div>
             </div>
 
-            {transfersLoading ? <LoadingSkeleton /> : transfers.length === 0 ? (
-              <EmptyState icon={Send} title="No outbound transfers"
-                subtitle="Accept a request to create a transfer out." />
+            <div className="px-4 sm:px-5 py-2 border-b bg-gray-50/50">
+              <div className="relative max-w-sm">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+                <Input
+                  value={transferOutSearch}
+                  onChange={(e) => setTransferOutSearch(e.target.value)}
+                  placeholder="Search challan, date, warehouse, status..."
+                  className="h-8 pl-8 pr-8 text-xs bg-white"
+                />
+                {transferOutSearch && (
+                  <button type="button" onClick={() => setTransferOutSearch("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {transfersLoading ? <LoadingSkeleton /> : filteredTransfers.length === 0 ? (
+              <EmptyState icon={Send} title={transferOutSearch ? "No matching records" : "No outbound transfers"}
+                subtitle={transferOutSearch ? "Try a different search term." : "Accept a request to create a transfer out."} />
             ) : (
               <>
                 {/* Mobile card list */}
                 <div className="md:hidden divide-y">
-                  {transfers.map((t) => (
+                  {filteredTransfers.map((t) => (
                     <div key={t.id} className="p-4 space-y-3">
                       <div className="flex items-start justify-between">
                         <div>
@@ -649,7 +729,7 @@ export default function TransferPage({ params }: TransferPageProps) {
                       </tr>
                     </thead>
                     <tbody className="divide-y">
-                      {transfers.map((t) => (
+                      {filteredTransfers.map((t) => (
                         <tr key={t.id} className="hover:bg-gray-50/50 transition-colors">
                           <td className="py-3 px-4 text-sm font-medium text-gray-900">{t.challan_no}</td>
                           <td className="py-3 px-4">{getStatusBadge(t.status)}</td>
@@ -740,15 +820,33 @@ export default function TransferPage({ params }: TransferPageProps) {
             <SectionHeader title="Transfer IN Records (GRNs)" count={transferInsTotal}
               onRefresh={() => loadTransferIns(transferInsPage)} isLoading={transferInsLoading} />
 
-            {transferInsLoading ? <LoadingSkeleton /> : transferIns.length === 0 ? (
-              <EmptyState icon={Inbox} title="No inbound transfers"
-                subtitle="Receive a transfer to create a GRN record."
-                action={() => router.push(`/${company}/transfer/transferIn`)} actionLabel="Create Transfer IN" />
+            <div className="px-4 sm:px-5 py-2 border-b bg-gray-50/50">
+              <div className="relative max-w-sm">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+                <Input
+                  value={transferInSearch}
+                  onChange={(e) => setTransferInSearch(e.target.value)}
+                  placeholder="Search GRN, transfer no, warehouse, status..."
+                  className="h-8 pl-8 pr-8 text-xs bg-white"
+                />
+                {transferInSearch && (
+                  <button type="button" onClick={() => setTransferInSearch("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {transferInsLoading ? <LoadingSkeleton /> : filteredTransferIns.length === 0 ? (
+              <EmptyState icon={Inbox} title={transferInSearch ? "No matching records" : "No inbound transfers"}
+                subtitle={transferInSearch ? "Try a different search term." : "Receive a transfer to create a GRN record."}
+                action={transferInSearch ? undefined : () => router.push(`/${company}/transfer/transferIn`)} actionLabel="Create Transfer IN" />
             ) : (
               <>
                 {/* Mobile card list */}
                 <div className="md:hidden divide-y">
-                  {transferIns.map((ti) => (
+                  {filteredTransferIns.map((ti) => (
                     <div key={ti.id} className="p-4 space-y-3">
                       <div className="flex items-start justify-between">
                         <div>
@@ -818,7 +916,7 @@ export default function TransferPage({ params }: TransferPageProps) {
                       </tr>
                     </thead>
                     <tbody className="divide-y">
-                      {transferIns.map((ti) => (
+                      {filteredTransferIns.map((ti) => (
                         <tr key={ti.id} className="hover:bg-gray-50/50 transition-colors">
                           <td className="py-3 px-4 text-sm font-medium text-gray-900">{ti.grn_number}</td>
                           <td className="py-3 px-4 text-sm text-gray-600">{ti.transfer_out_no}</td>

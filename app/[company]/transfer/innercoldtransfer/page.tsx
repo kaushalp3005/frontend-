@@ -126,6 +126,7 @@ function ColdStorageStockSearch({
                   <span className="bg-gray-100 px-2 py-0.5 rounded font-mono">Lot: {record.lot_no || "-"}</span>
                   <span className="text-muted-foreground">{record.net_qty_on_cartons ?? 0} cartons</span>
                   <span className="text-muted-foreground">{record.weight_kg ?? 0} kg</span>
+                  {record.storage_location && <span className="bg-blue-50 px-2 py-0.5 rounded text-blue-700">{record.storage_location}</span>}
                 </div>
               </div>
             ))}
@@ -144,6 +145,7 @@ function ColdStorageStockSearch({
                   <th className="px-3 py-2 text-right font-medium text-gray-700">Qty of Cartons</th>
                   <th className="px-3 py-2 text-right font-medium text-gray-700">Weight (kg)</th>
                   <th className="px-3 py-2 text-right font-medium text-gray-700">Total Inv (kgs)</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-700">Storage Location</th>
                   <th className="px-3 py-2 text-center font-medium text-gray-700">Action</th>
                 </tr>
               </thead>
@@ -159,6 +161,7 @@ function ColdStorageStockSearch({
                     <td className="px-3 py-2 text-right">{record.net_qty_on_cartons ?? "-"}</td>
                     <td className="px-3 py-2 text-right">{record.weight_kg ?? "-"}</td>
                     <td className="px-3 py-2 text-right">{(record.net_qty_on_cartons != null && record.weight_kg != null) ? (record.net_qty_on_cartons * record.weight_kg).toFixed(2) : "-"}</td>
+                    <td className="px-3 py-2">{record.storage_location || "-"}</td>
                     <td className="px-3 py-2 text-center">
                       <Button size="sm" variant="default" className="h-7 px-3 text-xs" onClick={() => handleSelect(record)}>Select</Button>
                     </td>
