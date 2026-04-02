@@ -194,7 +194,7 @@ function ItemDescriptionDropdown({
   updateArticle?: (id: string, field: string, value: any) => void
   disabled?: boolean
 }) {
-  const itemDescriptionsHook = useItemDescriptions({ company, material_type: materialType, item_category: categoryId, sub_category: subCategoryId })
+  const itemDescriptionsHook = useCategorialItemDescriptions({ material_type: materialType, item_category: categoryId, sub_category: subCategoryId })
 
   const handleValueChange = async (selectedValue: string) => {
     // Find the selected option to get the label
@@ -203,15 +203,15 @@ function ItemDescriptionDropdown({
       // Update item_description immediately
       updateArticle(articleId, "item_description", selectedOption.label)
 
+      // Auto-fill unit_pack_size from categorial_inv uom
+      if (selectedOption.uom != null) {
+        updateArticle(articleId, "unit_pack_size", Number(selectedOption.uom))
+      }
+
       // Reset SKU ID while fetching
       updateArticle(articleId, "sku_id", null)
 
-      // If the option already has an ID from the dropdown API, use it as sku_id
-      if (selectedOption.id && selectedOption.id > 0) {
-        updateArticle(articleId, "sku_id", selectedOption.id)
-      }
-
-      // Fetch SKU ID from API to get full details including unit_pack_size
+      // Fetch SKU ID from API
       try {
         const skuResponse = await dropdownApi.fetchSkuId({
           company,
@@ -241,27 +241,7 @@ function ItemDescriptionDropdown({
         }
       } catch (err) {
         console.error("Error fetching SKU ID:", err)
-        // Keep the dropdown ID if SKU fetch fails
-        if (!selectedOption.id || selectedOption.id <= 0) {
-          updateArticle(articleId, "sku_id", null)
-        }
-      }
-
-      // Fetch unit_pack_size from categorial_inv
-      try {
-        const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/interunit/categorial-search?search=${encodeURIComponent(selectedOption.label)}&limit=1`
-        const res = await fetch(apiUrl, { headers: { 'Accept': 'application/json' } })
-        if (res.ok) {
-          const data = await res.json()
-          const match = (data.items || []).find((it: any) =>
-            it.item_description?.toUpperCase() === selectedOption.label.toUpperCase()
-          )
-          if (match?.uom != null) {
-            updateArticle(articleId, "unit_pack_size", match.uom)
-          }
-        }
-      } catch (err) {
-        console.error("Error fetching unit_pack_size:", err)
+        updateArticle(articleId, "sku_id", null)
       }
     }
 
@@ -284,7 +264,7 @@ function ItemDescriptionDropdown({
 }
 
 // Cold storage warehouse values that trigger the stock search UI
-const COLD_STORAGE_WAREHOUSES = ["Cold Storage", "Savla D-39 cold", "Savla D-514 cold", "Rishi cold"]
+const COLD_STORAGE_WAREHOUSES = ["Rishi cold", "Savla D-39 cold", "Savla D-514 cold"]
 
 // Cold Storage Stock Search Component (same as cold-storage/transfer-out)
 function ColdStorageStockSearch({
@@ -431,7 +411,6 @@ function ColdStorageStockSearch({
                   <th className="px-3 py-2 text-right font-medium text-gray-700">Qty of Cartons</th>
                   <th className="px-3 py-2 text-right font-medium text-gray-700">Weight (kg)</th>
                   <th className="px-3 py-2 text-right font-medium text-gray-700">Total Inv (kgs)</th>
-                  <th className="px-3 py-2 text-left font-medium text-gray-700">Storage Location</th>
                   <th className="px-3 py-2 text-center font-medium text-gray-700">Action</th>
                 </tr>
               </thead>
@@ -450,7 +429,6 @@ function ColdStorageStockSearch({
                     <td className="px-3 py-2 text-right">{record.net_qty_on_cartons ?? "-"}</td>
                     <td className="px-3 py-2 text-right">{record.weight_kg ?? "-"}</td>
                     <td className="px-3 py-2 text-right">{(record.net_qty_on_cartons != null && record.weight_kg != null) ? (record.net_qty_on_cartons * record.weight_kg).toFixed(2) : "-"}</td>
-                    <td className="px-3 py-2">{record.storage_location || "-"}</td>
                     <td className="px-3 py-2 text-center">
                       <Button
                         size="sm"
@@ -553,7 +531,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     cs_inward_no: string | null
     cs_total_inventory_kgs: number | null
     cs_item_mark: string | null
-    cs_storage_location: string | null
   }
 
   const [articles, setArticles] = useState<Article[]>([
@@ -586,7 +563,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       cs_inward_no: null,
       cs_total_inventory_kgs: null,
       cs_item_mark: null,
-      cs_storage_location: null,
     },
   ])
 
@@ -644,6 +620,15 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     }},
     loadedItems: { value: loadedItems, setter: setLoadedItems },
   })
+
+  // Always reset requestDate to today on mount — localStorage restore may have cached an old date
+  useEffect(() => {
+    if (!isEditMode) {
+      const now = new Date()
+      const today = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}`
+      setFormData(prev => ({ ...prev, requestDate: today }))
+    }
+  }, [])
 
   // Use categorial_inv dropdown hooks for transfer
   const { options: itemCategories, loading: categoriesLoading } = useItemCategories({ company, material_type: articles[0]?.material_type || "" })
@@ -876,7 +861,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         const vehicleVal = transfer.vehicle_no || ""
         const isKnownVehicle = knownVehicles.includes(vehicleVal)
 
-        const knownDrivers = ["Tukaram (+919930056340)", "Sayaji (+919819944031)", "Prashant (+919619606340)", "Shantilal (+919819048534)"]
+        const knownDrivers = ["Tukaram (+919930056340)", "Sachin (8692885298)", "Gopal (+919975887148)"]
         const driverVal = transfer.driver_name || ""
         const isKnownDriver = knownDrivers.includes(driverVal)
 
@@ -1148,7 +1133,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
           cs_inward_no: record.inward_no || null,
           cs_total_inventory_kgs: (record.net_qty_on_cartons != null && record.weight_kg != null) ? record.net_qty_on_cartons * record.weight_kg : null,
           cs_item_mark: record.item_mark || null,
-          cs_storage_location: record.storage_location || null,
         }
 
         console.log('✅ [DEBUG] Article Updated with CS Data:', {
@@ -1156,7 +1140,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
           cs_transaction_no: updatedArticle.cs_transaction_no,
           cs_inward_no: updatedArticle.cs_inward_no,
           cs_total_inventory_kgs: updatedArticle.cs_total_inventory_kgs,
-          cs_storage_location: updatedArticle.cs_storage_location,
         })
 
         return updatedArticle
@@ -1445,8 +1428,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         hsnCode: 'N/A',
         qualityGrade: 'N/A',
         scannedAt: timeStamp,
-        storageLocation: isColdStorageArticle ? (article.cs_storage_location || '') : '',
-        itemMark: isColdStorageArticle ? (article.cs_item_mark || '') : '',
         rawData: article,
       })
     }
@@ -2181,8 +2162,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       net_weight: String(box.netWeight || 0),
       total_weight: String(box.totalWeight || 0),
       batch_number: cleanNull(box.batchNumber),
-      lot_number: cleanNull(box.lotNumber),
-      storage_location: box.storageLocation || null
+      lot_number: cleanNull(box.lotNumber)
     }))
 
     // Only include boxes that were actually QR-scanned (not manually added via "Add to Articles List")
@@ -2219,8 +2199,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         batch_number: box.batchNumber || "",
         transaction_no: box.transactionNo || "",
         net_weight: String(Number(netVal.toFixed(3))),
-        gross_weight: String(Number(grossVal.toFixed(3))),
-        storage_location: box.storageLocation || null
+        gross_weight: String(Number(grossVal.toFixed(3)))
       }
     })
 
@@ -2293,28 +2272,29 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       if (isColdInvolved) {
         const vehicleNo = transferInfo.vehicleNumber === "other" ? transferInfo.vehicleNumberOther : transferInfo.vehicleNumber
         // Build per-item summary from scannedBoxes grouped by description
-        const itemMap: Record<string, { description: string; subCategory: string; boxes: number; lotNumber: string; itemMark: string; storageLocation: string }> = {}
+        const itemMap: Record<string, { description: string; subCategory: string; boxes: number; lotNumber: string; itemMark: string }> = {}
         scannedBoxes.forEach((box) => {
           const key = `${box.itemDescription || ""}_${box.lotNumber || ""}`
           if (!itemMap[key]) {
+            // Try to find item_mark from articles (cold storage data)
+            const matchedArticle = articles.find(a => a.item_description === box.itemDescription)
             itemMap[key] = {
               description: box.itemDescription || "-",
-              subCategory: box.subCategory || "-",
+              subCategory: box.subCategory || matchedArticle?.sub_category || "-",
               boxes: 0,
               lotNumber: box.lotNumber || "-",
-              itemMark: box.itemMark || box.rawData?.cs_item_mark || "-",
-              storageLocation: box.storageLocation || "-",
+              itemMark: matchedArticle?.cs_item_mark || "-",
             }
           }
           itemMap[key].boxes += 1
         })
 
-        const lines = Object.values(itemMap).map((item) =>
-          `Item Mark : ${item.itemMark}\nNo of Boxes : ${item.boxes}\nLot Number : ${item.lotNumber}\nStorage Location : ${item.storageLocation}`
+        const summaryLines = Object.values(itemMap).map((item) =>
+          `Item Mark : ${item.itemMark}\nNo of Boxes : ${item.boxes}\nLot Number : ${item.lotNumber}`
         )
-        lines.push(`From : ${fromWh || "-"}\nTo : ${toWh || "-"}`)
-        lines.push(`Vehicle Number : ${vehicleNo || "-"}`)
-        const message = lines.join("\n\n")
+        summaryLines.push(`From : ${fromWh || "-"}\nTo : ${toWh || "-"}`)
+        summaryLines.push(`Vehicle Number : ${vehicleNo || "-"}`)
+        const message = summaryLines.join("\n\n")
         setColdTransferPopup({ open: true, message })
       } else {
         // No cold storage — redirect immediately
@@ -2428,7 +2408,9 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                   <SelectItem value="A101">A101</SelectItem>
                   <SelectItem value="A68">A68</SelectItem>
                   <SelectItem value="F53">F53</SelectItem>
-                  <SelectItem value="Cold Storage">Cold Storage</SelectItem>
+                  <SelectItem value="Rishi cold">Rishi cold</SelectItem>
+                  <SelectItem value="Savla D-39 cold">Savla D-39 cold</SelectItem>
+                  <SelectItem value="Savla D-514 cold">Savla D-514 cold</SelectItem>
 
                 </SelectContent>
 
@@ -2448,9 +2430,9 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
 
               </Label>
 
-              <Select
+              <Select 
 
-                value={formData.toWarehouse}
+                value={formData.toWarehouse} 
 
                 onValueChange={(value) => handleInputChange('toWarehouse', value)}
 
@@ -2474,9 +2456,11 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
 
                   <SelectItem value="F53">F53</SelectItem>
 
-                  <SelectItem value="Savla D-39 cold">Savla D-39</SelectItem>
-                  <SelectItem value="Savla D-514 cold">Savla D-514</SelectItem>
-                  <SelectItem value="Rishi cold">Rishi Cold</SelectItem>
+                  <SelectItem value="Rishi cold">Rishi cold</SelectItem>
+
+                  <SelectItem value="Savla D-39 cold">Savla D-39 cold</SelectItem>
+
+                  <SelectItem value="Savla D-514 cold">Savla D-514 cold</SelectItem>
 
                 </SelectContent>
 
@@ -2816,7 +2800,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                   </div>
 
                   {/* Auto-filled fields from cold storage stock selection */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
                     <div className="space-y-1">
                       <Label className="text-xs">Item Category</Label>
                       <Input
@@ -2854,15 +2838,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                         }
                         readOnly
                         placeholder="Auto-calculated"
-                        className="bg-muted"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Storage Location</Label>
-                      <Input
-                        value={article.cs_storage_location || ""}
-                        readOnly
-                        placeholder="Auto-filled from stock selection"
                         className="bg-muted"
                       />
                     </div>
@@ -3473,16 +3448,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                           <span className="text-gray-500">Transaction:</span>
                           <span className="ml-1 text-gray-800 font-mono font-medium">{box.transactionNo || 'N/A'}</span>
                         </div>
-                        <div>
-                          <span className="text-gray-500">Box ID:</span>
-                          <span className="ml-1 text-gray-800 font-mono font-medium">{box.boxId || 'N/A'}</span>
-                        </div>
-                        {box.storageLocation && (
-                          <div>
-                            <span className="text-gray-500">Location:</span>
-                            <span className="ml-1 text-blue-700 font-medium">{box.storageLocation}</span>
-                          </div>
-                        )}
                       </div>
                     </div>
                   ))}
@@ -3502,8 +3467,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                         <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Total Wt</th>
                         <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Lot No</th>
                         <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Transaction No</th>
-                        <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Box ID</th>
-                        <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Location</th>
                         <th className="text-center py-2 px-2 text-xs font-medium text-gray-700">Action</th>
                       </tr>
                     </thead>
@@ -3571,14 +3534,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                             <span className="font-mono text-gray-800 font-medium">
                               {box.transactionNo || 'N/A'}
                             </span>
-                          </td>
-                          <td className="py-2 px-2 text-xs">
-                            <span className="font-mono text-gray-800 font-medium">
-                              {box.boxId || 'N/A'}
-                            </span>
-                          </td>
-                          <td className="py-2 px-2 text-xs text-gray-700">
-                            {box.storageLocation || '-'}
                           </td>
                           <td className="py-2 px-2 text-center">
                             <Button
@@ -3670,7 +3625,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
 
     {/* Cold Transfer Summary Popup */}
     <Dialog open={coldTransferPopup.open} onOpenChange={() => {}}>
-      <DialogContent className="max-w-md [&>button.absolute]:hidden" onPointerDownOutside={(e) => e.preventDefault()}>
+      <DialogContent className="max-w-md" onPointerDownOutside={(e) => e.preventDefault()}>
         <DialogHeader>
           <DialogTitle>Transfer Summary</DialogTitle>
         </DialogHeader>
