@@ -193,7 +193,7 @@ function ItemDescriptionDropdown({
   updateArticle?: (id: string, field: string, value: any) => void
   disabled?: boolean
 }) {
-  const itemDescriptionsHook = useItemDescriptions({ company, material_type: materialType, item_category: categoryId, sub_category: subCategoryId })
+  const itemDescriptionsHook = useCategorialItemDescriptions({ material_type: materialType, item_category: categoryId, sub_category: subCategoryId })
 
   const handleValueChange = async (selectedValue: string) => {
     // Find the selected option to get the label
@@ -202,15 +202,15 @@ function ItemDescriptionDropdown({
       // Update item_description immediately
       updateArticle(articleId, "item_description", selectedOption.label)
 
+      // Auto-fill unit_pack_size from categorial_inv uom
+      if (selectedOption.uom != null) {
+        updateArticle(articleId, "unit_pack_size", Number(selectedOption.uom))
+      }
+
       // Reset SKU ID while fetching
       updateArticle(articleId, "sku_id", null)
 
-      // If the option already has an ID from the dropdown API, use it as sku_id
-      if (selectedOption.id && selectedOption.id > 0) {
-        updateArticle(articleId, "sku_id", selectedOption.id)
-      }
-
-      // Fetch SKU ID from API to get full details
+      // Fetch SKU ID from API
       try {
         const skuResponse = await dropdownApi.fetchSkuId({
           company,
@@ -239,27 +239,7 @@ function ItemDescriptionDropdown({
         }
       } catch (err) {
         console.error("Error fetching SKU ID:", err)
-        // Keep the dropdown ID if SKU fetch fails
-        if (!selectedOption.id || selectedOption.id <= 0) {
-          updateArticle(articleId, "sku_id", null)
-        }
-      }
-
-      // Fetch unit_pack_size from categorial_inv
-      try {
-        const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/interunit/categorial-search?search=${encodeURIComponent(selectedOption.label)}&limit=1`
-        const res = await fetch(apiUrl, { headers: { 'Accept': 'application/json' } })
-        if (res.ok) {
-          const data = await res.json()
-          const match = (data.items || []).find((it: any) =>
-            it.item_description?.toUpperCase() === selectedOption.label.toUpperCase()
-          )
-          if (match?.uom != null) {
-            updateArticle(articleId, "unit_pack_size", match.uom)
-          }
-        }
-      } catch (err) {
-        console.error("Error fetching unit_pack_size:", err)
+        updateArticle(articleId, "sku_id", null)
       }
     }
 
@@ -391,7 +371,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
   const [scannedBoxes, setScannedBoxes] = useState<any[]>([])
 
   // Cold transfer summary popup
-  const COLD_STORAGE_WAREHOUSES = ["Cold Storage", "Savla D-39 cold", "Savla D-514 cold", "Rishi cold"]
+  const COLD_STORAGE_WAREHOUSES = ["Rishi cold", "Savla D-39 cold", "Savla D-514 cold"]
   const [coldTransferPopup, setColdTransferPopup] = useState<{ open: boolean; message: string }>({ open: false, message: "" })
   const [popupCopied, setPopupCopied] = useState(false)
   
@@ -429,6 +409,13 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     scannedBoxes: { value: scannedBoxes, setter: setScannedBoxes },
     loadedItems: { value: loadedItems, setter: setLoadedItems },
   })
+
+  // Always reset requestDate to today on mount — localStorage restore may have cached an old date
+  useEffect(() => {
+    const now = new Date()
+    const today = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}`
+    setFormData(prev => ({ ...prev, requestDate: today }))
+  }, [])
 
   // Use categorial_inv dropdown hooks for transfer
   const { options: itemCategories, loading: categoriesLoading } = useItemCategories({ company, material_type: articles[0]?.material_type || "" })
@@ -1849,7 +1836,9 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                   <SelectItem value="A101">A101</SelectItem>
                   <SelectItem value="A68">A68</SelectItem>
                   <SelectItem value="F53">F53</SelectItem>
-                  <SelectItem value="Cold Storage">Cold Storage</SelectItem>
+                  <SelectItem value="Rishi cold">Rishi cold</SelectItem>
+                  <SelectItem value="Savla D-39 cold">Savla D-39 cold</SelectItem>
+                  <SelectItem value="Savla D-514 cold">Savla D-514 cold</SelectItem>
 
                 </SelectContent>
 
@@ -1869,9 +1858,9 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
 
               </Label>
 
-              <Select
+              <Select 
 
-                value={formData.toWarehouse}
+                value={formData.toWarehouse} 
 
                 onValueChange={(value) => handleInputChange('toWarehouse', value)}
 
@@ -1895,9 +1884,11 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
 
                   <SelectItem value="F53">F53</SelectItem>
 
-                  <SelectItem value="Savla D-39 cold">Savla D-39</SelectItem>
-                  <SelectItem value="Savla D-514 cold">Savla D-514</SelectItem>
-                  <SelectItem value="Rishi cold">Rishi Cold</SelectItem>
+                  <SelectItem value="Rishi cold">Rishi cold</SelectItem>
+
+                  <SelectItem value="Savla D-39 cold">Savla D-39 cold</SelectItem>
+
+                  <SelectItem value="Savla D-514 cold">Savla D-514 cold</SelectItem>
 
                 </SelectContent>
 
