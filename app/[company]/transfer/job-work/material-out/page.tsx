@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { useItemCategories, useCategorialSubCategories, useCategorialItemDescriptions } from "@/lib/hooks/useDropdownData"
+import { useItemCategories, useSubCategories, useCategorialItemDescriptions } from "@/lib/hooks/useDropdownData"
 import { SearchableSelect } from "@/components/ui/searchable-select"
 import { dropdownApi } from "@/lib/api"
 import { ColdStorageApiService, type ColdStorageStockRecord } from "@/lib/api/coldStorageApiService"
@@ -82,7 +82,7 @@ function SubCategoryDropdown({
 }: {
   categoryId: string; value: string; onValueChange: (v: string) => void; company: Company; error?: string; disabled?: boolean; materialType?: string
 }) {
-  const hook = useCategorialSubCategories({ material_type: materialType, item_category: categoryId })
+  const hook = useSubCategories(categoryId, { company, material_type: materialType })
   return (
     <SearchableSelect value={value} onValueChange={onValueChange} placeholder="Select sub category..."
       searchPlaceholder="Search..." options={hook.options} loading={hook.loading} error={hook.error}
