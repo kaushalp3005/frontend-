@@ -50,9 +50,14 @@ export function SearchableSelect({
 
   const selectedOption = options.find((option) => option.value.toLowerCase() === value.toLowerCase())
 
-  // Use options directly from parent (no local filtering)
-  // The parent component handles the filtering via API calls
-  const filteredOptions = options
+  // Filter options locally by search query for instant client-side search
+  const filteredOptions = React.useMemo(() => {
+    if (!searchQuery.trim()) return options
+    const query = searchQuery.trim().toLowerCase()
+    return options.filter((option) =>
+      option.label.toLowerCase().includes(query)
+    )
+  }, [options, searchQuery])
 
   // Clear search when popover closes
   React.useEffect(() => {

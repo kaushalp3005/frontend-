@@ -449,7 +449,7 @@ export default function TransferViewPage({ params }: TransferViewPageProps) {
                       {/* Case Pack */}
                       {line.unit_pack_size && line.unit_pack_size !== '0' && (
                         <div className="space-y-1">
-                          <p className="text-xs text-gray-600">Unit Pack Size</p>
+                          <p className="text-xs text-gray-600">Unit Pack Size/Count</p>
                           <p className="text-sm font-medium text-gray-900">{line.unit_pack_size}</p>
                         </div>
                       )}

@@ -798,7 +798,9 @@ export default function MaterialOutPage({ params }: MaterialOutPageProps) {
       if (field === "sub_category" && value !== art.sub_category) {
         updated.item_description = ""; updated.sku_id = null
       }
-      if (["quantity_units", "packaging_type", "unit_pack_size", "material_type"].includes(field)) {
+      // For PM items, skip recalc when unit_pack_size changes (it doesn't affect net weight)
+      const skipRecalc = field === "unit_pack_size" && updated.material_type === "PM"
+      if (!skipRecalc && ["quantity_units", "packaging_type", "unit_pack_size", "material_type"].includes(field)) {
         // Don't recalculate net_weight for cold storage articles — it's per-box weight from stock
         if (updated.cs_max_boxes === null) {
           updated.net_weight = calculateNetWeight(updated)
@@ -992,7 +994,7 @@ export default function MaterialOutPage({ params }: MaterialOutPageProps) {
           amount: String(parseFloat((boxNetWeight * (article.rate_per_kg || 0)).toFixed(2))),
           lineRemarks: article.line_remarks || "",
           coldUnit: article.cold_company || "",
-          itemMark: article.item_mark || "",
+          itemMark: pickedBox?.item_mark || article.item_mark || "",
           boxId,
           transactionNo,
           coldStockSnapshot: snapshot,
@@ -1614,7 +1616,7 @@ export default function MaterialOutPage({ params }: MaterialOutPageProps) {
                   {/* Quantity & Weight Fields */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
                     <div className="space-y-1">
-                      <Label className="text-xs">Unit Pack Size</Label>
+                      <Label className="text-xs">Unit Pack Size/Count</Label>
                       <Input type="number" step="any" min="0" value={article.unit_pack_size || ""}
                         onChange={(e) => updateArticle(article.id, "unit_pack_size", parseFloat(e.target.value) || 0)}
                         onWheel={(e) => e.currentTarget.blur()} placeholder="0" />

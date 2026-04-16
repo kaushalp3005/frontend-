@@ -533,11 +533,11 @@ export function useCategorialItemDescriptions(args: {
     try {
       const query = new URLSearchParams()
       query.append("material_type", material_type)
-      query.append("group", item_category)
-      query.append("sub_group", sub_category)
+      query.append("item_category", item_category)
+      query.append("sub_category", sub_category)
       query.append("limit", "500")
 
-      const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/interunit/categorial-search?${query.toString()}`
+      const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/interunit/categorial-dropdown?${query.toString()}`
       const response = await fetch(apiUrl, {
         method: "GET",
         headers: { Accept: "application/json" },
@@ -546,16 +546,17 @@ export function useCategorialItemDescriptions(args: {
       if (!response.ok) throw new Error(`API call failed: ${response.status}`)
 
       const data = await response.json()
-      const items: Array<{ id: number; item_description: string; uom?: number | null }> = data.items || []
+      const itemDescs: string[] = data.options?.item_descriptions || []
+      const uomValues: (number | null)[] = data.options?.uom_values || []
 
       setOptions(
-        items
-          .filter((item) => item.item_description)
-          .map((item) => ({
-            value: item.item_description,
-            label: item.item_description,
-            id: item.id,
-            uom: item.uom ?? null,
+        itemDescs
+          .filter((desc: string) => desc)
+          .map((desc: string, idx: number) => ({
+            value: desc,
+            label: desc,
+            id: idx + 1,
+            uom: uomValues[idx] ?? null,
           }))
       )
     } catch (e: any) {

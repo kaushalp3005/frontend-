@@ -765,7 +765,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                 {/* Package Size */}
                 <div className="space-y-1.5">
                   <Label className="text-xs font-medium text-gray-600">
-                    Unit Pack Size
+                    Unit Pack Size/Count
                   </Label>
                   <Input
                     type="number"

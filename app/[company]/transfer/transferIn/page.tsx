@@ -98,6 +98,10 @@ export default function TransferInPage({ params }: TransferInPageProps) {
   const totalMatched = allLinesCoveredByBoxes ? resolvedLines : matchedBoxes + resolvedLines
   const allMatched = totalItems > 0 && totalMatched === totalItems
 
+  // ── Authorized users for acknowledge / print QR / issue actions ──
+  const AUTHORIZED_ACKNOWLEDGE_USERS = ["yash@candorfoods.in", "b.hrithik@candorfoods.in", "sunil.jasoria@candorfoods.in"]
+  const isAuthorizedUser = AUTHORIZED_ACKNOWLEDGE_USERS.includes(user?.email?.toLowerCase() || "")
+
   // ── Cold storage check ──
   const COLD_STORAGE_WAREHOUSES = ["Cold Storage", "Rishi cold", "Savla D-39 cold", "Savla D-514 cold"]
   const fromWarehouse = transferData?.from_warehouse || transferData?.from_site || ""
@@ -343,6 +347,8 @@ export default function TransferInPage({ params }: TransferInPageProps) {
           const restoredIssueMap: Record<number, { remarks: string; net_weight?: string; total_weight?: string; case_pack?: string }> = {}
           const restoredBoxMap: Record<number, boolean> = {}
 
+          const restoredWeights: Record<number, { net_weight: string; total_weight: string }> = {}
+
           savedBoxes.forEach((sb: any) => {
             if (sb.line_index !== null && sb.line_index !== undefined) {
               if (sb.is_matched) {
@@ -356,6 +362,13 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                   case_pack: issueData.case_pack || undefined,
                 }
               }
+              // Restore weights from acknowledged box data (prevents reversion)
+              if (sb.net_weight != null || sb.gross_weight != null) {
+                restoredWeights[sb.line_index] = {
+                  net_weight: sb.net_weight != null ? String(sb.net_weight) : (weightsMap[sb.line_index]?.net_weight || ""),
+                  total_weight: sb.gross_weight != null ? String(sb.gross_weight) : (weightsMap[sb.line_index]?.total_weight || ""),
+                }
+              }
             } else if (sb.transfer_out_box_id) {
               restoredBoxMap[sb.transfer_out_box_id] = true
             }
@@ -365,6 +378,10 @@ export default function TransferInPage({ params }: TransferInPageProps) {
           if (Object.keys(restoredIssueMap).length > 0) setLinesIssueMap(restoredIssueMap)
           if (Object.keys(restoredBoxMap).length > 0) {
             setBoxesMatchMap(prev => ({ ...prev, ...restoredBoxMap }))
+          }
+          // Restore line weights from acknowledged data so they don't revert
+          if (Object.keys(restoredWeights).length > 0) {
+            setLineWeights(prev => ({ ...prev, ...restoredWeights }))
           }
 
           toast.success(`Resuming pending GRN ${pendingResult.header.grn_number}`)
@@ -933,8 +950,11 @@ export default function TransferInPage({ params }: TransferInPageProps) {
 
     const boxData = lineBoxDataMap[line.id] || {}
     const weights = lineWeights[lineIndex] || {}
-    const netWt = parseFloat(weights.net_weight || line.net_weight || "0")
-    const grossWt = parseFloat(weights.total_weight || line.total_weight || "0")
+    const issueData = linesIssueMap[lineIndex]
+    const netWt = issueData?.net_weight ? parseFloat(issueData.net_weight) : parseFloat(weights.net_weight || line.net_weight || "0")
+    const grossWt = issueData?.total_weight ? parseFloat(issueData.total_weight) : parseFloat(weights.total_weight || line.total_weight || "0")
+    const issueCasePack = issueData?.case_pack || ""
+    const hasIssue = !!issueData
     const itemName = line.item_desc_raw || line.item_description || `Article ${lineIndex + 1}`
     const txNo = line.transaction_no || boxData.transaction_no || ""
     const bId = line.box_id || boxData.box_id || ""
@@ -990,18 +1010,21 @@ export default function TransferInPage({ params }: TransferInPageProps) {
         .item { font-weight: bold; font-size: 7.5pt; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
         .detail { font-size: 7pt; }
         .lot { font-family: monospace; border-top: 1px solid #ccc; padding-top: 2px; font-size: 6.5pt; }
+        .issue-tag { display: inline-block; background: #fee2e2; color: #dc2626; font-size: 6pt; font-weight: bold; padding: 1px 4px; border-radius: 2px; border: 1px solid #fca5a5; margin-left: 4px; }
+        .issue-vals { font-size: 6.5pt; color: #dc2626; }
       </style></head><body>
         <div class="label">
           <div class="qr"><img src="${qrCodeDataURL}" /></div>
           <div class="info">
             <div>
-              <div class="company">${company}</div>
+              <div class="company">${company}${hasIssue ? '<span class="issue-tag">ISSUE</span>' : ''}</div>
               <div class="txn">${transferNo}</div>
               <div class="boxid">ID: ${bId}</div>
             </div>
             <div class="item">${itemName}</div>
             <div>
               <div class="detail"><b>Box #${boxNum}</b> &nbsp; Net: ${netWt}kg &nbsp; Gross: ${grossWt}kg</div>
+              ${hasIssue && issueCasePack ? `<div class="issue-vals">Case Pack: ${issueCasePack}</div>` : ''}
               <div class="detail">Date: ${dateStr}</div>
             </div>
             <div class="lot">${(lotNo).substring(0, 20)}</div>
@@ -1039,6 +1062,280 @@ export default function TransferInPage({ params }: TransferInPageProps) {
       toast.error("Failed to generate QR code")
     }
   }, [lines, lineBoxDataMap, lineWeights, transferData, company, toast])
+
+  // ── Bulk QR Print state ──
+  const [bulkFromBox, setBulkFromBox] = useState<number>(1)
+  const [bulkToBox, setBulkToBox] = useState<number>(1)
+  const [bulkEmptyCartonWeights, setBulkEmptyCartonWeights] = useState<Record<string, string>>({})
+  const [bulkPrinting, setBulkPrinting] = useState(false)
+
+  // Update bulkToBox default when lines load
+  useEffect(() => {
+    if (lines.length > 0) setBulkToBox(lines.length)
+  }, [lines.length])
+
+  // Unique articles in selected range for empty carton weight inputs
+  const bulkRangeArticles = useMemo(() => {
+    const fromIdx = Math.max(0, bulkFromBox - 1)
+    const toIdx = Math.min(lines.length, bulkToBox)
+    const rangeLines = lines.slice(fromIdx, toIdx)
+    const seen = new Set<string>()
+    const articles: string[] = []
+    rangeLines.forEach((line: any) => {
+      const name = line.item_desc_raw || line.item_description || "Unknown"
+      if (!seen.has(name)) {
+        seen.add(name)
+        articles.push(name)
+      }
+    })
+    return articles
+  }, [lines, bulkFromBox, bulkToBox])
+
+  // Track original total_weight per line (before empty carton weight adjustment)
+  const originalTotalWeightsRef = useRef<Record<number, string>>({})
+  useEffect(() => {
+    if (lines.length > 0 && Object.keys(originalTotalWeightsRef.current).length === 0) {
+      const originals: Record<number, string> = {}
+      lines.forEach((line: any, i: number) => {
+        const w = lineWeights[i] || {}
+        originals[i] = w.total_weight || line.total_weight || "0"
+      })
+      originalTotalWeightsRef.current = originals
+    }
+  }, [lines, lineWeights])
+
+  // ── Dynamic update of total_weight (gross) when empty carton weight changes ──
+  useEffect(() => {
+    if (Object.keys(bulkEmptyCartonWeights).length === 0) return
+    const fromIdx = Math.max(0, bulkFromBox - 1)
+    const toIdx = Math.min(lines.length, bulkToBox)
+
+    setLineWeights(prev => {
+      const updated = { ...prev }
+      for (let i = fromIdx; i < toIdx; i++) {
+        const line = lines[i]
+        if (!line) continue
+        if (linesMatchMap[i] || linesIssueMap[i]) continue // skip already acknowledged/issued
+
+        const articleName = line.item_desc_raw || line.item_description || "Unknown"
+        const cartonWtStr = bulkEmptyCartonWeights[articleName] || ""
+        const cartonWt = parseFloat(cartonWtStr)
+
+        const origTotal = originalTotalWeightsRef.current[i] || prev[i]?.total_weight || line.total_weight || "0"
+        const netWt = parseFloat(prev[i]?.net_weight || line.net_weight || "0")
+
+        if (cartonWtStr !== "" && !isNaN(cartonWt) && cartonWt > 0) {
+          // Add empty carton weight to net weight to get gross (total_weight)
+          updated[i] = { ...updated[i], total_weight: (netWt + cartonWt).toFixed(2) }
+        } else {
+          // Reset to original total_weight when carton weight is cleared
+          updated[i] = { ...updated[i], total_weight: String(origTotal) }
+        }
+      }
+      return updated
+    })
+  }, [bulkEmptyCartonWeights, bulkFromBox, bulkToBox, lines, linesMatchMap, linesIssueMap])
+
+  // ── Bulk Print QR handler ──
+  const handleBulkPrintQR = useCallback(async () => {
+    const fromIdx = Math.max(0, bulkFromBox - 1)
+    const toIdx = Math.min(lines.length, bulkToBox)
+    if (fromIdx >= toIdx) {
+      toast.error("Invalid box range")
+      return
+    }
+
+    // Validate empty carton weights (only validate if a value is entered)
+    for (const article of bulkRangeArticles) {
+      const val = bulkEmptyCartonWeights[article] || ""
+      if (val !== "" && val !== "0") {
+        const wt = parseFloat(val)
+        if (isNaN(wt) || wt < 0) {
+          toast.error(`Please enter a valid empty carton weight for ${article}`)
+          return
+        }
+      }
+    }
+
+    setBulkPrinting(true)
+    const headerId = await ensurePendingHeader()
+    if (!headerId) {
+      setBulkPrinting(false)
+      toast.error("Could not create pending transfer")
+      return
+    }
+
+    // Build batch acknowledge items with calculated gross weights
+    const batchItems: any[] = []
+    const labelData: any[] = []
+
+    for (let i = fromIdx; i < toIdx; i++) {
+      const line = lines[i]
+      if (!line) continue
+      if (linesMatchMap[i] || linesIssueMap[i]) continue // skip already acknowledged/issued
+
+      const articleName = line.item_desc_raw || line.item_description || "Unknown"
+      const emptyCartonWt = parseFloat(bulkEmptyCartonWeights[articleName] || "0")
+      const w = lineWeights[i] || {}
+      const netWt = parseFloat(w.net_weight || line.net_weight || "0")
+      const calculatedGrossWt = netWt + emptyCartonWt
+
+      // Update lineWeights with calculated gross weight (total_weight)
+      if (emptyCartonWt > 0) {
+        setLineWeights(prev => ({
+          ...prev,
+          [i]: { ...prev[i], total_weight: calculatedGrossWt.toFixed(2) },
+        }))
+      }
+
+      const boxRef = lineBoxDataMap[line.id] || {}
+      const boxId = line.box_id || boxRef.box_id || `ART-${i + 1}`
+      const txNo = line.transaction_no || boxRef.transaction_no || ""
+
+      batchItems.push({
+        box_id: boxId,
+        article: articleName,
+        batch_number: line.batch_number || null,
+        lot_number: getColdLotNo(articleName) || line.lot_number || null,
+        transaction_no: txNo || null,
+        net_weight: netWt,
+        gross_weight: calculatedGrossWt,
+        is_matched: true,
+        line_index: i,
+      })
+
+      const lineIssue = linesIssueMap[i]
+      labelData.push({
+        index: i,
+        itemName: articleName,
+        boxId,
+        txNo,
+        netWt,
+        grossWt: calculatedGrossWt,
+        lotNo: line.lot_number || "",
+        boxNum: i + 1,
+        hasIssue: !!lineIssue,
+        issueCasePack: lineIssue?.case_pack || "",
+      })
+    }
+
+    if (batchItems.length === 0) {
+      setBulkPrinting(false)
+      toast.info("All boxes in range already acknowledged")
+      return
+    }
+
+    // Batch acknowledge
+    try {
+      await InterunitApiService.acknowledgeBatch(headerId, batchItems)
+      const newMap = { ...linesMatchMap }
+      batchItems.forEach((item: any) => { newMap[item.line_index] = true })
+      setLinesMatchMap(newMap)
+    } catch (err: any) {
+      setBulkPrinting(false)
+      toast.error(err.message || "Failed to batch acknowledge")
+      return
+    }
+
+    // Generate all QR labels in a single print window
+    const transferNo = transferData?.challan_no || transferData?.transfer_no || ""
+    const dateStr = new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "2-digit" })
+
+    try {
+      const qrPromises = labelData.map(async (ld) => {
+        const qrDataString = JSON.stringify({ tx: ld.txNo, bi: ld.boxId })
+        const qrCodeDataURL = await QRCode.toDataURL(qrDataString, { width: 170, margin: 1, errorCorrectionLevel: "M" })
+        return { ...ld, qrCodeDataURL }
+      })
+      const labelsWithQR = await Promise.all(qrPromises)
+
+      const labelsHtml = labelsWithQR.map((ld) => `
+        <div class="label">
+          <div class="qr"><img src="${ld.qrCodeDataURL}" /></div>
+          <div class="info">
+            <div>
+              <div class="company">${company}${ld.hasIssue ? '<span class="issue-tag">ISSUE</span>' : ''}</div>
+              <div class="txn">${transferNo}</div>
+              <div class="boxid">ID: ${ld.boxId}</div>
+            </div>
+            <div class="item">${ld.itemName}</div>
+            <div>
+              <div class="detail"><b>Box #${ld.boxNum}</b> &nbsp; Net: ${ld.netWt.toFixed(2)}kg &nbsp; Gross: ${ld.grossWt.toFixed(2)}kg</div>
+              ${ld.hasIssue && ld.issueCasePack ? `<div class="issue-vals">Case Pack: ${ld.issueCasePack}</div>` : ''}
+              <div class="detail">Date: ${dateStr}</div>
+            </div>
+            <div class="lot">${(ld.lotNo).substring(0, 20)}</div>
+          </div>
+        </div>
+      `).join("\n")
+
+      const iframe = document.createElement("iframe")
+      iframe.style.position = "fixed"
+      iframe.style.left = "-9999px"
+      iframe.style.top = "-9999px"
+      iframe.style.width = "0"
+      iframe.style.height = "0"
+      document.body.appendChild(iframe)
+
+      const doc = iframe.contentWindow?.document
+      if (!doc) { setBulkPrinting(false); return }
+
+      doc.open()
+      doc.write(`<!DOCTYPE html><html><head><title>Bulk Labels</title><style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { background: white; }
+        @page { size: 4in 2in; margin: 0; padding: 0; }
+        @media print {
+          html, body { background: white; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        }
+        .label { width: 4in; height: 2in; background: white; border: 1px solid #000; display: flex; font-family: Arial, sans-serif; page-break-after: always; page-break-inside: avoid; }
+        .label:last-child { page-break-after: avoid; }
+        .qr { width: 2in; height: 2in; display: flex; align-items: center; justify-content: center; padding: 0.1in; }
+        .qr img { width: 1.7in; height: 1.7in; }
+        .info { width: 2in; height: 2in; padding: 0.08in; font-size: 8pt; line-height: 1.2; display: flex; flex-direction: column; justify-content: space-between; }
+        .company { font-weight: bold; font-size: 9pt; }
+        .txn { font-family: monospace; font-size: 7pt; }
+        .boxid { font-family: monospace; font-size: 6.5pt; color: #555; }
+        .item { font-weight: bold; font-size: 7.5pt; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .detail { font-size: 7pt; }
+        .lot { font-family: monospace; border-top: 1px solid #ccc; padding-top: 2px; font-size: 6.5pt; }
+        .issue-tag { display: inline-block; background: #fee2e2; color: #dc2626; font-size: 6pt; font-weight: bold; padding: 1px 4px; border-radius: 2px; border: 1px solid #fca5a5; margin-left: 4px; }
+        .issue-vals { font-size: 6.5pt; color: #dc2626; }
+      </style></head><body>
+        ${labelsHtml}
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+              window.onafterprint = function() { window.parent.postMessage('print-complete', '*'); };
+            }, 300);
+          };
+        </script>
+      </body></html>`)
+      doc.close()
+
+      const cleanup = (e: MessageEvent) => {
+        if (e.data === "print-complete") {
+          window.removeEventListener("message", cleanup)
+          document.body.removeChild(iframe)
+        }
+      }
+      window.addEventListener("message", cleanup)
+      setTimeout(() => {
+        if (document.body.contains(iframe)) {
+          document.body.removeChild(iframe)
+          window.removeEventListener("message", cleanup)
+        }
+      }, 60000)
+
+      toast.success(`${labelsWithQR.length} QR labels sent to printer`)
+    } catch (err) {
+      console.error("Bulk QR generation failed:", err)
+      toast.error("Failed to generate bulk QR codes")
+    } finally {
+      setBulkPrinting(false)
+    }
+  }, [lines, bulkFromBox, bulkToBox, bulkEmptyCartonWeights, bulkRangeArticles, lineWeights, lineBoxDataMap, linesMatchMap, linesIssueMap, transferData, company])
 
   const handleConfirmReceipt = async () => {
     if (!transferData) return
@@ -1444,7 +1741,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                   )}
                 </div>
               </div>
-              {!allMatched && totalItems > 0 && ["b.hrithik@candorfoods.in", "yash@candorfoods.in"].includes(user?.email?.toLowerCase() || "") && (
+              {!allMatched && totalItems > 0 && isAuthorizedUser && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -1470,7 +1767,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                       <Badge variant="outline" className={`text-xs ${matchedBoxes === totalBoxes ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-700 border-amber-200"}`}>
                         {matchedBoxes}/{totalBoxes}
                       </Badge>
-                      {matchedBoxes < totalBoxes && (
+                      {matchedBoxes < totalBoxes && isAuthorizedUser && (
                         <Button variant="ghost" size="sm" onClick={handleAcknowledgeAllBoxes} className="text-xs text-teal-600 hover:text-teal-800 h-7 px-2">
                           <CheckCheck className="h-3 w-3 mr-1" /> All
                         </Button>
@@ -1513,7 +1810,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                             <Badge variant="outline" className={`text-xs ${allArtMatched ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-700 border-amber-200"}`}>
                               {artMatched}/{artTotal}
                             </Badge>
-                            {!allArtMatched && (
+                            {!allArtMatched && isAuthorizedUser && (
                               <Button variant="ghost" size="sm" onClick={() => handleAcknowledgeArticleBoxes(articleName)} className="text-xs text-teal-600 hover:text-teal-800 h-7 px-2">
                                 <CheckCheck className="h-3 w-3 mr-1" /> All
                               </Button>
@@ -1645,6 +1942,72 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                 </div>
               )}
 
+              {/* ──── BULK QR PRINT BAR (cold storage FROM transfers) ──── */}
+              {totalLines > 0 && isColdStorageFrom && (
+                <div className="px-3 sm:px-4 py-3 border-b-2 border-blue-200 bg-blue-50/40">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Printer className="h-4 w-4 text-blue-600" />
+                    <span className="text-xs sm:text-sm font-semibold text-blue-800">Bulk Print QR</span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+                    <div className="space-y-1">
+                      <Label className="text-xs font-medium text-gray-600">From Box #</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={totalLines}
+                        value={bulkFromBox}
+                        onChange={(e) => setBulkFromBox(Math.max(1, parseInt(e.target.value) || 1))}
+                        className="h-9 bg-white border-gray-200 text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs font-medium text-gray-600">To Box #</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={totalLines}
+                        value={bulkToBox}
+                        onChange={(e) => setBulkToBox(Math.min(totalLines, parseInt(e.target.value) || 1))}
+                        className="h-9 bg-white border-gray-200 text-sm"
+                      />
+                    </div>
+                  </div>
+                  {bulkRangeArticles.length > 0 && (
+                    <div className="mb-3">
+                      <Label className="text-xs font-medium text-gray-600 mb-1.5 block">Empty Carton Weight per Article (kg)</Label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                        {bulkRangeArticles.map((article) => (
+                          <div key={article} className="flex items-center gap-2 bg-white rounded-md border border-gray-200 px-2.5 py-1.5">
+                            <span className="text-xs font-medium text-gray-700 truncate flex-1" title={article}>{article}</span>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              min={0}
+                              value={bulkEmptyCartonWeights[article] || ""}
+                              onChange={(e) => setBulkEmptyCartonWeights(prev => ({ ...prev, [article]: e.target.value }))}
+                              placeholder="0.00"
+                              className="h-7 w-24 text-xs bg-gray-50 border-gray-200"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <Button
+                    onClick={handleBulkPrintQR}
+                    disabled={bulkPrinting || bulkRangeArticles.length === 0}
+                    className="h-9 px-5 bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-medium w-full sm:w-auto"
+                  >
+                    {bulkPrinting ? (
+                      <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> Printing...</>
+                    ) : (
+                      <><Printer className="h-3.5 w-3.5 mr-1.5" /> Bulk Print QR ({Math.min(bulkToBox, totalLines) - Math.max(0, bulkFromBox - 1)} boxes)</>
+                    )}
+                  </Button>
+                </div>
+              )}
+
               {/* ──── ARTICLE LINES SECTION ──── */}
               {totalLines > 0 && (
                 <div>
@@ -1662,7 +2025,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                           {issuedLines} issue{issuedLines !== 1 ? "s" : ""}
                         </Badge>
                       )}
-                      {resolvedLines < totalLines && (
+                      {resolvedLines < totalLines && isAuthorizedUser && (
                         <Button variant="ghost" size="sm" onClick={handleAcknowledgeAllLines} className="text-xs text-teal-600 hover:text-teal-800 h-7 px-2">
                           <CheckCheck className="h-3 w-3 mr-1" /> All
                         </Button>

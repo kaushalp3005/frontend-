@@ -123,12 +123,21 @@ export default function TransferInViewPage({ params }: TransferInViewPageProps) 
       </div>
 
       {/* Info Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <Card className="border-0 shadow-sm">
           <CardContent className="p-3 text-center">
             <div className="flex items-center justify-center gap-1.5 text-muted-foreground mb-1">
               <MapPin className="h-3.5 w-3.5" />
-              <span className="text-[11px] uppercase tracking-wider font-medium">Warehouse</span>
+              <span className="text-[11px] uppercase tracking-wider font-medium">From (Sender)</span>
+            </div>
+            <p className="text-sm font-semibold text-gray-900">{data.from_warehouse || "N/A"}</p>
+          </CardContent>
+        </Card>
+        <Card className="border-0 shadow-sm">
+          <CardContent className="p-3 text-center">
+            <div className="flex items-center justify-center gap-1.5 text-muted-foreground mb-1">
+              <MapPin className="h-3.5 w-3.5" />
+              <span className="text-[11px] uppercase tracking-wider font-medium">To (Receiver)</span>
             </div>
             <p className="text-sm font-semibold text-gray-900">{data.receiving_warehouse || "N/A"}</p>
           </CardContent>

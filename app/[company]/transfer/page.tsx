@@ -174,7 +174,7 @@ export default function TransferPage({ params }: TransferPageProps) {
     searchMatch(r, requestSearch, ["request_no", "from_warehouse", "to_warehouse", "request_date", "status"])
   )
   const filteredTransferIns = transferIns.filter(t =>
-    searchMatch(t, transferInSearch, ["grn_number", "transfer_out_no", "receiving_warehouse", "received_by", "status", "grn_date"])
+    searchMatch(t, transferInSearch, ["grn_number", "transfer_out_no", "receiving_warehouse", "from_warehouse", "received_by", "status", "grn_date"])
   )
 
   const handleApproveRequest = (requestId: number) => {
@@ -424,14 +424,6 @@ export default function TransferPage({ params }: TransferPageProps) {
           >
             <BarChart3 className="h-4 w-4 mr-2" />
             View Summary
-          </Button>
-          <Button
-            variant="outline"
-            className="flex-1 sm:flex-initial h-10 px-4 text-sm shadow-sm"
-            onClick={() => router.push(`/${company}/transfer/jobwork/dashboard`)}
-          >
-            <ArrowRightLeft className="h-4 w-4 mr-2" />
-            Jobwork Summary
           </Button>
           <Button
             className="flex-1 sm:flex-initial bg-gray-900 hover:bg-gray-800 text-white h-10 px-5 text-sm shadow-sm"
@@ -877,9 +869,13 @@ export default function TransferPage({ params }: TransferPageProps) {
                         <span className="text-muted-foreground">From:</span>
                         <span className="font-medium bg-gray-100 px-2 py-1 rounded">{ti.transfer_out_no}</span>
                       </div>
-                      <div className="grid grid-cols-3 gap-2 text-center">
+                      <div className="grid grid-cols-4 gap-2 text-center">
                         <div className="bg-gray-50 rounded-lg p-2">
-                          <p className="text-[10px] text-muted-foreground">Warehouse</p>
+                          <p className="text-[10px] text-muted-foreground">From</p>
+                          <p className="text-xs font-semibold">{ti.from_warehouse || "N/A"}</p>
+                        </div>
+                        <div className="bg-gray-50 rounded-lg p-2">
+                          <p className="text-[10px] text-muted-foreground">To</p>
                           <p className="text-xs font-semibold">{ti.receiving_warehouse}</p>
                         </div>
                         <div className="bg-gray-50 rounded-lg p-2">
@@ -907,7 +903,8 @@ export default function TransferPage({ params }: TransferPageProps) {
                         <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">GRN No</th>
                         <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Transfer Out</th>
                         <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
-                        <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Warehouse</th>
+                        <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">From WH</th>
+                        <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">To WH</th>
                         <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Received By</th>
                         <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Condition</th>
                         <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Boxes</th>
@@ -921,6 +918,7 @@ export default function TransferPage({ params }: TransferPageProps) {
                           <td className="py-3 px-4 text-sm font-medium text-gray-900">{ti.grn_number}</td>
                           <td className="py-3 px-4 text-sm text-gray-600">{ti.transfer_out_no}</td>
                           <td className="py-3 px-4">{getStatusBadge(ti.status)}</td>
+                          <td className="py-3 px-4 text-sm text-gray-600">{ti.from_warehouse || "N/A"}</td>
                           <td className="py-3 px-4 text-sm text-gray-600">{ti.receiving_warehouse}</td>
                           <td className="py-3 px-4 text-sm text-gray-600">{ti.received_by}</td>
                           <td className="py-3 px-4">

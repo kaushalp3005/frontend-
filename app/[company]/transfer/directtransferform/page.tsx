@@ -264,7 +264,7 @@ function ItemDescriptionDropdown({
 }
 
 // Cold storage warehouse values that trigger the stock search UI
-const COLD_STORAGE_WAREHOUSES = ["Rishi cold", "Savla D-39 cold", "Savla D-514 cold"]
+const COLD_STORAGE_WAREHOUSES = ["Cold Storage", "Rishi cold", "Savla D-39 cold", "Savla D-514 cold"]
 
 // Cold Storage Stock Search Component (same as cold-storage/transfer-out)
 function ColdStorageStockSearch({
@@ -1195,7 +1195,9 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         }
 
         // Auto-recalculate net weight when relevant fields change
-        if (["quantity_units", "packaging_type", "unit_pack_size", "material_type"].includes(field)) {
+        // For PM items, skip recalc when unit_pack_size changes (it doesn't affect net weight)
+        const skipRecalc = field === "unit_pack_size" && updatedArticle.material_type === "PM"
+        if (!skipRecalc && ["quantity_units", "packaging_type", "unit_pack_size", "material_type"].includes(field)) {
           // For cold storage articles (cs_max_boxes set), only recalc total_weight display — keep net_weight as per-box weight
           if (updatedArticle.cs_max_boxes != null) {
             // net_weight stays as per-box weight from cold storage selection
@@ -1605,6 +1607,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         itemCode: 'N/A',
         hsnCode: 'N/A',
         qualityGrade: boxData.quality_grade || 'N/A',
+        itemMark: boxData.item_mark || '',
         scannedAt: new Date().toLocaleTimeString(),
         rawData: boxData,
       }
@@ -1723,6 +1726,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
               quality_grade: fetchedBox.quality_grade,
               box_number: fetchedBox.box_number,
               box_id: fetchedBox.box_id,
+              item_mark: fetchedBox.item_mark,
             }
           } catch (fetchError: any) {
             console.error('❌ Failed to fetch box by box_id:', fetchError)
@@ -1762,6 +1766,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
               uom: fetchedBox.uom || 'BAG',
               box_number: fetchedBox.box_number,
               box_id: fetchedBox.box_id || qrBoxId,
+              item_mark: fetchedBox.item_mark,
             }
           } catch (fetchError: any) {
             console.error('❌ Failed to fetch bulk entry box:', fetchError)
@@ -1854,6 +1859,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                 quality_grade: matchingBox?.quality_grade || qrData.quality_grade,
                 box_number: matchingBox?.box_number || qrData.box_number,
                 box_id: matchingBox?.box_id || qrData.box_id,
+                item_mark: matchingBox?.item_mark || qrData.item_mark,
               }
             }
           } catch (fetchError) {
@@ -1892,18 +1898,19 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
           itemCode: 'N/A',
           hsnCode: 'N/A',
           qualityGrade: boxData.quality_grade || 'N/A',
+          itemMark: boxData.item_mark || '',
           scannedAt: new Date().toLocaleTimeString(),
           rawData: boxData,
         }
 
         setScannedBoxes(prev => {
           const updatedBoxes = [...prev, newBox]
-          
+
           // Check if all request qty boxes are scanned (using quantity as request qty boxes)
           const requestQtyBoxes = articles[0]?.quantity_units || 0
           const scannedCount = updatedBoxes.length
           const pendingCount = requestQtyBoxes - scannedCount
-          
+
           if (requestQtyBoxes > 0) {
             if (pendingCount === 0) {
               toast({
@@ -2005,6 +2012,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
           itemCode: 'N/A',
           hsnCode: 'N/A',
           qualityGrade: 'N/A',
+          itemMark: '',
           scannedAt: new Date().toLocaleTimeString(),
           rawData: { transaction_no: decodedText },
         }
@@ -2276,14 +2284,14 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         scannedBoxes.forEach((box) => {
           const key = `${box.itemDescription || ""}_${box.lotNumber || ""}`
           if (!itemMap[key]) {
-            // Try to find item_mark from articles (cold storage data)
+            // Try box.itemMark first (from API), fall back to articles (cold storage data)
             const matchedArticle = articles.find(a => a.item_description === box.itemDescription)
             itemMap[key] = {
               description: box.itemDescription || "-",
               subCategory: box.subCategory || matchedArticle?.sub_category || "-",
               boxes: 0,
               lotNumber: box.lotNumber || "-",
-              itemMark: matchedArticle?.cs_item_mark || "-",
+              itemMark: box.itemMark || matchedArticle?.cs_item_mark || "-",
             }
           }
           itemMap[key].boxes += 1
@@ -2408,9 +2416,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                   <SelectItem value="A101">A101</SelectItem>
                   <SelectItem value="A68">A68</SelectItem>
                   <SelectItem value="F53">F53</SelectItem>
-                  <SelectItem value="Rishi cold">Rishi cold</SelectItem>
-                  <SelectItem value="Savla D-39 cold">Savla D-39 cold</SelectItem>
-                  <SelectItem value="Savla D-514 cold">Savla D-514 cold</SelectItem>
+                  <SelectItem value="Cold Storage">Cold Storage</SelectItem>
 
                 </SelectContent>
 
@@ -3062,7 +3068,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
 
                     {/* Package Size */}
                     <div className="space-y-1">
-                      <Label htmlFor={`unit_pack_size_${article.id}`}>Unit Pack Size</Label>
+                      <Label htmlFor={`unit_pack_size_${article.id}`}>Unit Pack Size/Count</Label>
                       <Input
                         id={`unit_pack_size_${article.id}`}
                         type="number"
@@ -3276,7 +3282,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                           </div>
                           {item.unit_pack_size && (
                             <div>
-                              <span className="text-gray-500">Unit Pack Size:</span>
+                              <span className="text-gray-500">Unit Pack Size/Count:</span>
                               <span className="ml-1 text-gray-700 font-medium">{item.unit_pack_size}</span>
                             </div>
                           )}
@@ -3399,15 +3405,28 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                           <span className="text-gray-500">Category:</span>
                           <span className="ml-2 text-gray-700">{box.itemCategory !== 'N/A' ? box.itemCategory : '-'}</span>
                         </div>
-                        <div className="grid grid-cols-3 gap-2 pt-1">
+                        <div className="grid grid-cols-4 gap-2 pt-1">
                           <div>
-                            <span className="text-gray-500 block mb-0.5">Unit Pack Size</span>
+                            <span className="text-gray-500 block mb-0.5">Case Pack</span>
                             <Input
                               type="number"
                               step="any"
                               min="0"
                               value={box.packagingType || ""}
                               onChange={(e) => updateScannedBox(box.id, "packagingType", e.target.value)}
+                              onWheel={(e) => e.currentTarget.blur()}
+                              className="h-7 text-xs px-1"
+                              placeholder="0"
+                            />
+                          </div>
+                          <div>
+                            <span className="text-gray-500 block mb-0.5">UPS/Count</span>
+                            <Input
+                              type="number"
+                              step="any"
+                              min="0"
+                              value={box.packageSize || ""}
+                              onChange={(e) => updateScannedBox(box.id, "packageSize", e.target.value)}
                               onWheel={(e) => e.currentTarget.blur()}
                               className="h-7 text-xs px-1"
                               placeholder="0"
@@ -3462,7 +3481,8 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                         <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Item Description</th>
                         <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Material Type</th>
                         <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Category</th>
-                        <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Unit Pack Size</th>
+                        <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Case Pack</th>
+                        <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Unit Pack Size/Count</th>
                         <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Net Wt</th>
                         <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Total Wt</th>
                         <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Lot No</th>
@@ -3496,6 +3516,18 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                               min="0"
                               value={box.packagingType || ""}
                               onChange={(e) => updateScannedBox(box.id, "packagingType", e.target.value)}
+                              onWheel={(e) => e.currentTarget.blur()}
+                              className="h-7 w-20 text-xs px-1"
+                              placeholder="0"
+                            />
+                          </td>
+                          <td className="py-2 px-1">
+                            <Input
+                              type="number"
+                              step="any"
+                              min="0"
+                              value={box.packageSize || ""}
+                              onChange={(e) => updateScannedBox(box.id, "packageSize", e.target.value)}
                               onWheel={(e) => e.currentTarget.blur()}
                               className="h-7 w-20 text-xs px-1"
                               placeholder="0"
