@@ -232,13 +232,18 @@ export default function DeliveryChallan({
                       <strong>Reason:</strong> {reasonDescription}
                     </td>
                   </tr>
+                  <tr>
+                    <td colSpan={8} style={{ padding: '10px', border: '1px solid #000', fontSize: '11px' }}>
+                      <strong>Auth Sign :</strong> _________________________
+                    </td>
+                  </tr>
 
                   <tr>
-                    <td colSpan={8} style={{ 
-                      padding: '15px 10px', 
-                      borderTop: '2px solid #000', 
-                      textAlign: 'center', 
-                      fontSize: '10px', 
+                    <td colSpan={8} style={{
+                      padding: '15px 10px',
+                      borderTop: '2px solid #000',
+                      textAlign: 'center',
+                      fontSize: '10px',
                       fontStyle: 'italic',
                       backgroundColor: '#f8f9fa'
                     }}>
