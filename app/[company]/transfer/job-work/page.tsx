@@ -14,12 +14,14 @@ import {
   ArrowLeft, ArrowRight, Plus, Loader2, Search,
   Package, Send, Inbox, ClipboardList, Eye, CheckCircle,
   Truck, RefreshCw, Pencil, Printer, Trash2, AlertTriangle, Info,
-  BarChart3, TrendingUp, Filter, Download, Activity, Users, Layers, Box
+  BarChart3, Layers, Box
 } from "lucide-react"
 import QRCode from 'qrcode'
 import type { Company } from "@/types/auth"
 import { useAuthStore } from "@/lib/stores/auth"
 import { useToast } from "@/hooks/use-toast"
+import { JobWorkErrorBoundary } from "@/components/modules/jobwork/JobWorkErrorBoundary"
+import { JobworkSummaryTab } from "@/components/modules/jobwork/JobworkSummaryTab"
 
 // ─── Article Entry types ───
 interface GeneratedArticle {
@@ -94,11 +96,12 @@ interface JobWorkRecord {
   item_descriptions: string
   total_qty: number
   total_weight: number
+  total_net_weight: number
   created_by: string
   created_at: string
 }
 
-export default function JobWorkPage({ params }: JobWorkPageProps) {
+function JobWorkPageInner({ params }: JobWorkPageProps) {
   const { company } = params
   const router = useRouter()
   const { toast } = useToast()
@@ -482,7 +485,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
       const lossConfig = data.loss_config as LossConfig | null
 
       setMiItems(lines.map((line: any, idx: number) => {
-        const sentKgs = Number(line.quantity_kgs || line.net_weight || 0)
+        const sentKgs = Number(line.net_weight || line.quantity_kgs || 0)
         const sentBoxes = Number(line.quantity_boxes || 0)
         const prevFg = Number(line.prev_fg_kgs || 0)
         const prevWaste = Number(line.prev_waste_kgs || 0)
@@ -546,7 +549,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
 
         const lines = data.line_items || []
         setMiItems(lines.map((line: any, idx: number) => {
-          const sentKgs = Number(line.quantity_kgs || line.net_weight || 0)
+          const sentKgs = Number(line.net_weight || line.quantity_kgs || 0)
           const sentBoxes = Number(line.quantity_boxes || 0)
           const prevFg = Number(line.prev_fg_kgs || 0)
           const prevWaste = Number(line.prev_waste_kgs || 0)
@@ -751,6 +754,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
         ...r,
         total_qty: Number(r.total_qty || 0),
         total_weight: Number(r.total_weight || 0),
+        total_net_weight: Number(r.total_net_weight || 0),
         items_count: Number(r.items_count || 0),
       })))
       setRecordsTotalPages(data.total_pages || 1)
@@ -817,77 +821,6 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
   const showWasteColumn = !isThermopacking
   const wasteLabel = miLossConfig?.loss_component || "Waste/Byproduct"
 
-  // ════════════════════════════════════════
-  //  REPORTS / DASHBOARD
-  // ════════════════════════════════════════
-  const [rptLoading, setRptLoading] = useState(false)
-  const [rptData, setRptData] = useState<any>(null)
-  const [rptFilterProcess, setRptFilterProcess] = useState("")
-  const [rptFilterVendor, setRptFilterVendor] = useState("")
-  const [rptFilterItem, setRptFilterItem] = useState("")
-  const [rptFilterFrom, setRptFilterFrom] = useState("")
-  const [rptFilterTo, setRptFilterTo] = useState("")
-  const [rptActiveView, setRptActiveView] = useState<"process" | "vendor" | "item" | "trend" | "matrix">("process")
-
-  const loadReportWithParams = async (filterProcess: string, filterVendor: string, filterItem: string, from: string, to: string) => {
-    setRptLoading(true)
-    try {
-      const p = new URLSearchParams()
-      if (filterProcess && filterProcess !== "all") p.append("sub_category", filterProcess)
-      if (filterVendor && filterVendor !== "all") p.append("vendor", filterVendor)
-      if (filterItem && filterItem !== "all") p.append("item", filterItem)
-      if (from) {
-        const [y, m, d] = from.split('-')
-        p.append("from_date", `${d}-${m}-${y}`)
-      }
-      if (to) {
-        const [y, m, d] = to.split('-')
-        p.append("to_date", `${d}-${m}-${y}`)
-      }
-      const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/job-work/reports/dashboard?${p.toString()}`
-      const res = await fetch(apiUrl, { headers: { 'Accept': 'application/json' } })
-      if (!res.ok) throw new Error("Failed to load report")
-      const data = await res.json()
-      setRptData(data)
-    } catch (error: any) {
-      toast({ title: "Error", description: error.message, variant: "destructive" })
-    } finally {
-      setRptLoading(false)
-    }
-  }
-
-  const loadReport = () => loadReportWithParams(rptFilterProcess, rptFilterVendor, rptFilterItem, rptFilterFrom, rptFilterTo)
-
-  // Auto-reload on any filter change (debounced for date fields)
-  useEffect(() => {
-    if (activeTab !== "reports") return
-    const timer = setTimeout(() => {
-      loadReportWithParams(rptFilterProcess, rptFilterVendor, rptFilterItem, rptFilterFrom, rptFilterTo)
-    }, 100)
-    return () => clearTimeout(timer)
-  }, [activeTab, rptFilterProcess, rptFilterVendor, rptFilterItem, rptFilterFrom, rptFilterTo])
-
-  const rptSummary = rptData?.summary || {}
-  const rptStatusCounts = rptData?.status_counts || {}
-  const rptByProcess = rptData?.by_process || []
-  const rptByVendor = rptData?.by_vendor || []
-  const rptByItem = rptData?.by_item || []
-  const rptMonthly = rptData?.monthly_trend || []
-  const rptVendorItem = rptData?.vendor_item_matrix || []
-  // Hardcoded options (same as material-out form) merged with DB options
-  const PROCESS_OPTIONS = ["De seeding", "Dicing", "Cracking", "Stuffing", "Vacuum Packaging", "Slicing", "Thermopacking"]
-  const VENDOR_OPTIONS = ["UNAZO CORPORATION", "Krishnat Kerba Chavan", "AL SAKHI ENTERPRISES", "MIE FOODS INDIA PRIVATE LIMITED", "HAG CORPORATION"]
-
-  const dbFilterOpts = rptData?.filter_options || { sub_categories: [], vendors: [], items: [] }
-  const rptFilterOpts = {
-    sub_categories: [...new Set([...PROCESS_OPTIONS, ...(dbFilterOpts.sub_categories || [])])].sort(),
-    vendors: [...new Set([...VENDOR_OPTIONS, ...(dbFilterOpts.vendors || [])])].sort(),
-    items: dbFilterOpts.items || [],
-  }
-
-  // Helper: bar width for visual bars
-  const barWidth = (val: number, max: number) => max > 0 ? Math.max(4, (val / max) * 100) : 0
-
   return (
     <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-6 py-4 sm:py-6">
       {/* Header */}
@@ -915,8 +848,8 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
           <TabsTrigger value="create-in" className="text-xs sm:text-sm data-[state=active]:bg-white data-[state=active]:shadow-sm rounded-md flex items-center gap-1.5">
             <Inbox className="h-3.5 w-3.5" /><span className="hidden sm:inline">Material In</span><span className="sm:hidden">In</span>
           </TabsTrigger>
-          <TabsTrigger value="reports" className="text-xs sm:text-sm data-[state=active]:bg-white data-[state=active]:shadow-sm rounded-md flex items-center gap-1.5">
-            <BarChart3 className="h-3.5 w-3.5" /><span className="hidden sm:inline">Reports</span><span className="sm:hidden">Report</span>
+          <TabsTrigger value="summary" className="text-xs sm:text-sm data-[state=active]:bg-white data-[state=active]:shadow-sm rounded-md flex items-center gap-1.5">
+            <BarChart3 className="h-3.5 w-3.5" /><span className="hidden sm:inline">Summary</span><span className="sm:hidden">Summary</span>
           </TabsTrigger>
         </TabsList>
 
@@ -1849,7 +1782,8 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                         <th className="px-4 py-3 text-left font-medium text-gray-600 text-xs">Item Description</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600 text-xs">Date</th>
                         <th className="px-4 py-3 text-right font-medium text-gray-600 text-xs">Total Qty</th>
-                        <th className="px-4 py-3 text-right font-medium text-gray-600 text-xs">Total Wt (Kg)</th>
+                        <th className="px-4 py-3 text-right font-medium text-gray-600 text-xs">Net Wt (Kg)</th>
+                        <th className="px-4 py-3 text-right font-medium text-gray-600 text-xs">Gross Wt (Kg)</th>
                         <th className="px-4 py-3 text-center font-medium text-gray-600 text-xs">Actions</th>
                       </tr>
                     </thead>
@@ -1862,6 +1796,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                           <td className="px-4 py-3 text-xs max-w-[250px] truncate" title={rec.item_descriptions}>{rec.item_descriptions || "-"}</td>
                           <td className="px-4 py-3 text-xs whitespace-nowrap">{rec.job_work_date}</td>
                           <td className="px-4 py-3 text-right text-xs font-medium">{rec.total_qty}</td>
+                          <td className="px-4 py-3 text-right text-xs font-medium">{rec.total_net_weight.toFixed(2)}</td>
                           <td className="px-4 py-3 text-right text-xs font-medium">{rec.total_weight.toFixed(2)}</td>
                           <td className="px-4 py-3 text-center">
                             <div className="flex items-center justify-center gap-1">
@@ -1911,7 +1846,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                       )}
                       <div className="flex items-center justify-between text-xs text-gray-500">
                         <span>{rec.job_work_date}</span>
-                        <span>Qty: {rec.total_qty} | Wt: {rec.total_weight.toFixed(2)} kg</span>
+                        <span>Qty: {rec.total_qty} | Net: {rec.total_net_weight.toFixed(2)} kg</span>
                       </div>
                       <div className="flex items-center gap-2 pt-1 border-t flex-wrap">
                         {(rec.status === 'sent' || rec.status === 'partially_received') && (
@@ -1961,380 +1896,8 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
           </Card>
         </TabsContent>
 
-        {/* ══════════════════════════════════════════ */}
-        {/*  TAB: REPORTS / DASHBOARD                  */}
-        {/* ══════════════════════════════════════════ */}
-        <TabsContent value="reports" className="mt-4 space-y-4">
-
-          {/* ─── Filters ─── */}
-          <Card className="border-0 shadow-sm overflow-hidden">
-            <CardHeader className="pb-3 bg-gradient-to-r from-indigo-50 to-blue-50 border-b">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-sm sm:text-base font-semibold text-gray-800 flex items-center gap-2">
-                  <Filter className="h-4 w-4 text-indigo-600" />
-                  Filters
-                </CardTitle>
-                <div className="flex items-center gap-2">
-                  <Button size="sm" variant="ghost" onClick={() => {
-                    setRptFilterProcess(""); setRptFilterVendor(""); setRptFilterItem(""); setRptFilterFrom(""); setRptFilterTo("")
-                  }} className="h-8 px-3 text-xs text-gray-500">
-                    Clear All
-                  </Button>
-                  {rptLoading && <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />}
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="p-4">
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-                <div className="space-y-1">
-                  <Label className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Process</Label>
-                  <Select value={rptFilterProcess} onValueChange={setRptFilterProcess}>
-                    <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="All Processes" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Processes</SelectItem>
-                      {rptFilterOpts.sub_categories.map((s: string) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Vendor</Label>
-                  <Select value={rptFilterVendor} onValueChange={setRptFilterVendor}>
-                    <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="All Vendors" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Vendors</SelectItem>
-                      {rptFilterOpts.vendors.map((v: string) => <SelectItem key={v} value={v}>{v}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Item</Label>
-                  <Select value={rptFilterItem} onValueChange={setRptFilterItem}>
-                    <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="All Items" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Items</SelectItem>
-                      {rptFilterOpts.items.map((i: string) => <SelectItem key={i} value={i}>{i}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">From Date</Label>
-                  <Input type="date" value={rptFilterFrom} onChange={(e) => setRptFilterFrom(e.target.value)} className="h-8 text-xs" />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">To Date</Label>
-                  <Input type="date" value={rptFilterTo} onChange={(e) => setRptFilterTo(e.target.value)} className="h-8 text-xs" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {rptLoading ? (
-            <div className="flex items-center justify-center py-16">
-              <Loader2 className="h-8 w-8 animate-spin text-indigo-500" />
-            </div>
-          ) : rptData ? (
-            <>
-              {/* ─── KPI Cards ─── */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3">
-                {[
-                  { label: "Total JWOs", value: rptSummary.total_jwo, icon: ClipboardList, color: "text-blue-600", bg: "bg-blue-50" },
-                  { label: "Dispatched", value: `${(rptSummary.total_dispatched_kgs || 0).toLocaleString()} kg`, icon: Send, color: "text-indigo-600", bg: "bg-indigo-50" },
-                  { label: "FG Received", value: `${(rptSummary.total_fg_kgs || 0).toLocaleString()} kg`, icon: Package, color: "text-emerald-600", bg: "bg-emerald-50" },
-                  { label: "Waste + Rejection", value: `${((rptSummary.total_waste_kgs || 0) + (rptSummary.total_rejection_kgs || 0)).toLocaleString()} kg`, icon: Trash2, color: "text-orange-600", bg: "bg-orange-50" },
-                  { label: "Overall Loss", value: `${rptSummary.overall_loss_pct || 0}%`, icon: TrendingUp, color: rptSummary.overall_loss_pct > 10 ? "text-red-600" : "text-emerald-600", bg: rptSummary.overall_loss_pct > 10 ? "bg-red-50" : "bg-emerald-50" },
-                ].map((kpi, idx) => (
-                  <Card key={idx} className="border-0 shadow-sm">
-                    <CardContent className="p-3 sm:p-4">
-                      <div className="flex items-center gap-2 mb-1.5">
-                        <div className={`h-7 w-7 rounded-lg ${kpi.bg} flex items-center justify-center`}>
-                          <kpi.icon className={`h-3.5 w-3.5 ${kpi.color}`} />
-                        </div>
-                      </div>
-                      <p className="text-lg sm:text-xl font-bold text-gray-900">{kpi.value}</p>
-                      <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wider">{kpi.label}</p>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-
-              {/* ─── Status Distribution ─── */}
-              <Card className="border-0 shadow-sm">
-                <CardHeader className="pb-2 pt-4 px-4">
-                  <CardTitle className="text-xs font-semibold text-gray-700 flex items-center gap-1.5">
-                    <Activity className="h-3.5 w-3.5 text-indigo-500" /> Status Distribution
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="px-4 pb-4">
-                  <div className="flex flex-wrap gap-2">
-                    {Object.entries(rptStatusCounts).map(([status, count]) => (
-                      <div key={status} className="flex items-center gap-1.5 bg-gray-50 rounded-lg px-3 py-2">
-                        {getStatusBadge(status)}
-                        <span className="text-sm font-bold text-gray-800 ml-1">{count as number}</span>
-                      </div>
-                    ))}
-                    {Object.keys(rptStatusCounts).length === 0 && <p className="text-xs text-gray-400">No data</p>}
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* ─── Sub-view Tabs ─── */}
-              <div className="flex flex-wrap gap-1.5 bg-gray-100 rounded-lg p-1">
-                {[
-                  { key: "process" as const, label: "By Process", icon: Layers },
-                  { key: "vendor" as const, label: "By Vendor", icon: Users },
-                  { key: "item" as const, label: "By Item", icon: Box },
-                  { key: "trend" as const, label: "Monthly Trend", icon: TrendingUp },
-                  { key: "matrix" as const, label: "Vendor × Item", icon: BarChart3 },
-                ].map(({ key, label, icon: Icon }) => (
-                  <button key={key} onClick={() => setRptActiveView(key)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                      rptActiveView === key ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'
-                    }`}>
-                    <Icon className="h-3 w-3" />{label}
-                  </button>
-                ))}
-              </div>
-
-              {/* ─── By Process ─── */}
-              {rptActiveView === "process" && (
-                <Card className="border-0 shadow-sm overflow-hidden">
-                  <CardHeader className="pb-2 pt-4 px-4 border-b">
-                    <CardTitle className="text-sm font-semibold text-gray-800">Process Type Breakdown</CardTitle>
-                  </CardHeader>
-                  <CardContent className="p-0">
-                    <table className="w-full text-sm">
-                      <thead className="bg-gray-50 border-b">
-                        <tr>
-                          <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-600">Process</th>
-                          <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-600">JWOs</th>
-                          <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-600">Dispatched (Kg)</th>
-                          <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-600">FG Received (Kg)</th>
-                          <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-600 w-[200px]">Volume</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {rptByProcess.map((r: any, idx: number) => (
-                          <tr key={idx} className={`border-b last:border-0 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
-                            <td className="px-4 py-2.5 text-xs font-semibold">{r.process}</td>
-                            <td className="px-4 py-2.5 text-right text-xs">{r.jwo_count}</td>
-                            <td className="px-4 py-2.5 text-right text-xs font-medium">{r.dispatched_kgs.toLocaleString()}</td>
-                            <td className="px-4 py-2.5 text-right text-xs font-medium text-emerald-700">{r.fg_kgs.toLocaleString()}</td>
-                            <td className="px-4 py-2.5">
-                              <div className="w-full bg-gray-200 rounded-full h-2">
-                                <div className="bg-indigo-500 h-2 rounded-full transition-all" style={{ width: `${barWidth(r.dispatched_kgs, rptByProcess[0]?.dispatched_kgs || 1)}%` }} />
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                        {rptByProcess.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-xs text-gray-400">No data</td></tr>}
-                      </tbody>
-                    </table>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* ─── By Vendor ─── */}
-              {rptActiveView === "vendor" && (
-                <Card className="border-0 shadow-sm overflow-hidden">
-                  <CardHeader className="pb-2 pt-4 px-4 border-b">
-                    <CardTitle className="text-sm font-semibold text-gray-800">Vendor Breakdown ({rptSummary.unique_vendors} vendors)</CardTitle>
-                  </CardHeader>
-                  <CardContent className="p-0">
-                    <table className="w-full text-sm">
-                      <thead className="bg-gray-50 border-b">
-                        <tr>
-                          <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-600">Vendor</th>
-                          <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-600">JWOs</th>
-                          <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-600">Dispatched (Kg)</th>
-                          <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-600 w-[200px]">Volume</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {rptByVendor.map((r: any, idx: number) => (
-                          <tr key={idx} className={`border-b last:border-0 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
-                            <td className="px-4 py-2.5 text-xs font-semibold max-w-[200px] truncate" title={r.vendor}>{r.vendor}</td>
-                            <td className="px-4 py-2.5 text-right text-xs">{r.jwo_count}</td>
-                            <td className="px-4 py-2.5 text-right text-xs font-medium">{r.dispatched_kgs.toLocaleString()}</td>
-                            <td className="px-4 py-2.5">
-                              <div className="w-full bg-gray-200 rounded-full h-2">
-                                <div className="bg-teal-500 h-2 rounded-full transition-all" style={{ width: `${barWidth(r.dispatched_kgs, rptByVendor[0]?.dispatched_kgs || 1)}%` }} />
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                        {rptByVendor.length === 0 && <tr><td colSpan={4} className="px-4 py-8 text-center text-xs text-gray-400">No data</td></tr>}
-                      </tbody>
-                    </table>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* ─── By Item ─── */}
-              {rptActiveView === "item" && (
-                <Card className="border-0 shadow-sm overflow-hidden">
-                  <CardHeader className="pb-2 pt-4 px-4 border-b">
-                    <CardTitle className="text-sm font-semibold text-gray-800">Item Breakdown</CardTitle>
-                  </CardHeader>
-                  <CardContent className="p-0">
-                    <table className="w-full text-sm">
-                      <thead className="bg-gray-50 border-b">
-                        <tr>
-                          <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-600">Item</th>
-                          <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-600">JWOs</th>
-                          <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-600">Boxes</th>
-                          <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-600">Dispatched (Kg)</th>
-                          <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-600 w-[200px]">Volume</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {rptByItem.map((r: any, idx: number) => (
-                          <tr key={idx} className={`border-b last:border-0 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
-                            <td className="px-4 py-2.5 text-xs font-semibold max-w-[200px] truncate" title={r.item}>{r.item}</td>
-                            <td className="px-4 py-2.5 text-right text-xs">{r.jwo_count}</td>
-                            <td className="px-4 py-2.5 text-right text-xs">{r.total_boxes}</td>
-                            <td className="px-4 py-2.5 text-right text-xs font-medium">{r.dispatched_kgs.toLocaleString()}</td>
-                            <td className="px-4 py-2.5">
-                              <div className="w-full bg-gray-200 rounded-full h-2">
-                                <div className="bg-amber-500 h-2 rounded-full transition-all" style={{ width: `${barWidth(r.dispatched_kgs, rptByItem[0]?.dispatched_kgs || 1)}%` }} />
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                        {rptByItem.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-xs text-gray-400">No data</td></tr>}
-                      </tbody>
-                    </table>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* ─── Monthly Trend ─── */}
-              {rptActiveView === "trend" && (
-                <Card className="border-0 shadow-sm overflow-hidden">
-                  <CardHeader className="pb-2 pt-4 px-4 border-b">
-                    <CardTitle className="text-sm font-semibold text-gray-800">Monthly Trend (Last 12 months)</CardTitle>
-                  </CardHeader>
-                  <CardContent className="p-4">
-                    {rptMonthly.length > 0 ? (
-                      <div className="space-y-2">
-                        {rptMonthly.map((m: any, idx: number) => (
-                          <div key={idx} className="flex items-center gap-3">
-                            <span className="text-xs font-mono font-medium text-gray-600 w-[60px]">{m.month}</span>
-                            <div className="flex-1 bg-gray-100 rounded-full h-6 relative overflow-hidden">
-                              <div className="absolute inset-y-0 left-0 bg-gradient-to-r from-indigo-400 to-indigo-600 rounded-full transition-all flex items-center justify-end pr-2"
-                                style={{ width: `${barWidth(m.dispatched_kgs, Math.max(...rptMonthly.map((x: any) => x.dispatched_kgs)))}%` }}>
-                                <span className="text-[10px] font-semibold text-white">{m.dispatched_kgs.toLocaleString()} kg</span>
-                              </div>
-                            </div>
-                            <span className="text-xs text-gray-500 w-[50px] text-right">{m.jwo_count} JWO{m.jwo_count !== 1 ? 's' : ''}</span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-center text-xs text-gray-400 py-8">No monthly data available</p>
-                    )}
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* ─── Vendor × Item Matrix ─── */}
-              {rptActiveView === "matrix" && (
-                <Card className="border-0 shadow-sm overflow-hidden">
-                  <CardHeader className="pb-2 pt-4 px-4 border-b">
-                    <CardTitle className="text-sm font-semibold text-gray-800">Vendor × Item Matrix (Top 20 combinations)</CardTitle>
-                  </CardHeader>
-                  <CardContent className="p-0">
-                    <table className="w-full text-sm">
-                      <thead className="bg-gray-50 border-b">
-                        <tr>
-                          <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-600">Vendor</th>
-                          <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-600">Item</th>
-                          <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-600">JWOs</th>
-                          <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-600">Dispatched (Kg)</th>
-                          <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-600 w-[150px]">Volume</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {rptVendorItem.map((r: any, idx: number) => (
-                          <tr key={idx} className={`border-b last:border-0 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
-                            <td className="px-4 py-2.5 text-xs font-medium max-w-[150px] truncate" title={r.vendor}>{r.vendor}</td>
-                            <td className="px-4 py-2.5 text-xs max-w-[150px] truncate" title={r.item}>{r.item}</td>
-                            <td className="px-4 py-2.5 text-right text-xs">{r.jwo_count}</td>
-                            <td className="px-4 py-2.5 text-right text-xs font-medium">{r.dispatched_kgs.toLocaleString()}</td>
-                            <td className="px-4 py-2.5">
-                              <div className="w-full bg-gray-200 rounded-full h-2">
-                                <div className="bg-violet-500 h-2 rounded-full transition-all" style={{ width: `${barWidth(r.dispatched_kgs, rptVendorItem[0]?.dispatched_kgs || 1)}%` }} />
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                        {rptVendorItem.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-xs text-gray-400">No data</td></tr>}
-                      </tbody>
-                    </table>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* ─── Inward Summary Panel ─── */}
-              <Card className="border-0 shadow-sm">
-                <CardHeader className="pb-2 pt-4 px-4 border-b">
-                  <CardTitle className="text-sm font-semibold text-gray-800 flex items-center gap-2">
-                    <Inbox className="h-4 w-4 text-teal-600" /> Inward Summary
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="p-4">
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <div className="bg-teal-50 rounded-lg p-3 text-center">
-                      <p className="text-lg font-bold text-teal-700">{rptSummary.total_irs || 0}</p>
-                      <p className="text-[10px] text-teal-600 font-medium uppercase">Inward Receipts</p>
-                    </div>
-                    <div className="bg-emerald-50 rounded-lg p-3 text-center">
-                      <p className="text-lg font-bold text-emerald-700">{(rptSummary.total_fg_kgs || 0).toLocaleString()}</p>
-                      <p className="text-[10px] text-emerald-600 font-medium uppercase">FG Received (Kg)</p>
-                    </div>
-                    <div className="bg-orange-50 rounded-lg p-3 text-center">
-                      <p className="text-lg font-bold text-orange-700">{(rptSummary.total_waste_kgs || 0).toLocaleString()}</p>
-                      <p className="text-[10px] text-orange-600 font-medium uppercase">Waste (Kg)</p>
-                    </div>
-                    <div className="bg-rose-50 rounded-lg p-3 text-center">
-                      <p className="text-lg font-bold text-rose-700">{(rptSummary.total_rejection_kgs || 0).toLocaleString()}</p>
-                      <p className="text-[10px] text-rose-600 font-medium uppercase">Rejection (Kg)</p>
-                    </div>
-                  </div>
-                  {rptSummary.total_dispatched_kgs > 0 && (
-                    <div className="mt-4">
-                      <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
-                        <span>Dispatched vs Accounted</span>
-                        <span>{((rptSummary.total_dispatched_kgs - rptSummary.unaccounted_kgs) / rptSummary.total_dispatched_kgs * 100).toFixed(1)}% accounted</span>
-                      </div>
-                      <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden flex">
-                        <div className="bg-emerald-500 h-3" style={{ width: `${(rptSummary.total_fg_kgs / rptSummary.total_dispatched_kgs * 100)}%` }} title={`FG: ${rptSummary.total_fg_kgs} kg`} />
-                        <div className="bg-orange-400 h-3" style={{ width: `${(rptSummary.total_waste_kgs / rptSummary.total_dispatched_kgs * 100)}%` }} title={`Waste: ${rptSummary.total_waste_kgs} kg`} />
-                        <div className="bg-rose-400 h-3" style={{ width: `${(rptSummary.total_rejection_kgs / rptSummary.total_dispatched_kgs * 100)}%` }} title={`Rejection: ${rptSummary.total_rejection_kgs} kg`} />
-                      </div>
-                      <div className="flex items-center gap-4 mt-1.5 text-[10px] text-gray-500">
-                        <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" />FG</span>
-                        <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-orange-400" />Waste</span>
-                        <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-rose-400" />Rejection</span>
-                        <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-gray-200" />Unaccounted</span>
-                      </div>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </>
-          ) : (
-            <Card className="border border-dashed border-gray-300">
-              <CardContent className="py-12">
-                <div className="flex flex-col items-center justify-center text-center">
-                  <div className="h-16 w-16 rounded-full bg-indigo-50 flex items-center justify-center mb-4">
-                    <BarChart3 className="h-7 w-7 text-indigo-300" />
-                  </div>
-                  <h3 className="text-sm font-semibold text-gray-700 mb-1">Loading Reports...</h3>
-                  <p className="text-xs text-gray-500">Data will appear once loaded.</p>
-                </div>
-              </CardContent>
-            </Card>
-          )}
+        <TabsContent value="summary" className="mt-4">
+          <JobworkSummaryTab company={company} />
         </TabsContent>
       </Tabs>
 
@@ -2425,5 +1988,13 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+export default function JobWorkPage({ params }: JobWorkPageProps) {
+  return (
+    <JobWorkErrorBoundary company={params.company}>
+      <JobWorkPageInner params={params} />
+    </JobWorkErrorBoundary>
   )
 }
