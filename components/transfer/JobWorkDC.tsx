@@ -71,10 +71,28 @@ export default function JobWorkDC(props: JobWorkDCProps) {
     return () => clearTimeout(timer)
   }, [])
 
+  // Consolidate line items: group by item_description + lot_number, sum boxes & weights
+  const consolidatedItems = React.useMemo(() => {
+    const groups = new Map<string, typeof lineItems[number]>()
+    for (const it of lineItems) {
+      const key = `${it.item_description}||${it.lot_number || ''}`
+      const existing = groups.get(key)
+      if (existing) {
+        existing.quantity_boxes += it.quantity_boxes
+        existing.net_weight += it.net_weight
+        existing.total_weight += it.total_weight
+        if (it.amount != null) existing.amount = (existing.amount || 0) + it.amount
+      } else {
+        groups.set(key, { ...it })
+      }
+    }
+    return Array.from(groups.values()).map((it, idx) => ({ ...it, sl_no: idx + 1 }))
+  }, [lineItems])
+
   const ITEMS_PER_PAGE = 8
-  const pages: typeof lineItems[] = []
-  for (let i = 0; i < lineItems.length; i += ITEMS_PER_PAGE) {
-    pages.push(lineItems.slice(i, i + ITEMS_PER_PAGE))
+  const pages: typeof consolidatedItems[] = []
+  for (let i = 0; i < consolidatedItems.length; i += ITEMS_PER_PAGE) {
+    pages.push(consolidatedItems.slice(i, i + ITEMS_PER_PAGE))
   }
 
   const cellStyle = (extra?: React.CSSProperties): React.CSSProperties => ({
@@ -315,8 +333,8 @@ export default function JobWorkDC(props: JobWorkDCProps) {
             <td style={headerCell({ textAlign: 'right' })}>Total Wt (Kg)</td>
           </tr>
 
-          {/* Show up to 6 items in gate pass */}
-          {lineItems.slice(0, 6).map((item, idx) => (
+          {/* Show up to 6 consolidated items in gate pass */}
+          {consolidatedItems.slice(0, 6).map((item, idx) => (
             <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#fff' : '#fafaf7' }}>
               <td style={cellStyle({ textAlign: 'center' })}>{item.sl_no}</td>
               <td style={cellStyle({ fontWeight: '600' })}>{item.item_description}</td>
@@ -326,21 +344,21 @@ export default function JobWorkDC(props: JobWorkDCProps) {
               <td style={cellStyle({ textAlign: 'right' })}>{item.total_weight.toFixed(3)}</td>
             </tr>
           ))}
-          {lineItems.length > 6 && (
+          {consolidatedItems.length > 6 && (
             <tr>
               <td colSpan={6} style={cellStyle({ textAlign: 'center', fontStyle: 'italic', color: '#666', fontSize: '10px' })}>
-                ... and {lineItems.length - 6} more item(s) - refer Delivery Challan for full details
+                ... and {consolidatedItems.length - 6} more item(s) - refer Delivery Challan for full details
               </td>
             </tr>
           )}
 
           {/* Gate Pass Totals */}
           <tr style={{ backgroundColor: '#f0ebe3' }}>
-            <td colSpan={2} style={cellStyle({ fontWeight: 'bold' })}>Total Items: {lineItems.length}</td>
+            <td colSpan={2} style={cellStyle({ fontWeight: 'bold' })}>Total Items: {consolidatedItems.length}</td>
             <td style={cellStyle({ fontWeight: 'bold', textAlign: 'center' })}></td>
             <td style={cellStyle({ fontWeight: 'bold', textAlign: 'center' })}>{totals.total_boxes}</td>
             <td style={cellStyle({ fontWeight: 'bold', textAlign: 'right' })}>{totals.total_quantity_kgs.toFixed(3)}</td>
-            <td style={cellStyle({ fontWeight: 'bold', textAlign: 'right' })}>{lineItems.reduce((s, e) => s + e.total_weight, 0).toFixed(3)}</td>
+            <td style={cellStyle({ fontWeight: 'bold', textAlign: 'right' })}>{consolidatedItems.reduce((s, e) => s + e.total_weight, 0).toFixed(3)}</td>
           </tr>
 
           {/* Signatures */}

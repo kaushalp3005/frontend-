@@ -9,12 +9,38 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Checkbox } from "@/components/ui/checkbox"
-import { ArrowLeft, Send, Package, Plus, Trash2, Search, Loader2, X } from "lucide-react"
+import { ArrowLeft, Send, Package, Plus, Trash2, Search, Loader2, X, MapPin } from "lucide-react"
 import type { Company } from "@/types/auth"
 import { useAuthStore } from "@/lib/stores/auth"
 import { useToast } from "@/hooks/use-toast"
 import { ColdStorageApiService, type ColdStorageStockRecord } from "@/lib/api/coldStorageApiService"
+
+const COLD_STORAGE_LOCATIONS = ["Savla Bond", "Savla D-39", "Savla D-514", "Rishi", "Supreme"]
+
+function LocationChips({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {COLD_STORAGE_LOCATIONS.map((loc) => {
+        const selected = value === loc
+        return (
+          <button
+            key={loc}
+            type="button"
+            onClick={() => onChange(selected ? "" : loc)}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all duration-150 ${
+              selected
+                ? "bg-blue-600 text-white border-blue-600 shadow-sm"
+                : "bg-white text-gray-600 border-gray-300 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50"
+            }`}
+          >
+            <MapPin className="h-3 w-3" />
+            {loc}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
 
 interface InnerColdTransferPageProps {
   params: {
@@ -241,16 +267,13 @@ export default function InnerColdTransferPage({ params }: InnerColdTransferPageP
     quantity_units: number
     lot_number: string
     new_lot_number: string
-    change_location: boolean
     new_storage_location: string
-    location_is_other: boolean
   }
 
   const [articles, setArticles] = useState<Article[]>([{
     id: "1", stock_record_id: null, item_category: "", item_description: "",
     net_weight: 0, available_boxes: 0, quantity_units: 0,
-    lot_number: "", new_lot_number: "",
-    change_location: false, new_storage_location: "", location_is_other: false,
+    lot_number: "", new_lot_number: "", new_storage_location: "",
   }])
 
   // Transfer list (added articles ready for submit)
@@ -264,6 +287,7 @@ export default function InnerColdTransferPage({ params }: InnerColdTransferPageP
     old_lot_number: string
     new_lot_number: string
     new_storage_location: string
+    isExisting?: boolean  // true = already saved (from edit load), false/undefined = new
   }
 
   const [transferEntries, setTransferEntries] = useState<TransferEntry[]>([])
@@ -289,17 +313,25 @@ export default function InnerColdTransferPage({ params }: InnerColdTransferPageP
         })
 
         // Load lines into transfer entries
-        const entries: TransferEntry[] = (data.lines || []).map((line: any, idx: number) => ({
-          id: `edit-${idx}-${Date.now()}`,
-          stock_record_id: line.stock_record_id,
-          item_category: line.item_category || '',
-          item_description: line.item_description || '',
-          net_weight: line.net_weight_kg || 0,
-          quantity_units: line.quantity || 0,
-          old_lot_number: line.old_lot_number || '',
-          new_lot_number: line.new_lot_number || '',
-          new_storage_location: line.new_storage_location || '',
-        }))
+        // net_weight_kg in DB = total transferred weight (qty × per-box weight)
+        // Derive per-box weight = net_weight_kg / quantity so form calculates correctly
+        const entries: TransferEntry[] = (data.lines || []).map((line: any, idx: number) => {
+          const qty = line.quantity || 0
+          const totalWeight = line.net_weight_kg || 0
+          const perBoxWeight = qty > 0 ? parseFloat((totalWeight / qty).toFixed(3)) : totalWeight
+          return {
+            id: `edit-${idx}-${Date.now()}`,
+            stock_record_id: line.stock_record_id,
+            item_category: line.item_category || '',
+            item_description: line.item_description || '',
+            net_weight: perBoxWeight,
+            quantity_units: qty,
+            old_lot_number: line.old_lot_number || '',
+            new_lot_number: line.new_lot_number || '',
+            new_storage_location: line.new_storage_location || '',
+            isExisting: true,
+          }
+        })
         setTransferEntries(entries)
       } catch (error: any) {
         console.error('Failed to load edit data:', error)
@@ -325,8 +357,7 @@ export default function InnerColdTransferPage({ params }: InnerColdTransferPageP
     const newArticle: Article = {
       id: Date.now().toString(), stock_record_id: null, item_category: "", item_description: "",
       net_weight: 0, available_boxes: 0, quantity_units: 0,
-      lot_number: "", new_lot_number: "",
-      change_location: false, new_storage_location: "", location_is_other: false,
+      lot_number: "", new_lot_number: "", new_storage_location: "",
     }
     setArticles(prev => [...prev, newArticle])
   }
@@ -364,9 +395,7 @@ export default function InnerColdTransferPage({ params }: InnerColdTransferPageP
           available_boxes: availableBoxes,
           quantity_units: 0,
           new_lot_number: "",
-          change_location: false,
           new_storage_location: "",
-          location_is_other: false,
         }
       })
     )
@@ -391,11 +420,6 @@ export default function InnerColdTransferPage({ params }: InnerColdTransferPageP
       toast({ title: "Missing Fields", description: "Please enter the New Lot Number", variant: "destructive" })
       return
     }
-    if (article.change_location && !article.new_storage_location) {
-      toast({ title: "Missing Fields", description: "Please select the New Storage Location", variant: "destructive" })
-      return
-    }
-
     const entry: TransferEntry = {
       id: Date.now().toString(),
       stock_record_id: article.stock_record_id,
@@ -405,7 +429,7 @@ export default function InnerColdTransferPage({ params }: InnerColdTransferPageP
       quantity_units: article.quantity_units,
       old_lot_number: article.lot_number,
       new_lot_number: article.new_lot_number,
-      new_storage_location: article.change_location ? article.new_storage_location : "",
+      new_storage_location: article.new_storage_location || "",
     }
 
     setTransferEntries(prev => [...prev, entry])
@@ -426,7 +450,12 @@ export default function InnerColdTransferPage({ params }: InnerColdTransferPageP
     if (!formData.fromWarehouse) errors.push('Inner Stock Transfer selection is required')
     if (!formData.reason) errors.push('Reason is required')
     if (!formData.reasonDescription?.trim()) errors.push('Reason description is required')
-    if (transferEntries.length === 0) errors.push('Please add at least one article to the transfer list')
+    if (!isEditMode && transferEntries.length === 0) errors.push('Please add at least one article to the transfer list')
+
+    // In edit mode, only send NEW entries (existing ones already processed)
+    const linesToSubmit = isEditMode
+      ? transferEntries.filter(e => !e.isExisting)
+      : transferEntries
 
     if (errors.length > 0) {
       setValidationErrors(errors)
@@ -438,16 +467,7 @@ export default function InnerColdTransferPage({ params }: InnerColdTransferPageP
     setSubmitting(true)
 
     try {
-      // In edit mode, delete the old transfer records first
-      if (isEditMode && editChallan) {
-        const deleteUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/cold-storage/inner-transfer/${encodeURIComponent(editChallan)}?user_email=${encodeURIComponent(user?.email || '')}`
-        const delRes = await fetch(deleteUrl, { method: 'DELETE', headers: { 'Accept': 'application/json' } })
-        if (!delRes.ok) {
-          const errData = await delRes.json().catch(() => null)
-          throw new Error(errData?.detail || 'Failed to update: could not remove old records')
-        }
-      }
-
+      // Edit mode: append new lines to the same challan without deleting existing records
       const payload = {
         company: company,
         header: {
@@ -458,7 +478,7 @@ export default function InnerColdTransferPage({ params }: InnerColdTransferPageP
           reason_code: formData.reason,
           transfer_type: "INNER_COLD",
         },
-        lines: transferEntries.map((entry) => ({
+        lines: linesToSubmit.map((entry) => ({
           stock_record_id: entry.stock_record_id,
           item_category: entry.item_category,
           item_description: entry.item_description,
@@ -550,18 +570,15 @@ export default function InnerColdTransferPage({ params }: InnerColdTransferPageP
               </div>
 
               {/* Inner Stock Transfer */}
-              <div className="space-y-1">
+              <div className="space-y-2">
                 <Label className="text-xs font-medium text-gray-600">Inner Stock Transfer *</Label>
-                <Select value={formData.fromWarehouse} onValueChange={(value) => handleInputChange('fromWarehouse', value)}>
-                  <SelectTrigger className="h-9 bg-white border-gray-200">
-                    <SelectValue placeholder="Select cold storage" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {storageLocations.map(wh => (
-                      <SelectItem key={wh} value={wh}>{wh}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <LocationChips
+                  value={formData.fromWarehouse}
+                  onChange={(value) => handleInputChange('fromWarehouse', value)}
+                />
+                {!formData.fromWarehouse && (
+                  <p className="text-[11px] text-amber-600">Select a cold storage location</p>
+                )}
               </div>
 
               {/* Reason */}
@@ -687,62 +704,20 @@ export default function InnerColdTransferPage({ params }: InnerColdTransferPageP
                 </div>
 
                 {/* Change Location Option */}
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      id={`change-location-${article.id}`}
-                      checked={article.change_location}
-                      onCheckedChange={(checked) => {
-                        updateArticle(article.id, "change_location", !!checked)
-                        if (!checked) {
-                          updateArticle(article.id, "new_storage_location", "")
-                          updateArticle(article.id, "location_is_other", false)
-                        }
-                      }}
-                    />
-                    <Label htmlFor={`change-location-${article.id}`} className="text-xs font-medium cursor-pointer">
-                      Change Storage Location?
-                    </Label>
-                  </div>
-                  {article.change_location && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <Label className="text-xs">New Storage Location *</Label>
-                        <Select
-                          value={article.location_is_other ? "__other__" : article.new_storage_location}
-                          onValueChange={(value) => {
-                            if (value === "__other__") {
-                              updateArticle(article.id, "location_is_other", true)
-                              updateArticle(article.id, "new_storage_location", "")
-                            } else {
-                              updateArticle(article.id, "location_is_other", false)
-                              updateArticle(article.id, "new_storage_location", value)
-                            }
-                          }}
-                        >
-                          <SelectTrigger className="h-9 bg-white border-purple-300 focus:border-purple-500">
-                            <SelectValue placeholder="Select new location" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {storageLocations.filter(loc => !loc.toLowerCase().startsWith("kala namak")).map(loc => (
-                              <SelectItem key={loc} value={loc}>{loc}</SelectItem>
-                            ))}
-                            <SelectItem value="__other__">Other</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      {article.location_is_other && (
-                        <div className="space-y-1">
-                          <Label className="text-xs">Enter Location Name *</Label>
-                          <Input
-                            value={article.new_storage_location}
-                            onChange={(e) => updateArticle(article.id, "new_storage_location", e.target.value)}
-                            placeholder="Type custom location name"
-                            className="h-9 border-purple-300 focus:border-purple-500"
-                          />
-                        </div>
-                      )}
-                    </div>
+                <div className="space-y-2">
+                  <Label className="text-xs font-medium text-gray-600 flex items-center gap-1.5">
+                    <MapPin className="h-3.5 w-3.5 text-purple-500" />
+                    Change Storage Location
+                    <span className="text-gray-400 font-normal">(optional — click to select new location)</span>
+                  </Label>
+                  <LocationChips
+                    value={article.new_storage_location}
+                    onChange={(value) => updateArticle(article.id, "new_storage_location", value)}
+                  />
+                  {article.new_storage_location && (
+                    <p className="text-[11px] text-purple-700 font-medium">
+                      Will move to: <span className="font-semibold">{article.new_storage_location}</span>
+                    </p>
                   )}
                 </div>
 
@@ -769,11 +744,11 @@ export default function InnerColdTransferPage({ params }: InnerColdTransferPageP
                 </CardTitle>
                 <p className="text-xs text-muted-foreground mt-1">Lot number changes to be applied</p>
               </div>
-              {transferEntries.length > 0 && (
+              {transferEntries.some(e => !e.isExisting) && (
                 <Button type="button" variant="outline" size="sm"
-                  onClick={() => setTransferEntries([])}
+                  onClick={() => setTransferEntries(prev => prev.filter(e => e.isExisting))}
                   className="h-8 px-3 text-xs text-red-600 border-red-200 hover:bg-red-50">
-                  Clear All
+                  Clear New
                 </Button>
               )}
             </div>
@@ -790,9 +765,16 @@ export default function InnerColdTransferPage({ params }: InnerColdTransferPageP
                 {/* Mobile card list */}
                 <div className="md:hidden divide-y">
                   {transferEntries.map((entry, idx) => (
-                    <div key={entry.id} className="p-3 space-y-2">
+                    <div key={entry.id} className={`p-3 space-y-2 ${entry.isExisting ? 'bg-gray-50/70' : ''}`}>
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 mb-0.5">
+                            {entry.isExisting ? (
+                              <Badge variant="outline" className="text-[9px] px-1 py-0 bg-gray-100 text-gray-500 border-gray-200">SAVED</Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-[9px] px-1 py-0 bg-emerald-50 text-emerald-700 border-emerald-200">NEW</Badge>
+                            )}
+                          </div>
                           <p className="text-sm font-medium truncate">{entry.item_description}</p>
                           <p className="text-[11px] text-muted-foreground">{entry.item_category}</p>
                         </div>
@@ -837,8 +819,17 @@ export default function InnerColdTransferPage({ params }: InnerColdTransferPageP
                     </thead>
                     <tbody>
                       {transferEntries.map((entry, idx) => (
-                        <tr key={entry.id} className="border-b hover:bg-gray-50">
-                          <td className="px-3 py-2">{idx + 1}</td>
+                        <tr key={entry.id} className={`border-b hover:bg-gray-50 ${entry.isExisting ? 'bg-gray-50/70' : ''}`}>
+                          <td className="px-3 py-2">
+                            <div className="flex items-center gap-1.5">
+                              <span>{idx + 1}</span>
+                              {entry.isExisting ? (
+                                <Badge variant="outline" className="text-[9px] px-1 py-0 bg-gray-100 text-gray-500 border-gray-200">SAVED</Badge>
+                              ) : (
+                                <Badge variant="outline" className="text-[9px] px-1 py-0 bg-emerald-50 text-emerald-700 border-emerald-200">NEW</Badge>
+                              )}
+                            </div>
+                          </td>
                           <td className="px-3 py-2 max-w-[200px] truncate">{entry.item_description}</td>
                           <td className="px-3 py-2">{entry.item_category}</td>
                           <td className="px-3 py-2 text-right font-medium">{entry.quantity_units}</td>
@@ -880,12 +871,12 @@ export default function InnerColdTransferPage({ params }: InnerColdTransferPageP
 
         {/* Submit Button */}
         <div className="flex justify-end pb-6">
-          <Button type="submit" disabled={submitting || transferEntries.length === 0}
+          <Button type="submit" disabled={submitting || (!isEditMode && transferEntries.length === 0)}
             className="bg-blue-600 hover:bg-blue-700 text-white h-10 px-6 text-sm">
             {submitting ? (
               <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Submitting...</>
             ) : (
-              <><Send className="mr-2 h-4 w-4" /> {isEditMode ? 'Update Inner Cold Transfer' : 'Submit Inner Cold Transfer'}</>
+              <><Send className="mr-2 h-4 w-4" /> {isEditMode ? `Update Transfer${transferEntries.filter(e => !e.isExisting).length > 0 ? ` (+${transferEntries.filter(e => !e.isExisting).length} new)` : ''}` : 'Submit Inner Cold Transfer'}</>
             )}
           </Button>
         </div>

@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { getDisplayWarehouseName } from "@/lib/constants/warehouses"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   ArrowLeft, ArrowRight, Plus, Loader2, Search,
   Package, Send, Inbox, ClipboardList, Eye, CheckCircle,
@@ -1857,7 +1858,29 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                     <tbody>
                       {records.map((rec, idx) => (
                         <tr key={rec.id} className={`border-b last:border-0 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'} hover:bg-gray-50`}>
-                          <td className="px-4 py-3 font-mono text-xs font-medium">{rec.challan_no}</td>
+                          <td className="px-4 py-3 font-mono text-xs font-medium">
+                            <TooltipProvider delayDuration={200}>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span className="cursor-default underline decoration-dotted underline-offset-2">{rec.challan_no}</span>
+                                </TooltipTrigger>
+                                <TooltipContent
+                                  side="right"
+                                  sideOffset={6}
+                                  className="!bg-gradient-to-br !from-sky-50 !via-indigo-50 !to-violet-100 !text-slate-800 border border-indigo-200/70 shadow-lg shadow-indigo-200/40 rounded-lg max-w-xs text-xs p-3 space-y-1.5"
+                                >
+                                  <div className="font-semibold text-indigo-900 pb-1 border-b border-indigo-200/60">{rec.challan_no}</div>
+                                  <div><span className="font-semibold text-indigo-700">From → To:</span> <span className="text-slate-700">{getDisplayWarehouseName(rec.from_warehouse)} → {rec.to_party}</span></div>
+                                  {rec.item_descriptions && (
+                                    <div><span className="font-semibold text-indigo-700">Items:</span> <span className="text-slate-700">{rec.item_descriptions}</span></div>
+                                  )}
+                                  {rec.remarks && (
+                                    <div><span className="font-semibold text-indigo-700">Reason:</span> <span className="text-slate-700">{rec.remarks}</span></div>
+                                  )}
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </td>
                           <td className="px-4 py-3">{getStatusBadge(rec.status)}</td>
                           <td className="px-4 py-3 text-xs">{getDisplayWarehouseName(rec.from_warehouse)} → {rec.to_party}</td>
                           <td className="px-4 py-3 text-xs max-w-[250px] truncate" title={rec.item_descriptions}>{rec.item_descriptions || "-"}</td>

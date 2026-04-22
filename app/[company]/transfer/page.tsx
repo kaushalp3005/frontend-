@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useRef, useCallback } from "react"
+import { createPortal } from "react-dom"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -18,6 +19,200 @@ import type { Company } from "@/types/auth"
 import { useAuthStore } from "@/lib/stores/auth"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { getAllWarehouseCodes, getUserDefaultWarehouses, normalizeWarehouseName, getDisplayWarehouseName } from "@/lib/constants/warehouses"
+
+type HoverLine = {
+  name: string
+  qty?: number | string
+  netWeight?: number | string
+  lotNumber?: string
+  lotFrom?: string
+  lotTo?: string
+}
+
+type HoverMeta = { label: string; value: string; tone?: "default" | "warn" | "success" }
+
+function ChallanHoverCard({
+  challanNo,
+  from,
+  to,
+  reason,
+  lines,
+  fetchLines,
+  meta,
+  fetchMeta,
+}: {
+  challanNo: string
+  from?: string
+  to?: string
+  reason?: string
+  lines?: HoverLine[]
+  fetchLines?: () => Promise<{ lines: HoverLine[]; meta?: HoverMeta[] }>
+  meta?: HoverMeta[]
+}) {
+  const [show, setShow] = useState(false)
+  const [fetched, setFetched] = useState<HoverLine[] | null>(null)
+  const [fetchedMeta, setFetchedMeta] = useState<HoverMeta[] | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const triggerRef = useRef<HTMLSpanElement>(null)
+
+  const displayLines = fetched ?? lines
+  const displayMeta = fetchedMeta ?? meta
+
+  const computePosition = useCallback(() => {
+    if (!triggerRef.current) return
+    const rect = triggerRef.current.getBoundingClientRect()
+    const CARD_WIDTH = 304
+    const CARD_MAX_HEIGHT = 380
+    const MARGIN = 12
+    const GAP = 10
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+
+    // Horizontal: align with trigger, clamp to viewport
+    let left = rect.left
+    if (left + CARD_WIDTH > vw - MARGIN) left = Math.max(MARGIN, vw - CARD_WIDTH - MARGIN)
+    if (left < MARGIN) left = MARGIN
+
+    // Vertical: prefer ABOVE. If not enough room above, place below.
+    const spaceAbove = rect.top - MARGIN
+    const spaceBelow = vh - rect.bottom - MARGIN
+    let top: number
+    if (spaceAbove >= 160 || spaceAbove >= spaceBelow) {
+      // place above — card's bottom aligns GAP above trigger's top
+      const cardHeight = Math.min(CARD_MAX_HEIGHT, spaceAbove - GAP)
+      top = rect.top - GAP - cardHeight
+      if (top < MARGIN) top = MARGIN
+    } else {
+      top = rect.bottom + GAP
+      if (top + CARD_MAX_HEIGHT > vh - MARGIN) top = Math.max(MARGIN, vh - CARD_MAX_HEIGHT - MARGIN)
+    }
+    setPos({ top, left })
+  }, [])
+
+  const open = useCallback(async () => {
+    if (hideTimer.current) clearTimeout(hideTimer.current)
+    computePosition()
+    setShow(true)
+    if (fetchLines && fetched === null && !loading) {
+      setLoading(true)
+      try {
+        const result = await fetchLines()
+        setFetched(result.lines)
+        if (result.meta) setFetchedMeta(result.meta)
+      } catch { setFetched([]) }
+      finally { setLoading(false) }
+    }
+  }, [fetchLines, fetched, loading, computePosition])
+
+  const scheduleClose = useCallback(() => {
+    hideTimer.current = setTimeout(() => setShow(false), 180)
+  }, [])
+
+  const cancelClose = useCallback(() => {
+    if (hideTimer.current) clearTimeout(hideTimer.current)
+  }, [])
+
+  const toneClass = (t?: HoverMeta["tone"]) =>
+    t === "warn" ? "text-amber-700 bg-amber-50 border-amber-200"
+    : t === "success" ? "text-emerald-700 bg-emerald-50 border-emerald-200"
+    : "text-gray-700 bg-gray-50 border-gray-200"
+
+  return (
+    <>
+      <span
+        ref={triggerRef}
+        onMouseEnter={open}
+        onMouseLeave={scheduleClose}
+        className="text-sm font-semibold text-blue-700 cursor-default underline underline-offset-2 decoration-dotted decoration-blue-400"
+      >
+        {challanNo}
+      </span>
+      {show && typeof document !== "undefined" && createPortal(
+        <div
+          onMouseEnter={cancelClose}
+          onMouseLeave={scheduleClose}
+          style={{
+            position: "fixed",
+            top: pos.top,
+            left: pos.left,
+            width: 304,
+            maxHeight: 380,
+            background: "linear-gradient(135deg, #eff6ff 0%, #ffffff 45%, #faf5ff 100%)",
+            boxShadow: "0 20px 40px -10px rgba(79, 70, 229, 0.22), 0 8px 16px -4px rgba(236, 72, 153, 0.14), 0 0 0 1px rgba(147, 197, 253, 0.45)",
+          }}
+          className="z-[9999] rounded-2xl p-3 space-y-2.5 overflow-y-auto backdrop-blur-sm"
+        >
+          {(from || to) && (
+            <div className="flex items-center gap-1.5 text-xs">
+              <span className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md font-medium max-w-[110px] truncate">{from || '—'}</span>
+              <ArrowRight className="h-3 w-3 text-gray-400 shrink-0" />
+              <span className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md font-medium max-w-[110px] truncate">{to || from || '—'}</span>
+            </div>
+          )}
+
+          {reason && (
+            <div className="flex items-start gap-1.5 text-xs border-t border-gray-100 pt-2">
+              <span className="text-gray-400 shrink-0 mt-0.5">Reason:</span>
+              <span className="text-gray-700 font-medium leading-snug">{reason}</span>
+            </div>
+          )}
+
+          {displayMeta && displayMeta.length > 0 && (
+            <div className="flex flex-wrap gap-1 border-t border-gray-100 pt-2">
+              {displayMeta.map((m, i) => (
+                <span key={i} className={`text-[10px] font-medium px-1.5 py-0.5 rounded border ${toneClass(m.tone)}`}>
+                  <span className="opacity-60">{m.label}:</span> {m.value}
+                </span>
+              ))}
+            </div>
+          )}
+
+          <div className="border-t border-gray-100 pt-2">
+            <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Items</p>
+            {loading ? (
+              <div className="flex items-center gap-2 py-2 text-xs text-gray-400">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading items...
+              </div>
+            ) : displayLines && displayLines.length > 0 ? (
+              <div className="space-y-1">
+                {displayLines.map((line, i) => (
+                  <div key={i} className="text-xs bg-white/70 border border-blue-100 rounded-lg px-2 py-1.5 shadow-sm">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="font-medium text-gray-800 leading-snug">{line.name}</span>
+                      {line.qty !== undefined && (
+                        <span className="shrink-0 text-gray-500 text-[11px] tabular-nums">{line.qty} boxes</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap mt-0.5 text-[11px]">
+                      {line.netWeight !== undefined && line.netWeight !== "" && (
+                        <span className="text-gray-500">Wt: <span className="font-medium text-gray-700">{line.netWeight} kg</span></span>
+                      )}
+                      {line.lotNumber && (
+                        <span className="font-mono text-indigo-600">Lot: {line.lotNumber}</span>
+                      )}
+                    </div>
+                    {line.lotFrom && line.lotTo && (
+                      <div className="flex items-center gap-1 text-[11px] font-mono mt-0.5">
+                        <span className="text-gray-400">{line.lotFrom}</span>
+                        <ArrowRight className="h-2.5 w-2.5 text-gray-300" />
+                        <span className="text-orange-600 font-semibold">{line.lotTo}</span>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-400 py-1">No item details available</p>
+            )}
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
+  )
+}
 
 interface TransferPageProps {
   params: {
@@ -503,7 +698,13 @@ export default function TransferPage({ params }: TransferPageProps) {
                     <div key={req.id} className="p-4 space-y-3">
                       <div className="flex items-start justify-between">
                         <div>
-                          <p className="text-sm font-semibold text-gray-900">{req.request_no}</p>
+                          <ChallanHoverCard
+                            challanNo={req.request_no}
+                            from={getDisplayWarehouseName(req.from_warehouse)}
+                            to={getDisplayWarehouseName(req.to_warehouse)}
+                            reason={req.status}
+                            lines={req.lines?.map((l: any) => ({ name: l.item_description, qty: l.quantity }))}
+                          />
                           <p className="text-xs text-muted-foreground mt-0.5">{formatDate(req.request_date)}</p>
                         </div>
                         {getStatusBadge(req.status)}
@@ -561,7 +762,13 @@ export default function TransferPage({ params }: TransferPageProps) {
                       {filteredRequests.map((req) => (
                         <tr key={req.id} className="hover:bg-gray-50/50 transition-colors">
                           <td className="py-3 px-4">
-                            <span className="text-sm font-medium text-gray-900">{req.request_no}</span>
+                            <ChallanHoverCard
+                              challanNo={req.request_no}
+                              from={getDisplayWarehouseName(req.from_warehouse)}
+                              to={getDisplayWarehouseName(req.to_warehouse)}
+                              reason={req.status}
+                              lines={req.lines?.map((l: any) => ({ name: l.item_description, qty: l.quantity }))}
+                            />
                           </td>
                           <td className="py-3 px-4">{getStatusBadge(req.status)}</td>
                           <td className="py-3 px-4">
@@ -677,7 +884,47 @@ export default function TransferPage({ params }: TransferPageProps) {
                     <div key={t.id} className="p-4 space-y-3">
                       <div className="flex items-start justify-between">
                         <div>
-                          <p className="text-sm font-semibold text-gray-900">{t.challan_no}</p>
+                          <ChallanHoverCard
+                            challanNo={t.challan_no}
+                            from={getDisplayWarehouseName(t.from_warehouse)}
+                            to={getDisplayWarehouseName(t.to_warehouse)}
+                            reason={t.status}
+                            fetchLines={async () => {
+                              const { accessToken } = useAuthStore.getState()
+                              const url = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/interunit/transfers/${t.id}`
+                              const res = await fetch(url, { headers: { Accept: 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) } })
+                              if (!res.ok) return { lines: [] }
+                              const data = await res.json()
+                              let lines: HoverLine[] = (data.lines || []).map((l: any) => ({
+                                name: l.item_description || l.article || 'Unknown',
+                                qty: l.quantity,
+                                netWeight: l.net_weight || l.total_weight || undefined,
+                                lotNumber: l.lot_number || undefined,
+                              }))
+                              // Fallback: if no line items, group boxes by article+lot
+                              if (lines.length === 0 && Array.isArray(data.boxes) && data.boxes.length > 0) {
+                                const grouped = new Map<string, { name: string; qty: number; netWeight: number; lotNumber?: string }>()
+                                for (const b of data.boxes) {
+                                  const key = `${b.article || b.item_description || 'Unknown'}||${b.lot_number || ''}`
+                                  const g = grouped.get(key) || { name: b.article || b.item_description || 'Unknown', qty: 0, netWeight: 0, lotNumber: b.lot_number || undefined }
+                                  g.qty += 1
+                                  g.netWeight += Number(b.net_weight || 0)
+                                  grouped.set(key, g)
+                                }
+                                lines = Array.from(grouped.values()).map(g => ({
+                                  name: g.name,
+                                  qty: g.qty,
+                                  netWeight: g.netWeight > 0 ? g.netWeight.toFixed(2) : undefined,
+                                  lotNumber: g.lotNumber,
+                                }))
+                              }
+                              const meta: HoverMeta[] = []
+                              if (data.vehicle_no || data.vehicle_number) meta.push({ label: "Vehicle", value: data.vehicle_no || data.vehicle_number })
+                              if (data.driver_name) meta.push({ label: "Driver", value: data.driver_name })
+                              if (data.has_variance) meta.push({ label: "Variance", value: "Yes", tone: "warn" })
+                              return { lines, meta }
+                            }}
+                          />
                           <p className="text-xs text-muted-foreground mt-0.5">{formatDate(t.stock_trf_date)}</p>
                         </div>
                         {getStatusBadge(t.status)}
@@ -743,7 +990,47 @@ export default function TransferPage({ params }: TransferPageProps) {
                     <tbody className="divide-y">
                       {filteredTransfers.map((t) => (
                         <tr key={t.id} className="hover:bg-gray-50/50 transition-colors">
-                          <td className="py-3 px-4 text-sm font-medium text-gray-900">{t.challan_no}</td>
+                          <td className="py-3 px-4">
+                            <ChallanHoverCard
+                              challanNo={t.challan_no}
+                              from={getDisplayWarehouseName(t.from_warehouse)}
+                              to={getDisplayWarehouseName(t.to_warehouse)}
+                              reason={t.status}
+                              fetchLines={async () => {
+                                const { accessToken } = useAuthStore.getState()
+                                const url = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/interunit/transfers/${t.id}`
+                                const res = await fetch(url, { headers: { Accept: 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) } })
+                                if (!res.ok) return { lines: [] }
+                                const data = await res.json()
+                                let lines: HoverLine[] = (data.lines || []).map((l: any) => ({
+                                  name: l.item_description || l.article || 'Unknown',
+                                  qty: l.quantity,
+                                  netWeight: l.net_weight || l.total_weight || undefined,
+                                  lotNumber: l.lot_number || undefined,
+                                }))
+                                if (lines.length === 0 && Array.isArray(data.boxes) && data.boxes.length > 0) {
+                                  const grouped = new Map<string, { name: string; qty: number; netWeight: number; lotNumber?: string }>()
+                                  for (const b of data.boxes) {
+                                    const key = `${b.article || b.item_description || 'Unknown'}||${b.lot_number || ''}`
+                                    const g = grouped.get(key) || { name: b.article || b.item_description || 'Unknown', qty: 0, netWeight: 0, lotNumber: b.lot_number || undefined }
+                                    g.qty += 1
+                                    g.netWeight += Number(b.net_weight || 0)
+                                    grouped.set(key, g)
+                                  }
+                                  lines = Array.from(grouped.values()).map(g => ({
+                                    name: g.name,
+                                    qty: g.qty,
+                                    netWeight: g.netWeight > 0 ? g.netWeight.toFixed(2) : undefined,
+                                    lotNumber: g.lotNumber,
+                                  }))
+                                }
+                                const meta: HoverMeta[] = []
+                                if (data.vehicle_no || data.vehicle_number) meta.push({ label: "Vehicle", value: data.vehicle_no || data.vehicle_number })
+                                if (data.driver_name) meta.push({ label: "Driver", value: data.driver_name })
+                                return { lines, meta }
+                              }}
+                            />
+                          </td>
                           <td className="py-3 px-4">{getStatusBadge(t.status)}</td>
                           <td className="py-3 px-4">
                             <div className="flex items-center gap-1.5 text-sm">
@@ -878,7 +1165,48 @@ export default function TransferPage({ params }: TransferPageProps) {
                     <div key={ti.id} className="p-4 space-y-3">
                       <div className="flex items-start justify-between">
                         <div>
-                          <p className="text-sm font-semibold text-gray-900">{ti.grn_number}</p>
+                          <ChallanHoverCard
+                            challanNo={ti.grn_number}
+                            from={ti.from_warehouse || ti.transfer_out_no}
+                            to={getDisplayWarehouseName(ti.receiving_warehouse)}
+                            reason={ti.box_condition ? `Condition: ${ti.box_condition}` : ti.status}
+                            fetchLines={async () => {
+                              const { accessToken } = useAuthStore.getState()
+                              const url = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/interunit/transfer-in/${ti.id}`
+                              const res = await fetch(url, { headers: { Accept: 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) } })
+                              if (!res.ok) return { lines: [{ name: `Transfer: ${ti.transfer_out_no}`, qty: ti.total_boxes_scanned }] }
+                              const data = await res.json()
+                              const boxes: any[] = data.boxes || []
+                              const grouped = new Map<string, { name: string; qty: number; netWeight: number; lotNumber?: string; issues: number; unmatched: number }>()
+                              for (const b of boxes) {
+                                const key = `${b.article || 'Unknown'}||${b.lot_number || ''}`
+                                const existing = grouped.get(key) || { name: b.article || 'Unknown', qty: 0, netWeight: 0, lotNumber: b.lot_number || undefined, issues: 0, unmatched: 0 }
+                                existing.qty += 1
+                                existing.netWeight += Number(b.net_weight || 0)
+                                if (b.issue) existing.issues += 1
+                                if (b.is_matched === false) existing.unmatched += 1
+                                grouped.set(key, existing)
+                              }
+                              const lines: HoverLine[] = Array.from(grouped.values()).map(g => ({
+                                name: g.name,
+                                qty: g.qty,
+                                netWeight: g.netWeight > 0 ? g.netWeight.toFixed(2) : undefined,
+                                lotNumber: g.lotNumber,
+                              }))
+                              const meta: HoverMeta[] = []
+                              if (data.received_by) meta.push({ label: "Received by", value: data.received_by })
+                              if (data.box_condition) meta.push({ label: "Condition", value: data.box_condition, tone: data.box_condition === 'Good' ? 'success' : 'warn' })
+                              const totalIssues = boxes.filter(b => b.issue).length
+                              if (totalIssues > 0) meta.push({ label: "Issues", value: String(totalIssues), tone: "warn" })
+                              const unmatchedCount = boxes.filter(b => b.is_matched === false).length
+                              if (unmatchedCount > 0) meta.push({ label: "Unmatched", value: String(unmatchedCount), tone: "warn" })
+                              if (data.status) meta.push({ label: "Status", value: data.status })
+                              return {
+                                lines: lines.length > 0 ? lines : [{ name: `Transfer: ${ti.transfer_out_no}`, qty: ti.total_boxes_scanned }],
+                                meta,
+                              }
+                            }}
+                          />
                           <p className="text-xs text-muted-foreground mt-0.5">
                             {ti.grn_date ? formatDate(new Date(ti.grn_date).toLocaleDateString('en-GB').replace(/\//g, '-')) : 'N/A'}
                           </p>
@@ -951,7 +1279,51 @@ export default function TransferPage({ params }: TransferPageProps) {
                     <tbody className="divide-y">
                       {filteredTransferIns.map((ti) => (
                         <tr key={ti.id} className="hover:bg-gray-50/50 transition-colors">
-                          <td className="py-3 px-4 text-sm font-medium text-gray-900">{ti.grn_number}</td>
+                          <td className="py-3 px-4">
+                            <ChallanHoverCard
+                              challanNo={ti.grn_number}
+                              from={ti.from_warehouse || ti.transfer_out_no}
+                              to={getDisplayWarehouseName(ti.receiving_warehouse)}
+                              reason={ti.box_condition ? `Condition: ${ti.box_condition}` : ti.status}
+                              fetchLines={async () => {
+                              const { accessToken } = useAuthStore.getState()
+                              const url = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/interunit/transfer-in/${ti.id}`
+                              const res = await fetch(url, { headers: { Accept: 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) } })
+                              if (!res.ok) return { lines: [{ name: `Transfer: ${ti.transfer_out_no}`, qty: ti.total_boxes_scanned }] }
+                              const data = await res.json()
+                              const boxes: any[] = data.boxes || []
+                              // Group boxes by article+lot
+                              const grouped = new Map<string, { name: string; qty: number; netWeight: number; lotNumber?: string; issues: number; unmatched: number }>()
+                              for (const b of boxes) {
+                                const key = `${b.article || 'Unknown'}||${b.lot_number || ''}`
+                                const existing = grouped.get(key) || { name: b.article || 'Unknown', qty: 0, netWeight: 0, lotNumber: b.lot_number || undefined, issues: 0, unmatched: 0 }
+                                existing.qty += 1
+                                existing.netWeight += Number(b.net_weight || 0)
+                                if (b.issue) existing.issues += 1
+                                if (b.is_matched === false) existing.unmatched += 1
+                                grouped.set(key, existing)
+                              }
+                              const lines: HoverLine[] = Array.from(grouped.values()).map(g => ({
+                                name: g.name,
+                                qty: g.qty,
+                                netWeight: g.netWeight > 0 ? g.netWeight.toFixed(2) : undefined,
+                                lotNumber: g.lotNumber,
+                              }))
+                              const meta: HoverMeta[] = []
+                              if (data.received_by) meta.push({ label: "Received by", value: data.received_by })
+                              if (data.box_condition) meta.push({ label: "Condition", value: data.box_condition, tone: data.box_condition === 'Good' ? 'success' : 'warn' })
+                              const totalIssues = boxes.filter(b => b.issue).length
+                              if (totalIssues > 0) meta.push({ label: "Issues", value: String(totalIssues), tone: "warn" })
+                              const unmatchedCount = boxes.filter(b => b.is_matched === false).length
+                              if (unmatchedCount > 0) meta.push({ label: "Unmatched", value: String(unmatchedCount), tone: "warn" })
+                              if (data.status) meta.push({ label: "Status", value: data.status })
+                              return {
+                                lines: lines.length > 0 ? lines : [{ name: `Transfer: ${ti.transfer_out_no}`, qty: ti.total_boxes_scanned }],
+                                meta,
+                              }
+                            }}
+                            />
+                          </td>
                           <td className="py-3 px-4 text-sm text-gray-600">{ti.transfer_out_no}</td>
                           <td className="py-3 px-4">{getStatusBadge(ti.status)}</td>
                           <td className="py-3 px-4 text-sm text-gray-600">{ti.from_warehouse || "N/A"}</td>
@@ -1038,7 +1410,12 @@ export default function TransferPage({ params }: TransferPageProps) {
                     <div key={t.challan_no} className="p-4 space-y-3">
                       <div className="flex items-start justify-between">
                         <div>
-                          <p className="text-sm font-semibold text-gray-900">{t.challan_no}</p>
+                          <ChallanHoverCard
+                            challanNo={t.challan_no}
+                            from={t.from_warehouse}
+                            reason={t.reason_code || t.remark}
+                            lines={t.lines?.map((l: any) => ({ name: l.item_description, qty: l.quantity, lotFrom: String(l.old_lot_number), lotTo: String(l.new_lot_number) }))}
+                          />
                           <p className="text-xs text-muted-foreground mt-0.5">{t.transfer_date || formatDate(t.created_at)}</p>
                         </div>
                         <Badge variant="outline" className="text-[11px] font-medium px-2 py-0.5 bg-emerald-50 text-emerald-700 border-emerald-200">
@@ -1110,7 +1487,12 @@ export default function TransferPage({ params }: TransferPageProps) {
                       {innerColdTransfers.map((t: any) => (
                         <tr key={t.challan_no} className="hover:bg-gray-50/50 transition-colors">
                           <td className="py-3 px-4">
-                            <p className="text-sm font-semibold text-gray-900">{t.challan_no}</p>
+                            <ChallanHoverCard
+                              challanNo={t.challan_no}
+                              from={t.from_warehouse}
+                              reason={t.reason_code || t.remark}
+                              lines={t.lines?.map((l: any) => ({ name: l.item_description, qty: l.quantity, lotFrom: String(l.old_lot_number), lotTo: String(l.new_lot_number) }))}
+                            />
                           </td>
                           <td className="py-3 px-4 text-sm text-gray-600">{t.transfer_date || formatDate(t.created_at)}</td>
                           <td className="py-3 px-4 text-sm font-medium">{t.from_warehouse || 'N/A'}</td>
@@ -1121,25 +1503,33 @@ export default function TransferPage({ params }: TransferPageProps) {
                             )}
                           </td>
                           <td className="py-3 px-4">
-                            <div className="space-y-1">
-                              {t.lines?.map((line: any, i: number) => (
-                                <div key={i} className="text-xs">
-                                  <span className="font-medium">{line.item_description}</span>
-                                  <span className="text-gray-500 ml-1">({line.quantity} boxes)</span>
-                                </div>
-                              ))}
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <Badge variant="outline" className="text-[11px] bg-blue-50 text-blue-700 border-blue-200">
+                                {t.line_count ?? t.lines?.length ?? 0} Items
+                              </Badge>
+                              {t.lines?.[0] && (
+                                <span className="text-xs text-gray-600 truncate max-w-[140px]">
+                                  {t.lines[0].item_description}
+                                  {(t.lines?.length ?? 0) > 1 && (
+                                    <span className="text-gray-400 ml-1">+{t.lines.length - 1} more</span>
+                                  )}
+                                </span>
+                              )}
                             </div>
                           </td>
                           <td className="py-3 px-4">
-                            <div className="space-y-1">
-                              {t.lines?.map((line: any, i: number) => (
-                                <div key={i} className="flex items-center gap-1 text-xs">
-                                  <span className="font-mono text-gray-500">{line.old_lot_number}</span>
-                                  <ArrowRight className="h-3 w-3 text-gray-400" />
-                                  <span className="font-mono font-semibold text-orange-700">{line.new_lot_number}</span>
+                            {t.lines?.[0] ? (
+                              <div className="space-y-0.5">
+                                <div className="flex items-center gap-1 text-xs">
+                                  <span className="font-mono text-gray-500">{t.lines[0].old_lot_number}</span>
+                                  <ArrowRight className="h-3 w-3 text-gray-400 shrink-0" />
+                                  <span className="font-mono font-semibold text-orange-700">{t.lines[0].new_lot_number}</span>
                                 </div>
-                              ))}
-                            </div>
+                                {(t.lines?.length ?? 0) > 1 && (
+                                  <span className="text-[11px] text-gray-400">+{t.lines.length - 1} more</span>
+                                )}
+                              </div>
+                            ) : <span className="text-xs text-gray-400">—</span>}
                           </td>
                           <td className="py-3 px-4">
                             <Badge variant="outline" className="text-[11px] font-medium px-2 py-0.5 bg-emerald-50 text-emerald-700 border-emerald-200">
@@ -1189,7 +1579,47 @@ export default function TransferPage({ params }: TransferPageProps) {
                     <div key={t.id} className="p-4 space-y-3">
                       <div className="flex items-start justify-between">
                         <div>
-                          <p className="text-sm font-semibold text-gray-900">{t.challan_no || t.transfer_no}</p>
+                          <ChallanHoverCard
+                            challanNo={t.challan_no || t.transfer_no}
+                            from={getDisplayWarehouseName(t.from_warehouse || t.from_site)}
+                            to={getDisplayWarehouseName(t.to_warehouse || t.to_site)}
+                            reason={t.status}
+                            fetchLines={async () => {
+                              const { accessToken } = useAuthStore.getState()
+                              const url = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/interunit/transfers/${t.id}`
+                              const res = await fetch(url, { headers: { Accept: 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) } })
+                              if (!res.ok) return { lines: [] }
+                              const data = await res.json()
+                              let lines: HoverLine[] = (data.lines || []).map((l: any) => ({
+                                name: l.item_description || l.article || 'Unknown',
+                                qty: l.quantity,
+                                netWeight: l.net_weight || l.total_weight || undefined,
+                                lotNumber: l.lot_number || undefined,
+                              }))
+                              // Fallback: if no line items, group boxes by article+lot
+                              if (lines.length === 0 && Array.isArray(data.boxes) && data.boxes.length > 0) {
+                                const grouped = new Map<string, { name: string; qty: number; netWeight: number; lotNumber?: string }>()
+                                for (const b of data.boxes) {
+                                  const key = `${b.article || b.item_description || 'Unknown'}||${b.lot_number || ''}`
+                                  const g = grouped.get(key) || { name: b.article || b.item_description || 'Unknown', qty: 0, netWeight: 0, lotNumber: b.lot_number || undefined }
+                                  g.qty += 1
+                                  g.netWeight += Number(b.net_weight || 0)
+                                  grouped.set(key, g)
+                                }
+                                lines = Array.from(grouped.values()).map(g => ({
+                                  name: g.name,
+                                  qty: g.qty,
+                                  netWeight: g.netWeight > 0 ? g.netWeight.toFixed(2) : undefined,
+                                  lotNumber: g.lotNumber,
+                                }))
+                              }
+                              const meta: HoverMeta[] = []
+                              if (data.vehicle_no || data.vehicle_number) meta.push({ label: "Vehicle", value: data.vehicle_no || data.vehicle_number })
+                              if (data.driver_name) meta.push({ label: "Driver", value: data.driver_name })
+                              if (data.has_variance) meta.push({ label: "Variance", value: "Yes", tone: "warn" })
+                              return { lines, meta }
+                            }}
+                          />
                           <p className="text-xs text-muted-foreground mt-0.5">{formatDate(t.stock_trf_date || t.transfer_date || t.created_ts)}</p>
                         </div>
                         {getStatusBadge(t.status)}
@@ -1240,7 +1670,49 @@ export default function TransferPage({ params }: TransferPageProps) {
                     <tbody className="divide-y">
                       {transfers.map((t) => (
                         <tr key={t.id} className="hover:bg-gray-50/50 transition-colors">
-                          <td className="py-3 px-4 text-sm font-medium text-gray-900">{t.challan_no || t.transfer_no}</td>
+                          <td className="py-3 px-4">
+                            <ChallanHoverCard
+                              challanNo={t.challan_no || t.transfer_no}
+                              from={getDisplayWarehouseName(t.from_warehouse || t.from_site)}
+                              to={getDisplayWarehouseName(t.to_warehouse || t.to_site)}
+                              reason={t.status}
+                              fetchLines={async () => {
+                              const { accessToken } = useAuthStore.getState()
+                              const url = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/interunit/transfers/${t.id}`
+                              const res = await fetch(url, { headers: { Accept: 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) } })
+                              if (!res.ok) return { lines: [] }
+                              const data = await res.json()
+                              let lines: HoverLine[] = (data.lines || []).map((l: any) => ({
+                                name: l.item_description || l.article || 'Unknown',
+                                qty: l.quantity,
+                                netWeight: l.net_weight || l.total_weight || undefined,
+                                lotNumber: l.lot_number || undefined,
+                              }))
+                              // Fallback: if no line items, group boxes by article+lot
+                              if (lines.length === 0 && Array.isArray(data.boxes) && data.boxes.length > 0) {
+                                const grouped = new Map<string, { name: string; qty: number; netWeight: number; lotNumber?: string }>()
+                                for (const b of data.boxes) {
+                                  const key = `${b.article || b.item_description || 'Unknown'}||${b.lot_number || ''}`
+                                  const g = grouped.get(key) || { name: b.article || b.item_description || 'Unknown', qty: 0, netWeight: 0, lotNumber: b.lot_number || undefined }
+                                  g.qty += 1
+                                  g.netWeight += Number(b.net_weight || 0)
+                                  grouped.set(key, g)
+                                }
+                                lines = Array.from(grouped.values()).map(g => ({
+                                  name: g.name,
+                                  qty: g.qty,
+                                  netWeight: g.netWeight > 0 ? g.netWeight.toFixed(2) : undefined,
+                                  lotNumber: g.lotNumber,
+                                }))
+                              }
+                              const meta: HoverMeta[] = []
+                              if (data.vehicle_no || data.vehicle_number) meta.push({ label: "Vehicle", value: data.vehicle_no || data.vehicle_number })
+                              if (data.driver_name) meta.push({ label: "Driver", value: data.driver_name })
+                              if (data.has_variance) meta.push({ label: "Variance", value: "Yes", tone: "warn" })
+                              return { lines, meta }
+                            }}
+                            />
+                          </td>
                           <td className="py-3 px-4">{getStatusBadge(t.status)}</td>
                           <td className="py-3 px-4">
                             <div className="flex items-center gap-1.5 text-sm">
