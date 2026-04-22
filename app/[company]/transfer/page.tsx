@@ -214,6 +214,44 @@ function ChallanHoverCard({
   )
 }
 
+function groupLinesByItem(lines: any[]): HoverLine[] {
+  const grouped = new Map<string, { name: string; qty: number; netWeight: number; lotNumber?: string }>()
+  for (const l of lines) {
+    const name = l.item_description || l.article || 'Unknown'
+    const lot = l.lot_number || ''
+    const key = `${name}||${lot}`
+    const g = grouped.get(key) || { name, qty: 0, netWeight: 0, lotNumber: lot || undefined }
+    g.qty += Number(l.quantity || 1)
+    g.netWeight += Number(l.net_weight || l.total_weight || 0)
+    grouped.set(key, g)
+  }
+  return Array.from(grouped.values()).map(g => ({
+    name: g.name,
+    qty: g.qty,
+    netWeight: g.netWeight > 0 ? Number(g.netWeight.toFixed(3)) : undefined,
+    lotNumber: g.lotNumber,
+  }))
+}
+
+function groupBoxesByItem(boxes: any[]): HoverLine[] {
+  const grouped = new Map<string, { name: string; qty: number; netWeight: number; lotNumber?: string }>()
+  for (const b of boxes) {
+    const name = b.article || b.item_description || 'Unknown'
+    const lot = b.lot_number || ''
+    const key = `${name}||${lot}`
+    const g = grouped.get(key) || { name, qty: 0, netWeight: 0, lotNumber: lot || undefined }
+    g.qty += 1
+    g.netWeight += Number(b.net_weight || 0)
+    grouped.set(key, g)
+  }
+  return Array.from(grouped.values()).map(g => ({
+    name: g.name,
+    qty: g.qty,
+    netWeight: g.netWeight > 0 ? Number(g.netWeight.toFixed(3)) : undefined,
+    lotNumber: g.lotNumber,
+  }))
+}
+
 interface TransferPageProps {
   params: {
     company: Company
@@ -895,29 +933,9 @@ export default function TransferPage({ params }: TransferPageProps) {
                               const res = await fetch(url, { headers: { Accept: 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) } })
                               if (!res.ok) return { lines: [] }
                               const data = await res.json()
-                              let lines: HoverLine[] = (data.lines || []).map((l: any) => ({
-                                name: l.item_description || l.article || 'Unknown',
-                                qty: l.quantity,
-                                netWeight: l.net_weight || l.total_weight || undefined,
-                                lotNumber: l.lot_number || undefined,
-                              }))
-                              // Fallback: if no line items, group boxes by article+lot
-                              if (lines.length === 0 && Array.isArray(data.boxes) && data.boxes.length > 0) {
-                                const grouped = new Map<string, { name: string; qty: number; netWeight: number; lotNumber?: string }>()
-                                for (const b of data.boxes) {
-                                  const key = `${b.article || b.item_description || 'Unknown'}||${b.lot_number || ''}`
-                                  const g = grouped.get(key) || { name: b.article || b.item_description || 'Unknown', qty: 0, netWeight: 0, lotNumber: b.lot_number || undefined }
-                                  g.qty += 1
-                                  g.netWeight += Number(b.net_weight || 0)
-                                  grouped.set(key, g)
-                                }
-                                lines = Array.from(grouped.values()).map(g => ({
-                                  name: g.name,
-                                  qty: g.qty,
-                                  netWeight: g.netWeight > 0 ? g.netWeight.toFixed(2) : undefined,
-                                  lotNumber: g.lotNumber,
-                                }))
-                              }
+                              const lines = (data.lines || []).length > 0
+                                ? groupLinesByItem(data.lines)
+                                : groupBoxesByItem(data.boxes || [])
                               const meta: HoverMeta[] = []
                               if (data.vehicle_no || data.vehicle_number) meta.push({ label: "Vehicle", value: data.vehicle_no || data.vehicle_number })
                               if (data.driver_name) meta.push({ label: "Driver", value: data.driver_name })
@@ -1002,28 +1020,9 @@ export default function TransferPage({ params }: TransferPageProps) {
                                 const res = await fetch(url, { headers: { Accept: 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) } })
                                 if (!res.ok) return { lines: [] }
                                 const data = await res.json()
-                                let lines: HoverLine[] = (data.lines || []).map((l: any) => ({
-                                  name: l.item_description || l.article || 'Unknown',
-                                  qty: l.quantity,
-                                  netWeight: l.net_weight || l.total_weight || undefined,
-                                  lotNumber: l.lot_number || undefined,
-                                }))
-                                if (lines.length === 0 && Array.isArray(data.boxes) && data.boxes.length > 0) {
-                                  const grouped = new Map<string, { name: string; qty: number; netWeight: number; lotNumber?: string }>()
-                                  for (const b of data.boxes) {
-                                    const key = `${b.article || b.item_description || 'Unknown'}||${b.lot_number || ''}`
-                                    const g = grouped.get(key) || { name: b.article || b.item_description || 'Unknown', qty: 0, netWeight: 0, lotNumber: b.lot_number || undefined }
-                                    g.qty += 1
-                                    g.netWeight += Number(b.net_weight || 0)
-                                    grouped.set(key, g)
-                                  }
-                                  lines = Array.from(grouped.values()).map(g => ({
-                                    name: g.name,
-                                    qty: g.qty,
-                                    netWeight: g.netWeight > 0 ? g.netWeight.toFixed(2) : undefined,
-                                    lotNumber: g.lotNumber,
-                                  }))
-                                }
+                                const lines = (data.lines || []).length > 0
+                                  ? groupLinesByItem(data.lines)
+                                  : groupBoxesByItem(data.boxes || [])
                                 const meta: HoverMeta[] = []
                                 if (data.vehicle_no || data.vehicle_number) meta.push({ label: "Vehicle", value: data.vehicle_no || data.vehicle_number })
                                 if (data.driver_name) meta.push({ label: "Driver", value: data.driver_name })
@@ -1590,29 +1589,9 @@ export default function TransferPage({ params }: TransferPageProps) {
                               const res = await fetch(url, { headers: { Accept: 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) } })
                               if (!res.ok) return { lines: [] }
                               const data = await res.json()
-                              let lines: HoverLine[] = (data.lines || []).map((l: any) => ({
-                                name: l.item_description || l.article || 'Unknown',
-                                qty: l.quantity,
-                                netWeight: l.net_weight || l.total_weight || undefined,
-                                lotNumber: l.lot_number || undefined,
-                              }))
-                              // Fallback: if no line items, group boxes by article+lot
-                              if (lines.length === 0 && Array.isArray(data.boxes) && data.boxes.length > 0) {
-                                const grouped = new Map<string, { name: string; qty: number; netWeight: number; lotNumber?: string }>()
-                                for (const b of data.boxes) {
-                                  const key = `${b.article || b.item_description || 'Unknown'}||${b.lot_number || ''}`
-                                  const g = grouped.get(key) || { name: b.article || b.item_description || 'Unknown', qty: 0, netWeight: 0, lotNumber: b.lot_number || undefined }
-                                  g.qty += 1
-                                  g.netWeight += Number(b.net_weight || 0)
-                                  grouped.set(key, g)
-                                }
-                                lines = Array.from(grouped.values()).map(g => ({
-                                  name: g.name,
-                                  qty: g.qty,
-                                  netWeight: g.netWeight > 0 ? g.netWeight.toFixed(2) : undefined,
-                                  lotNumber: g.lotNumber,
-                                }))
-                              }
+                              const lines = (data.lines || []).length > 0
+                                ? groupLinesByItem(data.lines)
+                                : groupBoxesByItem(data.boxes || [])
                               const meta: HoverMeta[] = []
                               if (data.vehicle_no || data.vehicle_number) meta.push({ label: "Vehicle", value: data.vehicle_no || data.vehicle_number })
                               if (data.driver_name) meta.push({ label: "Driver", value: data.driver_name })
@@ -1682,29 +1661,9 @@ export default function TransferPage({ params }: TransferPageProps) {
                               const res = await fetch(url, { headers: { Accept: 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) } })
                               if (!res.ok) return { lines: [] }
                               const data = await res.json()
-                              let lines: HoverLine[] = (data.lines || []).map((l: any) => ({
-                                name: l.item_description || l.article || 'Unknown',
-                                qty: l.quantity,
-                                netWeight: l.net_weight || l.total_weight || undefined,
-                                lotNumber: l.lot_number || undefined,
-                              }))
-                              // Fallback: if no line items, group boxes by article+lot
-                              if (lines.length === 0 && Array.isArray(data.boxes) && data.boxes.length > 0) {
-                                const grouped = new Map<string, { name: string; qty: number; netWeight: number; lotNumber?: string }>()
-                                for (const b of data.boxes) {
-                                  const key = `${b.article || b.item_description || 'Unknown'}||${b.lot_number || ''}`
-                                  const g = grouped.get(key) || { name: b.article || b.item_description || 'Unknown', qty: 0, netWeight: 0, lotNumber: b.lot_number || undefined }
-                                  g.qty += 1
-                                  g.netWeight += Number(b.net_weight || 0)
-                                  grouped.set(key, g)
-                                }
-                                lines = Array.from(grouped.values()).map(g => ({
-                                  name: g.name,
-                                  qty: g.qty,
-                                  netWeight: g.netWeight > 0 ? g.netWeight.toFixed(2) : undefined,
-                                  lotNumber: g.lotNumber,
-                                }))
-                              }
+                              const lines = (data.lines || []).length > 0
+                                ? groupLinesByItem(data.lines)
+                                : groupBoxesByItem(data.boxes || [])
                               const meta: HoverMeta[] = []
                               if (data.vehicle_no || data.vehicle_number) meta.push({ label: "Vehicle", value: data.vehicle_no || data.vehicle_number })
                               if (data.driver_name) meta.push({ label: "Driver", value: data.driver_name })
