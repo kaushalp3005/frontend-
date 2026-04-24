@@ -264,7 +264,7 @@ function ItemDescriptionDropdown({
 }
 
 // Cold storage warehouse values that trigger the stock search UI
-const COLD_STORAGE_WAREHOUSES = ["Cold Storage", "Rishi cold", "Savla D-39 cold", "Savla D-514 cold"]
+const COLD_STORAGE_WAREHOUSES = ["Cold Storage", "Rishi", "Savla D-39", "Savla D-514", "Supreme"]
 
 // Cold Storage Stock Search Component (same as cold-storage/transfer-out)
 function ColdStorageStockSearch({
@@ -1156,13 +1156,13 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     const quantity = Number(article.quantity_units) || 1
     const packSize = Number(article.packaging_type) || 0
 
-    if (article.material_type === 'FG') {
-      // FG: (packageSize × packSize) × quantity → Kg
+    if (article.material_type === 'FG' || article.material_type === 'RM') {
+      // FG/RM: (unit_pack_size × pack_size) × quantity → Kg
       const packageSize = Number(article.unit_pack_size) || 1
       const result = (packageSize * packSize) * quantity
       return parseFloat(result.toFixed(3))
     } else {
-      // RM/PM/RTV: quantity × packSize (Kg)
+      // PM/RTV: quantity × packSize (Kg)
       return parseFloat((quantity * packSize).toFixed(2))
     }
   }
@@ -1429,6 +1429,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         itemCode: 'N/A',
         hsnCode: 'N/A',
         qualityGrade: 'N/A',
+        itemMark: article.cs_item_mark || '',
         scannedAt: timeStamp,
         rawData: article,
       })
@@ -2472,11 +2473,13 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
 
                   <SelectItem value="F53">F53</SelectItem>
 
-                  <SelectItem value="Rishi cold">Rishi cold</SelectItem>
+                  <SelectItem value="Rishi">Rishi</SelectItem>
 
-                  <SelectItem value="Savla D-39 cold">Savla D-39 cold</SelectItem>
+                  <SelectItem value="Savla D-39">Savla D-39</SelectItem>
 
-                  <SelectItem value="Savla D-514 cold">Savla D-514 cold</SelectItem>
+                  <SelectItem value="Savla D-514">Savla D-514</SelectItem>
+
+                  <SelectItem value="Supreme">Supreme</SelectItem>
 
                 </SelectContent>
 

@@ -660,7 +660,7 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
                     <SelectValue placeholder="Select factory" />
                   </SelectTrigger>
                   <SelectContent>
-                    {["W202", "A185", "A68", "A101", "F53", "Savla", "New Savla", "Rishi"].map((f) => (
+                    {["W202", "A185", "A68", "A101", "F53", "Savla D-39", "Savla D-514", "Rishi", "Supreme"].map((f) => (
                       <SelectItem key={f} value={f}>{f}</SelectItem>
                     ))}
                   </SelectContent>
