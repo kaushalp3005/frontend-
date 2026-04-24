@@ -62,11 +62,13 @@ interface IRItem {
   // This batch inputs
   fg_kgs: number
   waste_kgs: number
+  waste_type_desc: string
   rejection_kgs: number
   // Calculated
   total_accounted_kgs: number
   unaccounted_kgs: number
-  loss_pct: number
+  loss_pct: number           // (waste + rejection) / sent * 100
+  unaccounted_loss_pct: number // unaccounted / sent * 100
 }
 
 // ─── Loss Config ───
@@ -120,6 +122,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
   const [miChallanNo, setMiChallanNo] = useState("")
   const [miSearching, setMiSearching] = useState(false)
   const [miFoundRecord, setMiFoundRecord] = useState<any>(null)
+  const [miInwardWarehouse, setMiInwardWarehouse] = useState("")
   const [miLossConfig, setMiLossConfig] = useState<LossConfig | null>(null)
   const [miReceiveCount, setMiReceiveCount] = useState(0)
   const [miItems, setMiItems] = useState<IRItem[]>([])
@@ -128,6 +131,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
   const [miDriverName, setMiDriverName] = useState("")
   const [miRemarks, setMiRemarks] = useState("")
   const [miSubmitting, setMiSubmitting] = useState(false)
+  const [expandedLossRows, setExpandedLossRows] = useState<Set<number>>(new Set())
   const [miPriorIRs, setMiPriorIRs] = useState<Array<{ ir_number: string; challan_no: string; receipt_date: string; receipt_type: string; total_fg_kgs: number; total_waste_kgs: number; total_rejection_kgs: number }>>([])
 
   // ════════════════════════════════════════
@@ -475,6 +479,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
       if (!record) throw new Error("No record found")
 
       setMiFoundRecord(record)
+      setMiInwardWarehouse(record.from_warehouse || "")
       setMiLossConfig(data.loss_config || null)
       setMiReceiveCount(data.receive_count || 0)
       setMiPriorIRs(data.prior_irs || [])
@@ -502,10 +507,12 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
           prev_rejection_kgs: prevRejection,
           fg_kgs: 0,
           waste_kgs: 0,
+          waste_type_desc: "",
           rejection_kgs: 0,
           total_accounted_kgs: totalAccounted,
           unaccounted_kgs: unaccounted,
-          loss_pct: sentKgs > 0 ? parseFloat(((unaccounted / sentKgs) * 100).toFixed(2)) : 0,
+          loss_pct: 0,
+          unaccounted_loss_pct: sentKgs > 0 ? parseFloat(((unaccounted / sentKgs) * 100).toFixed(2)) : 0,
         }
       }))
 
@@ -541,6 +548,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
         if (!record) throw new Error("No record found")
 
         setMiFoundRecord(record)
+        setMiInwardWarehouse(record.from_warehouse || "")
         setMiSearchChallan(challanNo)
         setMiLossConfig(data.loss_config || null)
         setMiReceiveCount(data.receive_count || 0)
@@ -565,10 +573,12 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
             prev_rejection_kgs: prevRejection,
             fg_kgs: 0,
             waste_kgs: 0,
+            waste_type_desc: "",
             rejection_kgs: 0,
             total_accounted_kgs: totalAccounted,
             unaccounted_kgs: unaccounted,
-            loss_pct: sentKgs > 0 ? parseFloat(((unaccounted / sentKgs) * 100).toFixed(2)) : 0,
+            loss_pct: 0,
+            unaccounted_loss_pct: sentKgs > 0 ? parseFloat(((unaccounted / sentKgs) * 100).toFixed(2)) : 0,
           }
         }))
         toast({ title: "Record Loaded", description: `${challanNo} loaded — ready for next inward receipt` })
@@ -588,9 +598,14 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
       const totalRejection = updated.prev_rejection_kgs + updated.rejection_kgs
       updated.total_accounted_kgs = parseFloat((totalFg + totalWaste + totalRejection).toFixed(3))
       updated.unaccounted_kgs = parseFloat((updated.sent_kgs - updated.total_accounted_kgs).toFixed(3))
-      updated.loss_pct = updated.sent_kgs > 0 ? parseFloat(((updated.unaccounted_kgs / updated.sent_kgs) * 100).toFixed(2)) : 0
+      updated.loss_pct = updated.sent_kgs > 0 ? parseFloat((((updated.waste_kgs + updated.rejection_kgs) / updated.sent_kgs) * 100).toFixed(2)) : 0
+      updated.unaccounted_loss_pct = updated.sent_kgs > 0 ? parseFloat(((updated.unaccounted_kgs / updated.sent_kgs) * 100).toFixed(2)) : 0
       return updated
     }))
+  }
+
+  const updateIRItemWasteDesc = (idx: number, value: string) => {
+    setMiItems(prev => prev.map((item, i) => i !== idx ? item : { ...item, waste_type_desc: value }))
   }
 
   // Validation
@@ -648,7 +663,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
       vehicle_no: miVehicleNo,
       driver_name: miDriverName,
       remarks: miRemarks,
-      inward_warehouse: miFoundRecord.from_warehouse || "",
+      inward_warehouse: miInwardWarehouse || miFoundRecord.from_warehouse || "",
       cold_company: isColdStorageInward ? aeColdCompany : "",
       cold_inward_date: isColdStorageInward ? aeInwardDate : "",
       loss_config: miLossConfig ? {
@@ -668,6 +683,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
         finished_goods_boxes: 0,
         waste_kgs: item.waste_kgs,
         waste_type: miLossConfig?.loss_component || "",
+        waste_type_desc: item.waste_type_desc || "",
         rejection_kgs: item.rejection_kgs,
         rejection_boxes: 0,
         line_remarks: "",
@@ -708,7 +724,9 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
       setMiSearchChallan("")
       setMiChallanNo("")
       setMiFoundRecord(null)
+      setMiInwardWarehouse("")
       setMiItems([])
+      setExpandedLossRows(new Set())
       setMiLossConfig(null)
       setMiReceiveCount(0)
       setMiPriorIRs([])
@@ -807,11 +825,14 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
   }
   const totalAccountedKgs = totals.prev_fg + totals.prev_waste + totals.prev_rejection + totals.this_fg + totals.this_waste + totals.this_rejection
   const isFullyAccounted = totals.sent_kgs > 0 && Math.abs(totals.sent_kgs - totalAccountedKgs) < 0.01
-  const overallLossPct = totals.sent_kgs > 0 ? (totals.unaccounted / totals.sent_kgs) * 100 : 0
+  const overallLossPct = totals.sent_kgs > 0 ? ((totals.this_waste + totals.this_rejection) / totals.sent_kgs) * 100 : 0
+  const overallUnaccountedLossPct = totals.sent_kgs > 0 ? (totals.unaccounted / totals.sent_kgs) * 100 : 0
+  const isWithinFinalTolerance = totals.sent_kgs > 0 && overallUnaccountedLossPct > 0.01 && overallUnaccountedLossPct <= 0.5
+  const canSubmitFinal = isFullyAccounted || isWithinFinalTolerance
   const toleranceStatus = getLossToleranceStatus()
 
   // Cold storage detection
-  const isColdStorageInward = (miFoundRecord?.from_warehouse || "").toLowerCase().includes("cold")
+  const isColdStorageInward = miInwardWarehouse.toLowerCase().includes("cold")
 
   // Process type display helpers
   const processType = miFoundRecord?.sub_category || ""
@@ -1120,8 +1141,23 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                       <span className="font-medium">{processType || "-"}</span>
                     </div>
                     <div className="bg-teal-50 border border-teal-200 rounded-lg p-2.5">
-                      <span className="text-teal-600 block">Material-In Warehouse</span>
-                      <span className="font-semibold text-teal-900">{miFoundRecord.from_warehouse || "-"}</span>
+                      <span className="text-teal-600 block mb-1">Material-In Warehouse</span>
+                      <Select value={miInwardWarehouse} onValueChange={setMiInwardWarehouse}>
+                        <SelectTrigger className="h-7 text-xs bg-white border-teal-300 text-teal-900 font-semibold">
+                          <SelectValue placeholder="Select warehouse" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="W202">W202</SelectItem>
+                          <SelectItem value="A185">A185</SelectItem>
+                          <SelectItem value="A101">A101</SelectItem>
+                          <SelectItem value="A68">A68</SelectItem>
+                          <SelectItem value="F53">F53</SelectItem>
+                          <SelectItem value="Savla D-39">Savla D-39</SelectItem>
+                          <SelectItem value="Savla D-514">Savla D-514</SelectItem>
+                          <SelectItem value="Rishi">Rishi</SelectItem>
+                          <SelectItem value="Supreme">Supreme</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div className="bg-gray-50 rounded-lg p-2.5">
                       <span className="text-gray-500 block">Status</span>
@@ -1265,6 +1301,10 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                                   onChange={(e) => updateIRItem(idx, 'waste_kgs', Number(e.target.value) || 0)}
                                   onWheel={(e) => e.currentTarget.blur()}
                                   className="h-7 w-24 text-xs text-right inline-block border-orange-200 focus:border-orange-400" />
+                                <Input type="text" value={item.waste_type_desc}
+                                  onChange={(e) => updateIRItemWasteDesc(idx, e.target.value)}
+                                  placeholder="material type"
+                                  className="mt-1 h-6 w-24 text-[10px] text-left inline-block border-orange-100 focus:border-orange-300 placeholder:text-orange-300" />
                               </td>
                             )}
                             {/* Rejection */}
@@ -1283,14 +1323,33 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                             </td>
                             {/* Loss % */}
                             <td className="px-3 py-2 text-right">
-                              <Badge variant="outline" className={`text-[10px] font-semibold ${
-                                item.loss_pct > 10 ? 'bg-red-50 text-red-700 border-red-200' :
-                                item.loss_pct > 5 ? 'bg-amber-50 text-amber-700 border-amber-200' :
-                                item.loss_pct >= 0 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                                'bg-red-100 text-red-800 border-red-300'
-                              }`}>
-                                {item.loss_pct.toFixed(1)}%
-                              </Badge>
+                              <div className="flex items-center justify-end gap-1">
+                                <Badge variant="outline" className={`text-[10px] font-semibold ${
+                                  item.loss_pct > 10 ? 'bg-red-50 text-red-700 border-red-200' :
+                                  item.loss_pct > 5 ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                                  item.loss_pct >= 0 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                                  'bg-red-100 text-red-800 border-red-300'
+                                }`}>
+                                  {item.loss_pct.toFixed(1)}%
+                                </Badge>
+                                <button type="button"
+                                  onClick={() => setExpandedLossRows(prev => {
+                                    const next = new Set(prev)
+                                    next.has(idx) ? next.delete(idx) : next.add(idx)
+                                    return next
+                                  })}
+                                  className="text-[10px] text-gray-400 hover:text-gray-600 border border-gray-200 rounded px-1 leading-4">
+                                  {expandedLossRows.has(idx) ? '−' : '+'}
+                                </button>
+                              </div>
+                              {expandedLossRows.has(idx) && (
+                                <div className="mt-1 text-[10px] text-right space-y-0.5">
+                                  <div className="text-orange-600">W+R: <span className="font-semibold">{item.loss_pct.toFixed(1)}%</span></div>
+                                  <div className={item.unaccounted_loss_pct > 0 ? 'text-red-500' : 'text-gray-400'}>
+                                    Unacctd: <span className="font-semibold">{item.unaccounted_loss_pct.toFixed(1)}%</span>
+                                  </div>
+                                </div>
+                              )}
                             </td>
                           </tr>
                         ))}
@@ -1305,7 +1364,12 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                           <td className="px-3 py-2.5 text-right text-gray-700">{(totals.sent_kgs - totals.unaccounted).toFixed(2)}</td>
                           <td className="px-3 py-2.5 text-right text-red-600">{totals.unaccounted.toFixed(2)}</td>
                           <td className="px-3 py-2.5 text-right">
-                            <Badge variant="outline" className="text-[10px] font-bold bg-gray-200 text-gray-800 border-gray-400">{overallLossPct.toFixed(1)}%</Badge>
+                            <div className="flex flex-col items-end gap-0.5">
+                              <Badge variant="outline" className="text-[10px] font-bold bg-gray-200 text-gray-800 border-gray-400">{overallLossPct.toFixed(1)}%</Badge>
+                              {overallUnaccountedLossPct !== 0 && (
+                                <span className="text-[9px] text-red-500">+{overallUnaccountedLossPct.toFixed(1)}% unacctd</span>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       </tfoot>
@@ -1319,7 +1383,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
             {toleranceStatus && miItems.some(i => i.fg_kgs > 0 || i.waste_kgs > 0 || i.rejection_kgs > 0) && (
               <div className={`flex items-center gap-2 p-3 rounded-lg border text-xs font-medium ${toleranceStatus.color}`}>
                 {toleranceStatus.status === "normal" ? <CheckCircle className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
-                <span>Loss Tolerance: {overallLossPct.toFixed(1)}% — {toleranceStatus.label}</span>
+                <span>Loss Tolerance: {overallUnaccountedLossPct.toFixed(1)}% unaccounted — {toleranceStatus.label}</span>
                 {miLossConfig && <span className="ml-auto text-[10px] opacity-75">Expected: {miLossConfig.min_loss_pct}% – {miLossConfig.max_loss_pct}%</span>}
               </div>
             )}
@@ -1730,7 +1794,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
           {miItems.length > 0 && (
             <div className="flex items-center justify-between gap-3 pt-2">
               <Button type="button" variant="outline" onClick={() => {
-                setMiFoundRecord(null); setMiItems([]); setMiSearchChallan(""); setMiChallanNo(""); setMiLossConfig(null); setMiReceiveCount(0); setMiPriorIRs([])
+                setMiFoundRecord(null); setMiInwardWarehouse(""); setMiItems([]); setExpandedLossRows(new Set()); setMiSearchChallan(""); setMiChallanNo(""); setMiLossConfig(null); setMiReceiveCount(0); setMiPriorIRs([])
               }} className="h-10 px-5 text-sm">Clear</Button>
               <div className="flex items-center gap-3">
                 <Button type="button" disabled={miSubmitting}
@@ -1740,16 +1804,21 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                     <><Inbox className="h-4 w-4 mr-2" />Submit Partial</>}
                 </Button>
                 <div className="flex flex-col items-end gap-1">
-                  <Button type="button" disabled={miSubmitting || !isFullyAccounted}
+                  <Button type="button" disabled={miSubmitting || !canSubmitFinal}
                     onClick={(e) => handleSubmitMaterialIn(e as any, "final")}
                     className="h-10 px-5 text-sm shadow-sm bg-amber-600 hover:bg-amber-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                    title={!isFullyAccounted ? `Dispatched (${totals.sent_kgs.toFixed(2)} kg) ≠ Accounted (${totalAccountedKgs.toFixed(2)} kg)` : ''}>
+                    title={!canSubmitFinal ? `Unaccounted ${overallUnaccountedLossPct.toFixed(2)}% exceeds 0.5% tolerance` : isWithinFinalTolerance ? `Within tolerance — ${overallUnaccountedLossPct.toFixed(2)}% unaccounted` : ''}>
                     {miSubmitting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Submitting...</> :
                       <><AlertTriangle className="h-4 w-4 mr-2" />Submit Final</>}
                   </Button>
-                  {!isFullyAccounted && miItems.length > 0 && (
+                  {isWithinFinalTolerance && (
                     <span className="text-[10px] text-amber-600 font-medium">
-                      Dispatched: {totals.sent_kgs.toFixed(2)} kg | Accounted: {totalAccountedKgs.toFixed(2)} kg
+                      Within tolerance — {overallUnaccountedLossPct.toFixed(2)}% unaccounted
+                    </span>
+                  )}
+                  {!canSubmitFinal && miItems.length > 0 && (
+                    <span className="text-[10px] text-red-500 font-medium">
+                      {overallUnaccountedLossPct.toFixed(2)}% unaccounted &gt; 0.5% limit
                     </span>
                   )}
                 </div>

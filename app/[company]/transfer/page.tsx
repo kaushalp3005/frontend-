@@ -39,7 +39,6 @@ function ChallanHoverCard({
   lines,
   fetchLines,
   meta,
-  fetchMeta,
 }: {
   challanNo: string
   from?: string
@@ -53,7 +52,7 @@ function ChallanHoverCard({
   const [fetched, setFetched] = useState<HoverLine[] | null>(null)
   const [fetchedMeta, setFetchedMeta] = useState<HoverMeta[] | null>(null)
   const [loading, setLoading] = useState(false)
-  const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
+  const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number; maxHeight: number }>({ left: 0, maxHeight: 380 })
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const triggerRef = useRef<HTMLSpanElement>(null)
 
@@ -64,9 +63,9 @@ function ChallanHoverCard({
     if (!triggerRef.current) return
     const rect = triggerRef.current.getBoundingClientRect()
     const CARD_WIDTH = 304
-    const CARD_MAX_HEIGHT = 380
-    const MARGIN = 12
-    const GAP = 10
+    const CARD_MAX_HEIGHT = 360
+    const MARGIN = 8
+    const GAP = 6
     const vw = window.innerWidth
     const vh = window.innerHeight
 
@@ -75,20 +74,17 @@ function ChallanHoverCard({
     if (left + CARD_WIDTH > vw - MARGIN) left = Math.max(MARGIN, vw - CARD_WIDTH - MARGIN)
     if (left < MARGIN) left = MARGIN
 
-    // Vertical: prefer ABOVE. If not enough room above, place below.
     const spaceAbove = rect.top - MARGIN
     const spaceBelow = vh - rect.bottom - MARGIN
-    let top: number
-    if (spaceAbove >= 160 || spaceAbove >= spaceBelow) {
-      // place above — card's bottom aligns GAP above trigger's top
-      const cardHeight = Math.min(CARD_MAX_HEIGHT, spaceAbove - GAP)
-      top = rect.top - GAP - cardHeight
-      if (top < MARGIN) top = MARGIN
+
+    if (spaceAbove >= 120 || spaceAbove >= spaceBelow) {
+      // Anchor bottom of card just above the trigger — card hugs the challan no.
+      const maxHeight = Math.min(CARD_MAX_HEIGHT, spaceAbove - GAP)
+      setPos({ bottom: vh - rect.top + GAP, left, maxHeight })
     } else {
-      top = rect.bottom + GAP
-      if (top + CARD_MAX_HEIGHT > vh - MARGIN) top = Math.max(MARGIN, vh - CARD_MAX_HEIGHT - MARGIN)
+      // Place below
+      setPos({ top: rect.bottom + GAP, left, maxHeight: Math.min(CARD_MAX_HEIGHT, spaceBelow - GAP) })
     }
-    setPos({ top, left })
   }, [])
 
   const open = useCallback(async () => {
@@ -135,10 +131,10 @@ function ChallanHoverCard({
           onMouseLeave={scheduleClose}
           style={{
             position: "fixed",
-            top: pos.top,
+            ...(pos.bottom !== undefined ? { bottom: pos.bottom } : { top: pos.top }),
             left: pos.left,
             width: 304,
-            maxHeight: 380,
+            maxHeight: pos.maxHeight,
             background: "linear-gradient(135deg, #eff6ff 0%, #ffffff 45%, #faf5ff 100%)",
             boxShadow: "0 20px 40px -10px rgba(79, 70, 229, 0.22), 0 8px 16px -4px rgba(236, 72, 153, 0.14), 0 0 0 1px rgba(147, 197, 253, 0.45)",
           }}
@@ -147,8 +143,12 @@ function ChallanHoverCard({
           {(from || to) && (
             <div className="flex items-center gap-1.5 text-xs">
               <span className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md font-medium max-w-[110px] truncate">{from || '—'}</span>
-              <ArrowRight className="h-3 w-3 text-gray-400 shrink-0" />
-              <span className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md font-medium max-w-[110px] truncate">{to || from || '—'}</span>
+              {to && to !== from && (
+                <>
+                  <ArrowRight className="h-3 w-3 text-gray-400 shrink-0" />
+                  <span className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md font-medium max-w-[110px] truncate">{to}</span>
+                </>
+              )}
             </div>
           )}
 
@@ -926,7 +926,7 @@ export default function TransferPage({ params }: TransferPageProps) {
                             challanNo={t.challan_no}
                             from={getDisplayWarehouseName(t.from_warehouse)}
                             to={getDisplayWarehouseName(t.to_warehouse)}
-                            reason={t.status}
+                            reason={t.remark || t.reason_code || undefined}
                             fetchLines={async () => {
                               const { accessToken } = useAuthStore.getState()
                               const url = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/interunit/transfers/${t.id}`
@@ -1013,7 +1013,7 @@ export default function TransferPage({ params }: TransferPageProps) {
                               challanNo={t.challan_no}
                               from={getDisplayWarehouseName(t.from_warehouse)}
                               to={getDisplayWarehouseName(t.to_warehouse)}
-                              reason={t.status}
+                              reason={t.remark || t.reason_code || undefined}
                               fetchLines={async () => {
                                 const { accessToken } = useAuthStore.getState()
                                 const url = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/interunit/transfers/${t.id}`
@@ -1412,6 +1412,7 @@ export default function TransferPage({ params }: TransferPageProps) {
                           <ChallanHoverCard
                             challanNo={t.challan_no}
                             from={t.from_warehouse}
+                            to={t.lines?.find((l: any) => l.new_storage_location)?.new_storage_location || undefined}
                             reason={t.reason_code || t.remark}
                             lines={t.lines?.map((l: any) => ({ name: l.item_description, qty: l.quantity, lotFrom: String(l.old_lot_number), lotTo: String(l.new_lot_number) }))}
                           />
@@ -1489,6 +1490,7 @@ export default function TransferPage({ params }: TransferPageProps) {
                             <ChallanHoverCard
                               challanNo={t.challan_no}
                               from={t.from_warehouse}
+                              to={t.lines?.find((l: any) => l.new_storage_location)?.new_storage_location || undefined}
                               reason={t.reason_code || t.remark}
                               lines={t.lines?.map((l: any) => ({ name: l.item_description, qty: l.quantity, lotFrom: String(l.old_lot_number), lotTo: String(l.new_lot_number) }))}
                             />
@@ -1582,7 +1584,7 @@ export default function TransferPage({ params }: TransferPageProps) {
                             challanNo={t.challan_no || t.transfer_no}
                             from={getDisplayWarehouseName(t.from_warehouse || t.from_site)}
                             to={getDisplayWarehouseName(t.to_warehouse || t.to_site)}
-                            reason={t.status}
+                            reason={t.remark || t.reason_code || undefined}
                             fetchLines={async () => {
                               const { accessToken } = useAuthStore.getState()
                               const url = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/interunit/transfers/${t.id}`
