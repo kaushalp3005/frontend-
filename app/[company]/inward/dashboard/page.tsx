@@ -26,7 +26,7 @@ import {
 import { coldStorageDashboardApi } from "@/lib/api/coldStorageDashboardApi"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import { usePersistedState, setSerializers } from "@/lib/hooks/usePersistedState"
-import { getDisplayWarehouseName } from "@/lib/constants/warehouses"
+import { getDisplayWarehouseName, isColdWarehouse } from "@/lib/constants/warehouses"
 
 interface Props { params: { company: string } }
 
@@ -491,15 +491,33 @@ export default function InwardDashboard({ params }: Props) {
                 </div>
               </div>
 
-              {/* Warehouse */}
-              {cascadedOpts.warehouses.length > 0 && (
+              {/* Warehouse — regular only */}
+              {cascadedOpts.warehouses.filter(w => !isColdWarehouse(w.name)).length > 0 && (
                 <div className="flex flex-wrap items-center gap-2.5 px-5 py-3.5 border-b">
                   <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 w-[70px] flex-shrink-0">Warehouse</span>
                   <div className="flex flex-wrap gap-2">
-                    {cascadedOpts.warehouses.map(w => (
+                    {cascadedOpts.warehouses.filter(w => !isColdWarehouse(w.name)).map(w => (
                       <button key={w.name} onClick={() => setSelWarehouses(chipToggle(selWarehouses, w.name))}
                         className={cn("text-sm font-medium px-4 py-2 rounded-lg border-2 transition-all",
                           selWarehouses.has(w.name) ? "bg-blue-600 text-white border-blue-600 shadow-sm" : "bg-white dark:bg-slate-800 hover:bg-blue-50 dark:hover:bg-blue-950/30 border-slate-200 dark:border-slate-600 hover:border-blue-300")}>
+                        {getDisplayWarehouseName(w.name)} <span className="text-xs opacity-70 ml-0.5">({w.count})</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Cold Storage — Savla D-39 / Savla D-514 / Rishi / Supreme (all inward types) */}
+              {cascadedOpts.warehouses.filter(w => isColdWarehouse(w.name)).length > 0 && (
+                <div className="flex flex-wrap items-center gap-2.5 px-5 py-3.5 border-b bg-cyan-50/40 dark:bg-cyan-950/20">
+                  <span className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-cyan-600 dark:text-cyan-400 w-[70px] flex-shrink-0">
+                    <Snowflake className="w-3.5 h-3.5" />Cold
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    {cascadedOpts.warehouses.filter(w => isColdWarehouse(w.name)).map(w => (
+                      <button key={w.name} onClick={() => setSelWarehouses(chipToggle(selWarehouses, w.name))}
+                        className={cn("text-sm font-medium px-4 py-2 rounded-lg border-2 transition-all",
+                          selWarehouses.has(w.name) ? "bg-cyan-600 text-white border-cyan-600 shadow-sm" : "bg-white dark:bg-slate-800 hover:bg-cyan-50 dark:hover:bg-cyan-950/30 border-slate-200 dark:border-slate-600 hover:border-cyan-300")}>
                         {getDisplayWarehouseName(w.name)} <span className="text-xs opacity-70 ml-0.5">({w.count})</span>
                       </button>
                     ))}

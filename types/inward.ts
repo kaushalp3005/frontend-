@@ -655,12 +655,10 @@ class InwardApiService {
     return handleResponse<InwardListResponse>(response)
   }
 
-  // ── 4a. GET /inward/warehouses ────────────────────────
+  // ── 4a. GET /inward/{company}/warehouses ─────────────────
   // Returns distinct warehouse values seen across inward + bulk entry tables.
   async getWarehouseList(company: Company): Promise<string[]> {
-    const sp = new URLSearchParams()
-    sp.append("company", company)
-    const response = await fetch(`${API_BASE}/inward/warehouses?${sp.toString()}`, {
+    const response = await fetch(`${API_BASE}/inward/${company}/warehouses`, {
       method: "GET",
       headers: getAuthHeaders(),
     })

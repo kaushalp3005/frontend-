@@ -299,7 +299,16 @@ export default function InwardListPage({ params }: InwardListPageProps) {
   useEffect(() => {
     let cancelled = false
     inwardApiService.getWarehouseList(company)
-      .then(list => { if (!cancelled) setServerWarehouses(list) })
+      .then(list => {
+        if (!cancelled) {
+          // Normalize raw DB values (e.g. "old_savla" → "Savla D-39") and deduplicate
+          const seen = new Set<string>()
+          const normalized = list
+            .map(normalizeWarehouseName)
+            .filter(code => code && !seen.has(code) && seen.add(code) as unknown as boolean)
+          setServerWarehouses(normalized)
+        }
+      })
       .catch(err => { console.warn("getWarehouseList failed; using hardcoded fallback:", err) })
     return () => { cancelled = true }
   }, [company])

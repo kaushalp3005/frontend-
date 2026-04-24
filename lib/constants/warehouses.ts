@@ -67,7 +67,7 @@ export const WAREHOUSES: Record<string, WarehouseConfig> = {
  * CANONICAL CODES stored here match the backend DB values — do not rename
  * without coordinating the DB migration. For user-facing display, use
  * getDisplayWarehouseName() which maps canonical codes to the preferred
- * display form (Savla-D39 / Savla-D514 / Rishi Cold / Supreme Cold).
+ * display form (Savla D-39 / Savla D-514 / Rishi / Supreme Cold).
  */
 export const WAREHOUSE_ALIASES: Record<string, string> = {
   // Savla D-39 aliases (canonical code stays "Savla D-39")
@@ -112,9 +112,9 @@ export const WAREHOUSE_ALIASES: Record<string, string> = {
  * filter equality) keeps using the canonical code.
  */
 export const WAREHOUSE_DISPLAY_NAMES: Record<string, string> = {
-  "Savla D-39": "Savla-D39",
-  "Savla D-514": "Savla-D514",
-  "Rishi": "Rishi Cold",
+  "Savla D-39": "Savla D-39",
+  "Savla D-514": "Savla D-514",
+  "Rishi": "Rishi",
   "Supreme": "Supreme Cold",
 }
 
@@ -180,7 +180,8 @@ export const normalizeWarehouseName = (raw: string | null | undefined): string =
   if (!raw) return ""
   const trimmed = String(raw).trim()
   if (!trimmed) return ""
-  const lowerKey = trimmed.toLowerCase()
+  // Normalize underscores to spaces so DB values like "old_savla" match aliases
+  const lowerKey = trimmed.toLowerCase().replace(/_/g, " ")
   // First check aliases
   if (WAREHOUSE_ALIASES[lowerKey]) return WAREHOUSE_ALIASES[lowerKey]
   // Then check direct match (case-insensitive) against canonical codes
