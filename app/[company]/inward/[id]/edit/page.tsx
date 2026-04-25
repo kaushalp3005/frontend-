@@ -123,6 +123,8 @@ export default function EditInwardPage({ params }: EditInwardPageProps) {
             material_type: a.material_type,
             item_category: a.item_category,
             sub_category: a.sub_category,
+            unit_rate: a.unit_rate,
+            total_amount: a.total_amount,
           }))
         )
 
@@ -195,6 +197,8 @@ export default function EditInwardPage({ params }: EditInwardPageProps) {
           material_type: a.material_type,
           item_category: a.item_category,
           sub_category: a.sub_category,
+          unit_rate: a.unit_rate,
+          total_amount: a.total_amount,
         })),
         boxes: (() => {
           // Keep existing boxes, add a default box for any new article without boxes
