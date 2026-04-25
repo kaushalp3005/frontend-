@@ -274,6 +274,18 @@ export default function ApprovePage({ params }: ApprovePageProps) {
       )
     }
 
+    // Recompute total_amount when unit_rate changes: total = po_weight × unit_rate
+    if (field === "unit_rate") {
+      const poWeight = articleForms[idx]?.po_weight ?? 0
+      const rate = parseFloat(value) || 0
+      if (poWeight > 0 && rate > 0) {
+        const total = Math.round(poWeight * rate * 100) / 100
+        setArticleForms((prev) =>
+          prev.map((a, i) => (i === idx ? { ...a, total_amount: String(total) } : a))
+        )
+      }
+    }
+
     // Recalculate box net_weight when carton_weight changes: net = gross - carton
     if (field === "carton_weight") {
       const carton = parseFloat(value) || 0
@@ -1059,7 +1071,12 @@ export default function ApprovePage({ params }: ApprovePageProps) {
                   </div>
                   <div className="space-y-1">
                     <Label className="text-[11px]">Unit Rate</Label>
-                    <Input type="number" value={article.unit_rate} readOnly className="h-8 text-xs bg-muted" />
+                    <Input
+                      type="number"
+                      value={article.unit_rate}
+                      onChange={(e) => updateArticle(idx, "unit_rate", e.target.value)}
+                      className="h-8 text-xs"
+                    />
                   </div>
                   <div className="space-y-1">
                     <Label className="text-[11px]">Total Amount</Label>
