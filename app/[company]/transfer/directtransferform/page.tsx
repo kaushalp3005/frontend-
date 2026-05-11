@@ -203,10 +203,9 @@ function ItemDescriptionDropdown({
       // Update item_description immediately
       updateArticle(articleId, "item_description", selectedOption.label)
 
-      // Auto-fill unit_pack_size from categorial_inv uom
-      if (selectedOption.uom != null) {
-        updateArticle(articleId, "unit_pack_size", Number(selectedOption.uom))
-      }
+      // Auto-fill unit_pack_size from categorial_inv uom — always set (even null → 0)
+      // so switching items never leaves a stale value from the previously selected item.
+      updateArticle(articleId, "unit_pack_size", selectedOption.uom != null ? Number(selectedOption.uom) : 0)
 
       // Reset SKU ID while fetching
       updateArticle(articleId, "sku_id", null)
@@ -1158,7 +1157,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
 
     if (article.material_type === 'FG' || article.material_type === 'RM') {
       // FG/RM: (unit_pack_size × pack_size) × quantity → Kg
-      const packageSize = Number(article.unit_pack_size) || 1
+      const packageSize = Number(article.unit_pack_size) || 0
       const result = (packageSize * packSize) * quantity
       return parseFloat(result.toFixed(3))
     } else {
@@ -1322,6 +1321,18 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       toast({
         title: "Limit Exceeded",
         description: `No. of boxes (${qty}) exceeds available stock (${article.cs_max_boxes})`,
+        variant: "destructive",
+      })
+      return
+    }
+
+    // FG/RM without unit pack size silently calculates wrong net weight — block here
+    if ((article.material_type === 'FG' || article.material_type === 'RM') &&
+        article.cs_max_boxes === null &&
+        (!article.unit_pack_size || article.unit_pack_size <= 0)) {
+      toast({
+        title: "Unit Pack Size Required",
+        description: `${article.item_description} is ${article.material_type} — set Unit Pack Size/Count before adding (auto-fill missing for this item).`,
         variant: "destructive",
       })
       return
