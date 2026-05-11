@@ -61,6 +61,10 @@ export default function TransferInPage({ params }: TransferInPageProps) {
   // ── Editable line weights (keyed by line index) ──
   const [lineWeights, setLineWeights] = useState<Record<number, { net_weight: string; total_weight: string }>>({})
 
+  // ── Scanned QR data per line index — used to save & display the actual scanned trans/box IDs
+  //    when the line<->box mapping in lineBoxDataMap is incomplete (e.g. mismatched line/box counts).
+  const [scannedLineData, setScannedLineData] = useState<Record<number, { box_id: string; transaction_no: string }>>({})
+
   const updateLineWeight = (index: number, field: "net_weight" | "total_weight", value: string) => {
     setLineWeights(prev => ({
       ...prev,
@@ -74,40 +78,71 @@ export default function TransferInPage({ params }: TransferInPageProps) {
     return ci?.lot_no?.trim() || null
   }
 
-  // ── Derived state ──
-  const boxes = transferData?.boxes || []
-  // Filter out lines that already have corresponding scanned boxes
-  const rawLines = transferData?.lines || []
-  const boxLineIds = new Set((transferData?.boxes || []).map((b: any) => b.transfer_line_id).filter(Boolean))
-  // If boxes count covers all lines, show lines only (Article Entries has richer features: Print QR, editable weights)
-  // Otherwise, filter out lines that already have a matching box by transfer_line_id
-  const allLinesCoveredByBoxes = boxes.length > 0 && boxes.length >= rawLines.length
-  const lines = allLinesCoveredByBoxes
-    ? rawLines
-    : rawLines.filter((l: any) => !boxLineIds.has(l.id))
-  const totalBoxes = boxes.length
-  const totalLines = lines.length
-  const hasBatchData = lines.some((l: any) => l.batch_number)
-  // When boxes cover all lines, only Article Entries section is shown (boxes section hidden)
-  // So total count should only include lines, not both
-  const totalItems = allLinesCoveredByBoxes ? totalLines : totalBoxes + totalLines
-  const matchedBoxes = boxes.filter((b: any) => boxesMatchMap[b.id]).length
-  const matchedLines = lines.filter((_: any, i: number) => linesMatchMap[i]).length
-  const issuedLines = lines.filter((_: any, i: number) => linesIssueMap[i]).length
-  const resolvedLines = matchedLines + issuedLines
-  const totalMatched = allLinesCoveredByBoxes ? resolvedLines : matchedBoxes + resolvedLines
-  const allMatched = totalItems > 0 && totalMatched === totalItems
-
   // ── Authorized users for acknowledge / print QR / issue actions ──
   const AUTHORIZED_ACKNOWLEDGE_USERS = ["yash@candorfoods.in", "b.hrithik@candorfoods.in", "sunil.jasoria@candorfoods.in"]
   const isAuthorizedUser = AUTHORIZED_ACKNOWLEDGE_USERS.includes(user?.email?.toLowerCase() || "")
 
-  // ── Cold storage check ──
+  // ── Cold storage check (moved above `lines` so cold-storage branch can swap source) ──
   const COLD_STORAGE_WAREHOUSES = ["Cold Storage", "Rishi", "Savla D-39", "Savla D-514", "Supreme"]
   const fromWarehouse = transferData?.from_warehouse || transferData?.from_site || ""
   const toWarehouse = transferData?.to_warehouse || transferData?.to_site || ""
   const isColdStorageFrom = COLD_STORAGE_WAREHOUSES.some(w => w.toLowerCase() === fromWarehouse.toLowerCase())
   const isColdStorageTransfer = COLD_STORAGE_WAREHOUSES.some(w => w.toLowerCase() === toWarehouse.toLowerCase())
+
+  // ── Derived state ──
+  const boxes = transferData?.boxes || []
+  const rawLines = transferData?.lines || []
+
+  // For cold-storage transfers, render Article Entries directly from the boxes table —
+  // each box already has box_id + transaction_no populated, while transfer_lines does not.
+  // Memoized so its reference is stable across renders (prevents downstream effect loops).
+  const linesFromBoxes = useMemo(() => {
+    const _boxes = transferData?.boxes || []
+    if (!isColdStorageFrom || _boxes.length === 0) return null
+    return _boxes.map((b: any) => ({
+      id: b.id,
+      _source: "box",
+      _box_origin: b,
+      item_description: b.article || "",
+      item_desc_raw: b.article || "",
+      box_id: b.box_id || "",
+      box_number: b.box_number,
+      transaction_no: b.transaction_no || "",
+      lot_number: b.lot_number || "",
+      batch_number: b.batch_number || "",
+      net_weight: b.net_weight,
+      total_weight: b.gross_weight,
+      quantity: "1",
+      qty: 1,
+      uom: "BOX",
+      pack_size: "1",
+      unit_pack_size: "1",
+    }))
+  }, [transferData, isColdStorageFrom])
+
+  // If boxes count covers all lines, show lines only (Article Entries has richer features: Print QR, editable weights)
+  // Otherwise, filter out lines that already have a matching box by transfer_line_id
+  const allLinesCoveredByBoxes = boxes.length > 0 && boxes.length >= rawLines.length
+  // Memoized so `lines` ref is stable — downstream effects with `lines` in deps must not re-fire every render.
+  const lines = useMemo(() => {
+    if (linesFromBoxes) return linesFromBoxes
+    if (allLinesCoveredByBoxes) return rawLines
+    const _boxLineIds = new Set((transferData?.boxes || []).map((b: any) => b.transfer_line_id).filter(Boolean))
+    return rawLines.filter((l: any) => !_boxLineIds.has(l.id))
+  }, [transferData, linesFromBoxes, allLinesCoveredByBoxes])
+  const totalBoxes = boxes.length
+  const totalLines = lines.length
+  const hasBatchData = lines.some((l: any) => l.batch_number)
+  // When lines come from boxes (cold storage) OR boxes cover all lines, only Article Entries
+  // is shown — total count should only include lines, not boxes-section duplicates.
+  const linesAreBoxes = linesFromBoxes !== null
+  const totalItems = (linesAreBoxes || allLinesCoveredByBoxes) ? totalLines : totalBoxes + totalLines
+  const matchedBoxes = boxes.filter((b: any) => boxesMatchMap[b.id]).length
+  const matchedLines = lines.filter((_: any, i: number) => linesMatchMap[i]).length
+  const issuedLines = lines.filter((_: any, i: number) => linesIssueMap[i]).length
+  const resolvedLines = matchedLines + issuedLines
+  const totalMatched = (linesAreBoxes || allLinesCoveredByBoxes) ? resolvedLines : matchedBoxes + resolvedLines
+  const allMatched = totalItems > 0 && totalMatched === totalItems
 
   // ── Map line IDs to box data (for transaction_no / box_id from cold storage) ──
   const lineBoxDataMap = useMemo(() => {
@@ -536,7 +571,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
   }
 
   // ── Line handlers ──
-  const handleAcknowledgeLine = async (lineIndex: number) => {
+  const handleAcknowledgeLine = async (lineIndex: number, scannedRef?: { box_id?: string; transaction_no?: string }) => {
     const line = lines[lineIndex]
     const headerId = await ensurePendingHeader()
     if (!headerId) return
@@ -544,13 +579,14 @@ export default function TransferInPage({ params }: TransferInPageProps) {
     try {
       const w = lineWeights[lineIndex] || {}
       const boxRef = lineBoxDataMap[line.id] || {}
+      const scanned = scannedRef || scannedLineData[lineIndex] || {}
       const articleName = line.item_desc_raw || line.item_description || ""
       await InterunitApiService.acknowledgeBox(headerId, {
-        box_id: line.box_id || boxRef.box_id || `ART-${lineIndex + 1}`,
+        box_id: scanned.box_id || line.box_id || boxRef.box_id || `ART-${lineIndex + 1}`,
         article: articleName,
         batch_number: line.batch_number || null,
         lot_number: getColdLotNo(articleName) || line.lot_number || null,
-        transaction_no: line.transaction_no || boxRef.transaction_no || null,
+        transaction_no: scanned.transaction_no || line.transaction_no || boxRef.transaction_no || null,
         net_weight: w.net_weight ? Number(w.net_weight) : (line.net_weight ? Number(line.net_weight) : null),
         gross_weight: w.total_weight ? Number(w.total_weight) : (line.total_weight ? Number(line.total_weight) : null),
         is_matched: true,
@@ -851,9 +887,10 @@ export default function TransferInPage({ params }: TransferInPageProps) {
     if (matchedBox) {
       const article = matchedBox.article || "Unknown"
 
-      // When boxes cover all lines, the UI shows lines (not boxes).
-      // So we must acknowledge the corresponding LINE for the count to update.
-      if (allLinesCoveredByBoxes) {
+      // When boxes cover all lines, OR lines are synthesized from boxes (cold storage),
+      // the UI shows lines (not boxes). So we must acknowledge the corresponding LINE
+      // for the count to update.
+      if (linesAreBoxes || allLinesCoveredByBoxes) {
         // Find the line that corresponds to this box via lineBoxDataMap
         let lineIdx = lines.findIndex((l: any) => {
           const boxRef = lineBoxDataMap[l.id] || {}
@@ -875,7 +912,12 @@ export default function TransferInPage({ params }: TransferInPageProps) {
             setScanResult({ type: "already", message: `Already Acknowledged — ${article} | Box ID: ${scannedBoxId || "N/A"} | Transaction: ${scannedTransactionNo || "N/A"}` })
             return
           }
-          await handleAcknowledgeLine(lineIdx)
+          const scanRef = {
+            box_id: String(matchedBox.box_id || scannedBoxId || ""),
+            transaction_no: String(matchedBox.transaction_no || scannedTransactionNo || ""),
+          }
+          setScannedLineData(prev => ({ ...prev, [lineIdx]: scanRef }))
+          await handleAcknowledgeLine(lineIdx, scanRef)
           setScanResult({ type: "match", message: `Matched — ${article} | Box ID: ${scannedBoxId || "N/A"} | Transaction: ${scannedTransactionNo || "N/A"}` })
           return
         }
@@ -906,7 +948,9 @@ export default function TransferInPage({ params }: TransferInPageProps) {
         setScanResult({ type: "already", message: `Already Acknowledged — ${articleName} | Box ID: ${scannedBoxId || "N/A"} | Transaction: ${scannedTransactionNo || "N/A"}` })
         return
       }
-      await handleAcknowledgeLine(matchedLineIndex)
+      const scanRef = { box_id: scannedBoxId, transaction_no: scannedTransactionNo }
+      setScannedLineData(prev => ({ ...prev, [matchedLineIndex]: scanRef }))
+      await handleAcknowledgeLine(matchedLineIndex, scanRef)
       setScanResult({ type: "match", message: `Matched — ${articleName} | Box ID: ${scannedBoxId || "N/A"} | Transaction: ${scannedTransactionNo || "N/A"}` })
       return
     }
@@ -1755,134 +1799,6 @@ export default function TransferInPage({ params }: TransferInPageProps) {
             </CardHeader>
             <CardContent className="p-0">
 
-              {/* ──── BOXES SECTION ──── (hidden when all lines are covered by boxes to avoid duplicates) */}
-              {totalBoxes > 0 && !allLinesCoveredByBoxes && (
-                <div className="border-b-2 border-gray-200">
-                  <div className="flex items-center justify-between px-3 sm:px-4 py-2.5 bg-blue-50/60">
-                    <div className="flex items-center gap-2">
-                      <Package className="h-4 w-4 text-blue-600" />
-                      <span className="text-xs sm:text-sm font-semibold text-blue-800">Scanned Boxes ({totalBoxes})</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Badge variant="outline" className={`text-xs ${matchedBoxes === totalBoxes ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-700 border-amber-200"}`}>
-                        {matchedBoxes}/{totalBoxes}
-                      </Badge>
-                      {matchedBoxes < totalBoxes && isAuthorizedUser && (
-                        <Button variant="ghost" size="sm" onClick={handleAcknowledgeAllBoxes} className="text-xs text-teal-600 hover:text-teal-800 h-7 px-2">
-                          <CheckCheck className="h-3 w-3 mr-1" /> All
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Desktop column header for boxes */}
-                  <div className="hidden md:block">
-                    <div className="flex items-center gap-4 px-4 py-2 bg-blue-50/40 border-b text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-                      <span className="w-14">#</span>
-                      <span className="w-20">Box</span>
-                      <span className="w-32">Batch / Lot</span>
-                      <span className="w-36">Transaction No</span>
-                      <span className="w-24">Net Wt</span>
-                      <span className="w-24">Gross Wt</span>
-                      <span className="ml-auto w-28 text-right">Action</span>
-                    </div>
-                  </div>
-
-                  {Object.entries(groupedBoxes).map(([articleName, artBoxes]) => {
-                    const artMatched = artBoxes.filter((b: any) => boxesMatchMap[b.id]).length
-                    const artTotal = artBoxes.length
-                    const allArtMatched = artMatched === artTotal
-
-                    return (
-                      <div key={articleName} className="border-b last:border-b-0">
-                        {/* Article group header */}
-                        <div className="flex items-center justify-between px-3 sm:px-4 py-2.5 bg-gray-50/80">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <div className="h-7 w-7 rounded-lg bg-violet-100 flex items-center justify-center shrink-0">
-                              <Package className="h-3.5 w-3.5 text-violet-600" />
-                            </div>
-                            <div className="min-w-0">
-                              <p className="text-xs sm:text-sm font-semibold text-gray-800 truncate">{articleName}</p>
-                              <p className="text-[11px] text-muted-foreground">{artTotal} box{artTotal !== 1 ? "es" : ""}</p>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            <Badge variant="outline" className={`text-xs ${allArtMatched ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-700 border-amber-200"}`}>
-                              {artMatched}/{artTotal}
-                            </Badge>
-                            {!allArtMatched && isAuthorizedUser && (
-                              <Button variant="ghost" size="sm" onClick={() => handleAcknowledgeArticleBoxes(articleName)} className="text-xs text-teal-600 hover:text-teal-800 h-7 px-2">
-                                <CheckCheck className="h-3 w-3 mr-1" /> All
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Box rows */}
-                        <div className="divide-y divide-gray-100">
-                          {artBoxes.map((b: any) => {
-                            const matched = !!boxesMatchMap[b.id]
-                            return (
-                              <div key={b.id} className={`px-3 sm:px-4 py-2.5 ${matched ? "bg-emerald-50/40" : ""}`}>
-                                {/* Mobile */}
-                                <div className="md:hidden space-y-1.5">
-                                  <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-2">
-                                      <span className="inline-flex items-center gap-0.5 text-[11px] font-mono bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">
-                                        <Hash className="h-2.5 w-2.5" />{b.id}
-                                      </span>
-                                      <span className="text-sm font-semibold text-gray-900">Box {b.box_number}</span>
-                                    </div>
-                                    {matched ? (
-                                      <Badge variant="outline" className="text-[11px] bg-emerald-50 text-emerald-700 border-emerald-200 cursor-pointer hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors" onClick={() => handleUnacknowledgeBox(b.id)}>
-                                        <CheckCircle className="h-3 w-3 mr-0.5" /> Done
-                                      </Badge>
-                                    ) : (
-                                      <Button variant="outline" size="sm" onClick={() => handleAcknowledgeBox(b.id)} className="text-xs text-teal-700 border-teal-200 hover:bg-teal-50 h-7 px-2.5">
-                                        Acknowledge
-                                      </Button>
-                                    )}
-                                  </div>
-                                  <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs pl-1">
-                                    <div><span className="text-gray-500">Batch:</span> <span className="font-mono font-medium">{b.batch_number || b.lot_number || "-"}</span></div>
-                                    <div><span className="text-gray-500">Trans:</span> <span className="font-mono font-medium">{b.transaction_no || "-"}</span></div>
-                                    <div><span className="text-gray-500">Net:</span> <span className="font-medium">{b.net_weight || "-"}g</span></div>
-                                    <div><span className="text-gray-500">Gross:</span> <span className="font-medium">{b.gross_weight || "-"}g</span></div>
-                                  </div>
-                                </div>
-
-                                {/* Desktop */}
-                                <div className="hidden md:flex items-center gap-4">
-                                  <span className="inline-flex items-center gap-1 text-xs font-mono bg-gray-100 text-gray-600 px-2 py-1 rounded w-14 shrink-0">
-                                    <Hash className="h-3 w-3" />{b.id}
-                                  </span>
-                                  <span className="text-sm font-semibold text-gray-900 w-20 shrink-0">Box {b.box_number}</span>
-                                  <span className="text-sm font-mono text-gray-600 w-32 truncate">{b.batch_number || b.lot_number || "-"}</span>
-                                  <span className="text-sm font-mono text-gray-600 w-36 truncate">{b.transaction_no || "-"}</span>
-                                  <span className="text-sm text-gray-600 w-24">{b.net_weight || "-"}g</span>
-                                  <span className="text-sm text-gray-600 w-24">{b.gross_weight || "-"}g</span>
-                                  <div className="ml-auto shrink-0">
-                                    {matched ? (
-                                      <Badge variant="outline" className="text-xs bg-emerald-50 text-emerald-700 border-emerald-200 cursor-pointer hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors" onClick={() => handleUnacknowledgeBox(b.id)}>
-                                        <CheckCircle className="h-3.5 w-3.5 mr-1" /> Acknowledged
-                                      </Badge>
-                                    ) : (
-                                      <Button variant="outline" size="sm" onClick={() => handleAcknowledgeBox(b.id)} className="text-xs text-teal-700 border-teal-200 hover:bg-teal-50 h-7 px-3">
-                                        Acknowledge
-                                      </Button>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-
               {/* ──── SCAN BOX TO ACKNOWLEDGE ──── */}
               {totalLines > 0 && !allMatched && (
                 <div className="px-3 sm:px-4 py-3 border-b border-gray-200 bg-blue-50/40">
@@ -2086,8 +2002,8 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                                     {line.item_desc_raw || line.item_description || `Article ${index + 1}`}
                                   </span>
                                 </td>
-                                {isColdStorageFrom && <td className="py-2.5 px-3 text-gray-600 font-mono text-xs truncate">{line.transaction_no || boxData.transaction_no || "-"}</td>}
-                                {isColdStorageFrom && <td className="py-2.5 px-3 text-gray-600 font-mono text-xs truncate">{line.box_id || boxData.box_id || "-"}</td>}
+                                {isColdStorageFrom && <td className="py-2.5 px-3 text-gray-600 font-mono text-xs truncate">{scannedLineData[index]?.transaction_no || line.transaction_no || boxData.transaction_no || "-"}</td>}
+                                {isColdStorageFrom && <td className="py-2.5 px-3 text-gray-600 font-mono text-xs truncate">{scannedLineData[index]?.box_id || line.box_id || boxData.box_id || "-"}</td>}
                                 <td className={`py-2.5 px-3 text-right tabular-nums ${issued && linesIssueMap[index]?.case_pack ? "text-red-600 font-bold" : "text-gray-600"}`}>{(issued && linesIssueMap[index]?.case_pack) || line.pack_size || "-"}</td>
                                 <td className="py-2.5 px-3 text-right font-bold text-blue-600 tabular-nums whitespace-nowrap">{line.qty || line.quantity || 0} <span className="text-gray-400 font-normal text-xs">{line.uom || ""}</span></td>
                                 <td className={`py-2.5 px-3 text-right tabular-nums ${issued && linesIssueMap[index]?.net_weight ? "text-red-600 font-bold" : "text-gray-600"}`}>{(issued && linesIssueMap[index]?.net_weight) || lineWeights[index]?.net_weight || line.net_weight || "-"}</td>
@@ -2221,8 +2137,8 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                               <div><span className="text-gray-500">Qty:</span> <span className="font-bold text-blue-600">{line.qty || line.quantity || 0}</span> <span className="text-gray-500">{line.uom || ""}</span></div>
                               <div><span className="text-gray-500">Net Wt:</span> <span className={`font-medium ${issued && linesIssueMap[index]?.net_weight ? "text-red-600 font-bold" : ""}`}>{(issued && linesIssueMap[index]?.net_weight) || lineWeights[index]?.net_weight || line.net_weight || "-"}</span></div>
                               <div><span className="text-gray-500">Total Wt:</span> <span className={`font-medium ${issued && linesIssueMap[index]?.total_weight ? "text-red-600 font-bold" : ""}`}>{(issued && linesIssueMap[index]?.total_weight) || lineWeights[index]?.total_weight || line.total_weight || "-"}</span></div>
-                              {isColdStorageFrom && <div><span className="text-gray-500">Trans No:</span> <span className="font-mono font-medium">{line.transaction_no || mobileBoxData.transaction_no || "-"}</span></div>}
-                              {isColdStorageFrom && <div><span className="text-gray-500">Box ID:</span> <span className="font-mono font-medium">{line.box_id || mobileBoxData.box_id || "-"}</span></div>}
+                              {isColdStorageFrom && <div><span className="text-gray-500">Trans No:</span> <span className="font-mono font-medium">{scannedLineData[index]?.transaction_no || line.transaction_no || mobileBoxData.transaction_no || "-"}</span></div>}
+                              {isColdStorageFrom && <div><span className="text-gray-500">Box ID:</span> <span className="font-mono font-medium">{scannedLineData[index]?.box_id || line.box_id || mobileBoxData.box_id || "-"}</span></div>}
                               {line.batch_number && <div><span className="text-gray-500">Batch:</span> <span className="font-mono font-medium">{line.batch_number}</span></div>}
                               {(coldStorageItems[line.item_desc_raw || line.item_description || ""]?.lot_no?.trim() || line.lot_number) && <div><span className="text-gray-500">Lot:</span> <span className="font-mono font-medium">{coldStorageItems[line.item_desc_raw || line.item_description || ""]?.lot_no?.trim() || line.lot_number}</span></div>}
                             </div>
@@ -2310,14 +2226,14 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
                   <div className="text-center p-2.5 bg-blue-50/60 rounded-lg">
                     <p className="text-[11px] text-gray-500 uppercase tracking-wider font-medium">Total Boxes</p>
-                    <p className="text-lg sm:text-xl font-bold text-blue-700">{allLinesCoveredByBoxes ? totalLines : totalBoxes + totalLines}</p>
+                    <p className="text-lg sm:text-xl font-bold text-blue-700">{(linesAreBoxes || allLinesCoveredByBoxes) ? totalLines : totalBoxes + totalLines}</p>
                   </div>
                   <div className="text-center p-2.5 bg-indigo-50/60 rounded-lg">
                     <p className="text-[11px] text-gray-500 uppercase tracking-wider font-medium">Total Qty</p>
                     <p className="text-lg sm:text-xl font-bold text-indigo-700">
                       {(() => {
                         const qty = lines.reduce((sum: number, l: any) => sum + (parseFloat(l.qty || l.quantity || 0)), 0)
-                          + (allLinesCoveredByBoxes ? 0 : boxes.length)
+                          + ((linesAreBoxes || allLinesCoveredByBoxes) ? 0 : boxes.length)
                         return qty
                       })()}
                     </p>
