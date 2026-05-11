@@ -104,7 +104,7 @@ function ItemDescriptionDropdown({
     const opt = hook.options.find(o => o.value === selectedValue)
     if (opt && updateArticle) {
       updateArticle(articleId, "item_description", opt.label)
-      if (opt.uom != null) updateArticle(articleId, "unit_pack_size", Number(opt.uom))
+      updateArticle(articleId, "unit_pack_size", opt.uom != null ? Number(opt.uom) : 0)
       updateArticle(articleId, "sku_id", null)
       try {
         const skuRes = await dropdownApi.fetchSkuId({ company, item_description: opt.label, item_category: categoryId, sub_category: subCategoryId, material_type: materialType })
@@ -444,8 +444,18 @@ export default function MaterialOutPage({ params }: MaterialOutPageProps) {
   ]
 
   const handleVendorSelect = (vendorName: string) => {
+    if (vendorName === "Other") {
+      setVendorIsOther(true)
+      setDispatchTo({
+        name: "", address: "", state: "Maharashtra", city: "", pin_code: "",
+        contact_company: "", contact_mobile: "", email: "", sub_category: "",
+      })
+      setSubCatIsOther(false)
+      return
+    }
     const vendor = vendorList.find(v => v.name === vendorName)
     if (vendor) {
+      setVendorIsOther(false)
       setDispatchTo({ ...vendor })
       setSubCatIsOther(!subCatOptions.includes(vendor.sub_category) && vendor.sub_category !== "")
     } else {
@@ -480,6 +490,7 @@ export default function MaterialOutPage({ params }: MaterialOutPageProps) {
   const [submitting, setSubmitting] = useState(false)
   const subCatOptions = ["De seeding", "Dicing", "Cracking", "Stuffing", "Vacuum Packaging", "Slicing"]
   const [subCatIsOther, setSubCatIsOther] = useState(false)
+  const [vendorIsOther, setVendorIsOther] = useState(false)
 
   // Item quick search
   const [itemSearchQuery, setItemSearchQuery] = useState<Record<string, string>>({})
@@ -714,6 +725,12 @@ export default function MaterialOutPage({ params }: MaterialOutPageProps) {
           setSubCatIsOther(true)
         }
 
+        // Set vendor "other" check — show free-text input if loaded name is custom
+        const loadedVendorName = dt.name || data.to_party || ""
+        if (loadedVendorName && !vendorList.some(v => v.name === loadedVendorName)) {
+          setVendorIsOther(true)
+        }
+
         // Set transfer info
         setTransferInfo(prev => ({
           ...prev,
@@ -779,7 +796,7 @@ export default function MaterialOutPage({ params }: MaterialOutPageProps) {
     const qty = Number(article.quantity_units) || 1
     const packSize = Number(article.packaging_type) || 0
     if (article.material_type === 'FG') {
-      const unitPackSize = Number(article.unit_pack_size) || 1
+      const unitPackSize = Number(article.unit_pack_size) || 0
       return parseFloat(((unitPackSize * packSize) * qty).toFixed(3))
     }
     return parseFloat((qty * packSize).toFixed(2))
@@ -916,6 +933,12 @@ export default function MaterialOutPage({ params }: MaterialOutPageProps) {
     // Cold storage stock limit validation
     if (article.cs_max_boxes !== null && qty > article.cs_max_boxes) {
       toast({ title: "Limit Exceeded", description: `No. of boxes (${qty}) exceeds available stock (${article.cs_max_boxes})`, variant: "destructive" })
+      return
+    }
+
+    // FG without unit pack size silently calculates wrong net weight — block here
+    if (article.material_type === 'FG' && article.cs_max_boxes === null && (!article.unit_pack_size || article.unit_pack_size <= 0)) {
+      toast({ title: "Unit Pack Size Required", description: `${article.item_description} is FG — set Unit Pack Size/Count before adding (auto-fill missing for this item).`, variant: "destructive" })
       return
     }
 
@@ -1327,7 +1350,7 @@ export default function MaterialOutPage({ params }: MaterialOutPageProps) {
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="space-y-1">
                   <Label className="text-xs font-medium text-gray-600">Name *</Label>
-                  <Select value={dispatchTo.name} onValueChange={handleVendorSelect}>
+                  <Select value={vendorIsOther ? "Other" : dispatchTo.name} onValueChange={handleVendorSelect}>
                     <SelectTrigger className="h-9 bg-white border-gray-200">
                       <SelectValue placeholder="Select vendor" />
                     </SelectTrigger>
@@ -1335,8 +1358,14 @@ export default function MaterialOutPage({ params }: MaterialOutPageProps) {
                       {vendorList.map(v => (
                         <SelectItem key={v.name} value={v.name}>{v.name}</SelectItem>
                       ))}
+                      <SelectItem value="Other">Other</SelectItem>
                     </SelectContent>
                   </Select>
+                  {vendorIsOther && (
+                    <Input value={dispatchTo.name}
+                      onChange={(e) => setDispatchTo(prev => ({ ...prev, name: e.target.value }))}
+                      className="h-9 bg-white border-gray-200 mt-1.5" placeholder="Enter vendor name" />
+                  )}
                 </div>
                 <div className="space-y-1 sm:col-span-2">
                   <Label className="text-xs font-medium text-gray-600">Address</Label>
