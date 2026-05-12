@@ -1438,6 +1438,65 @@ export default function TransferInPage({ params }: TransferInPageProps) {
       }
 
       if (pendingHeaderId) {
+        // ── Safety re-sync: re-send every locally-acknowledged item before finalize ──
+        // Covers cases where a batch acknowledge silently missed data, or where the user
+        // edited weights / lot numbers AFTER clicking "Acknowledge All".
+        const syncBatch: any[] = []
+
+        lines.forEach((line: any, i: number) => {
+          const isMatched = !!linesMatchMap[i]
+          const issue = linesIssueMap[i]
+          if (!isMatched && !issue) return
+
+          const w = lineWeights[i] || {}
+          const boxRef = lineBoxDataMap[line.id] || {}
+          const articleName = line.item_desc_raw || line.item_description || ""
+          syncBatch.push({
+            box_id: line.box_id || boxRef.box_id || `ART-${i + 1}`,
+            article: articleName,
+            batch_number: line.batch_number || null,
+            lot_number: getColdLotNo(articleName) || line.lot_number || null,
+            transaction_no: line.transaction_no || boxRef.transaction_no || null,
+            net_weight: issue?.net_weight
+              ? Number(issue.net_weight)
+              : (w.net_weight ? Number(w.net_weight) : (line.net_weight ? Number(line.net_weight) : null)),
+            gross_weight: issue?.total_weight
+              ? Number(issue.total_weight)
+              : (w.total_weight ? Number(w.total_weight) : (line.total_weight ? Number(line.total_weight) : null)),
+            is_matched: !issue,
+            issue: issue
+              ? {
+                  remarks: issue.remarks || null,
+                  net_weight: issue.net_weight || null,
+                  total_weight: issue.total_weight || null,
+                  case_pack: issue.case_pack || null,
+                }
+              : null,
+            line_index: i,
+          })
+        })
+
+        boxes.forEach((b: any) => {
+          if (!boxesMatchMap[b.id]) return
+          const articleName = b.article ? String(b.article) : ""
+          const coldLot = coldStorageItems[articleName]?.lot_no?.trim() || null
+          syncBatch.push({
+            box_id: String(b.box_id || b.box_number || b.id || ""),
+            transfer_out_box_id: b.id,
+            article: articleName || null,
+            batch_number: b.batch_number ? String(b.batch_number) : null,
+            lot_number: coldLot || (b.lot_number ? String(b.lot_number) : null),
+            transaction_no: b.transaction_no ? String(b.transaction_no) : null,
+            net_weight: b.net_weight ? Number(b.net_weight) : null,
+            gross_weight: b.gross_weight ? Number(b.gross_weight) : null,
+            is_matched: true,
+          })
+        })
+
+        if (syncBatch.length > 0) {
+          await InterunitApiService.acknowledgeBatch(pendingHeaderId, syncBatch)
+        }
+
         // ── Finalize pending transfer-in (boxes already in DB from real-time acknowledges) ──
         const finalizePayload: any = {
           box_condition: boxCondition,
