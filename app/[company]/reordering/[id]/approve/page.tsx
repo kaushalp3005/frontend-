@@ -23,7 +23,7 @@ import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
 } from "@/components/ui/dropdown-menu"
 import { rtvApi } from "@/lib/api/rtvApiService"
-import type { RTVWithDetails } from "@/types/rtv"
+import { BUSINESS_HEAD_OPTIONS, type BusinessHead, type RTVWithDetails } from "@/types/rtv"
 import type { RTVLineForm } from "@/components/modules/rtv/RTVLineEditor"
 import { PermissionGuard } from "@/components/auth/permission-gate"
 import { useAuthStore } from "@/lib/stores/auth"
@@ -67,6 +67,7 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
   const [challanNo, setChallanNo] = useState("")
   const [dnNo, setDnNo] = useState("")
   const [salesPoc, setSalesPoc] = useState("")
+  const [businessHead, setBusinessHead] = useState<BusinessHead | "">("")
   const [remark, setRemark] = useState("")
   const [vehicleNumber, setVehicleNumber] = useState("")
   const [transporterName, setTransporterName] = useState("")
@@ -111,6 +112,7 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
         setChallanNo(detail.challan_no || "")
         setDnNo(detail.dn_no || "")
         setSalesPoc(detail.sales_poc || "")
+        setBusinessHead((detail.business_head as BusinessHead) || "")
         setRemark(detail.remark || "")
         setVehicleNumber(detail.vehicle_number || "")
         setTransporterName(detail.transporter_name || "")
@@ -543,6 +545,7 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
           challan_no: challanNo || undefined,
           dn_no: dnNo || undefined,
           sales_poc: salesPoc || undefined,
+          business_head: businessHead || undefined,
           remark: remark || undefined,
           vehicle_number: vehicleNumber || undefined,
           transporter_name: transporterName || undefined,
@@ -660,7 +663,7 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
                     <SelectValue placeholder="Select factory" />
                   </SelectTrigger>
                   <SelectContent>
-                    {["W202", "A185", "A68", "A101", "F53", "Savla D-39", "Savla D-514", "Rishi", "Supreme"].map((f) => (
+                    {["W202", "A185", "A68", "A101", "F53", "Savla", "New Savla", "Rishi"].map((f) => (
                       <SelectItem key={f} value={f}>{f}</SelectItem>
                     ))}
                   </SelectContent>
@@ -685,6 +688,23 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
               <div className="space-y-1">
                 <Label className="text-xs">Sales POC</Label>
                 <Input value={salesPoc} onChange={(e) => setSalesPoc(e.target.value)} className="h-9" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Business Head</Label>
+                <Select
+                  value={businessHead || "__none__"}
+                  onValueChange={(v) => setBusinessHead(v === "__none__" ? "" : (v as BusinessHead))}
+                >
+                  <SelectTrigger className="h-9">
+                    <SelectValue placeholder="Select business head" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">—</SelectItem>
+                    {BUSINESS_HEAD_OPTIONS.map((bh) => (
+                      <SelectItem key={bh} value={bh}>{bh}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Vehicle Number</Label>
