@@ -3,6 +3,16 @@
 
 export type RTVStatus = "Pending" | "Approved"
 
+// Backend matches by name, case-insensitive. Empty/null = no business head.
+export type BusinessHead = "Prashant Pal" | "Ajay Bajaj" | "Rakesh Ratra" | "Yash Gawdi"
+
+export const BUSINESS_HEAD_OPTIONS: BusinessHead[] = [
+  "Prashant Pal",
+  "Ajay Bajaj",
+  "Rakesh Ratra",
+  "Yash Gawdi",
+]
+
 // ─── Header ────────────────────────────────────────────────────────
 
 export interface RTVHeader {
@@ -16,6 +26,7 @@ export interface RTVHeader {
   dn_no: string | null
   conversion: string | null
   sales_poc: string | null
+  business_head: BusinessHead | string | null
   remark: string | null
   // Dispatch / logistics fields (backend addition)
   vehicle_number: string | null
@@ -36,6 +47,7 @@ export interface RTVHeaderCreate {
   dn_no?: string
   conversion?: string
   sales_poc?: string
+  business_head?: BusinessHead | string | null
   remark?: string
   vehicle_number?: string
   transporter_name?: string
@@ -51,6 +63,7 @@ export interface RTVHeaderUpdate {
   dn_no?: string
   conversion?: string
   sales_poc?: string
+  business_head?: BusinessHead | string | null
   remark?: string
   vehicle_number?: string
   transporter_name?: string
@@ -160,6 +173,7 @@ export interface RTVListItem {
   rtv_date: string | null
   factory_unit: string
   customer: string
+  business_head: BusinessHead | string | null
   vehicle_number: string | null
   transporter_name: string | null
   driver_name: string | null
@@ -221,6 +235,7 @@ export interface RTVApprovalHeaderFields {
   dn_no?: string
   conversion?: string
   sales_poc?: string
+  business_head?: BusinessHead | string | null
   remark?: string
   vehicle_number?: string
   transporter_name?: string
