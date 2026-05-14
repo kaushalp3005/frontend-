@@ -21,6 +21,7 @@ import { format } from "date-fns"
 import { rtvApi } from "@/lib/api/rtvApiService"
 import type { RTVWithDetails, RTVStatus, RTVBox } from "@/types/rtv"
 import { PermissionGuard } from "@/components/auth/permission-gate"
+import { useAuthStore } from "@/lib/stores/auth"
 import { cn } from "@/lib/utils"
 import QRCode from "qrcode"
 
@@ -57,6 +58,7 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
   const { company, id: rtvIdStr } = params
   const rtvId = parseInt(rtvIdStr, 10)
   const router = useRouter()
+  const { user } = useAuthStore()
 
   const [data, setData] = useState<RTVWithDetails | null>(null)
   const [loading, setLoading] = useState(true)
@@ -89,7 +91,7 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
   const handleDelete = async () => {
     try {
       setDeleting(true)
-      await rtvApi.deleteRTV(company, rtvId)
+      await rtvApi.deleteRTV(company, rtvId, user?.email || undefined)
       router.push(`/${company}/reordering`)
     } catch (err) {
       console.error("Delete failed:", err)
@@ -284,6 +286,7 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
                   <Field label="Challan No" value={data.challan_no} />
                   <Field label="DN No" value={data.dn_no} />
                   <Field label="Sales POC" value={data.sales_poc} />
+                  <Field label="Business Head" value={data.business_head} />
                   <Field label="RTV Date" value={data.rtv_date ? format(new Date(data.rtv_date), "dd MMM yyyy") : null} />
                   <Field label="Vehicle Number" value={data.vehicle_number} />
                   <Field label="Transporter" value={data.transporter_name} />
