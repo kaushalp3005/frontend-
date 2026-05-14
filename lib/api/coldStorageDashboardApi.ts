@@ -113,6 +113,38 @@ export interface AgeingSummaryResponse {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// Types — Ageing Summary (Day-based brackets)
+// ═══════════════════════════════════════════════════════════════════
+
+export interface AgeingDayBrackets {
+  kgs_lt30: number; kgs_30_60: number; kgs_60_90: number; kgs_90_180: number; kgs_gt180: number
+  val_lt30: number; val_30_60: number; val_60_90: number; val_90_180: number; val_gt180: number
+  grand_total_kgs: number; grand_total_value: number
+}
+
+export interface AgeingDayLayer3 extends AgeingDayBrackets {
+  item_mark: string
+}
+
+export interface AgeingDayLayer2 extends AgeingDayBrackets {
+  item_subgroup: string
+  children: AgeingDayLayer3[]
+}
+
+export interface AgeingDayLayer1 extends AgeingDayBrackets {
+  storage_location: string
+  group_name: string
+  children: AgeingDayLayer2[]
+}
+
+export interface AgeingDaySummaryResponse {
+  as_of_date: string
+  company: string
+  data: AgeingDayLayer1[]
+  grand_total: AgeingDayBrackets
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // Types — Lot Details
 // ═══════════════════════════════════════════════════════════════════
 
@@ -303,8 +335,21 @@ export const coldStorageDashboardApi = {
   async getAgeingSummary(company: string, storageLocation?: string): Promise<AgeingSummaryResponse> {
     const sp = new URLSearchParams({ company: company.toLowerCase() })
     if (storageLocation) sp.set("storage_location", storageLocation)
-    const r = await fetch(`${API_URL}/cold-storage/dashboard/ageing-summary?${sp}`, { headers: getAuthHeaders() })
+    const r = await fetch(`${API_URL}/cold-storage/dashboard/ageing-summary?${sp}`, {
+      headers: getAuthHeaders(),
+      cache: "no-store",
+    })
     return handleResponse<AgeingSummaryResponse>(r)
+  },
+
+  async getAgeingSummaryDays(company: string, storageLocation?: string): Promise<AgeingDaySummaryResponse> {
+    const sp = new URLSearchParams({ company: company.toLowerCase() })
+    if (storageLocation) sp.set("storage_location", storageLocation)
+    const r = await fetch(`${API_URL}/cold-storage/dashboard/ageing-summary-days?${sp}`, {
+      headers: getAuthHeaders(),
+      cache: "no-store",
+    })
+    return handleResponse<AgeingDaySummaryResponse>(r)
   },
 
   async getLotDetails(
