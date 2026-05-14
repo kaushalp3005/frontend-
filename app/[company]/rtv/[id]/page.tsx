@@ -112,6 +112,7 @@ export default function RTVDetailPage({ params }: Props) {
                 <Field label="Challan No" value={data.challan_no || "—"} />
                 <Field label="DN No" value={data.dn_no || "—"} />
                 <Field label="Sales POC" value={data.sales_poc || "—"} />
+                <Field label="Business Head" value={data.business_head || "—"} />
                 <Field label="Vehicle Number" value={data.vehicle_number || "—"} />
                 <Field label="Transporter" value={data.transporter_name || "—"} />
                 <Field label="Driver Name" value={data.driver_name || "—"} />
