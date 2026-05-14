@@ -20,6 +20,7 @@ import { format } from "date-fns"
 import { rtvApi } from "@/lib/api/rtvApiService"
 import type { RTVListItem, RTVStatus } from "@/types/rtv"
 import { PermissionGuard } from "@/components/auth/permission-gate"
+import { useAuthStore } from "@/lib/stores/auth"
 import { cn } from "@/lib/utils"
 
 interface RTVListPageProps {
@@ -43,6 +44,7 @@ function StatusBadge({ status }: { status: RTVStatus }) {
 
 export default function RTVListPage({ params }: RTVListPageProps) {
   const { company } = params
+  const { user } = useAuthStore()
 
   const [records, setRecords] = useState<RTVListItem[]>([])
   const [total, setTotal] = useState(0)
@@ -102,7 +104,7 @@ export default function RTVListPage({ params }: RTVListPageProps) {
     if (!deleteTarget) return
     try {
       setDeleting(true)
-      await rtvApi.deleteRTV(company, deleteTarget.id)
+      await rtvApi.deleteRTV(company, deleteTarget.id, user?.email || undefined)
       setDeleteTarget(null)
       fetchData()
     } catch (err) {
@@ -274,6 +276,7 @@ export default function RTVListPage({ params }: RTVListPageProps) {
                         <th className="text-left font-medium px-4 py-2.5">Date</th>
                         <th className="text-left font-medium px-4 py-2.5">Status</th>
                         <th className="text-left font-medium px-4 py-2.5">Customer</th>
+                        <th className="text-left font-medium px-4 py-2.5 hidden lg:table-cell">Business Head</th>
                         <th className="text-left font-medium px-4 py-2.5 hidden lg:table-cell">Factory Unit</th>
                         <th className="text-left font-medium px-4 py-2.5 hidden lg:table-cell">Items</th>
                         <th className="text-left font-medium px-4 py-2.5 hidden lg:table-cell">Total Qty</th>
@@ -289,6 +292,7 @@ export default function RTVListPage({ params }: RTVListPageProps) {
                           </td>
                           <td className="px-4 py-3"><StatusBadge status={item.status} /></td>
                           <td className="px-4 py-3 text-muted-foreground truncate max-w-[200px]">{item.customer || "\u2014"}</td>
+                          <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">{item.business_head || "\u2014"}</td>
                           <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">{item.factory_unit || "\u2014"}</td>
                           <td className="px-4 py-3 hidden lg:table-cell">
                             <Badge variant="secondary" className="text-xs">{item.items_count} items</Badge>
