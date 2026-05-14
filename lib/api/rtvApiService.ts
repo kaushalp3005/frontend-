@@ -134,9 +134,13 @@ export const rtvApi = {
 
   async deleteRTV(
     company: string,
-    rtvId: number
+    rtvId: number,
+    deletedBy?: string
   ): Promise<RTVDeleteResponse> {
-    const response = await fetch(`${API_URL}/rtv/${company}/${rtvId}`, {
+    const params = new URLSearchParams()
+    if (deletedBy) params.set("deleted_by", deletedBy)
+    const qs = params.toString() ? `?${params.toString()}` : ""
+    const response = await fetch(`${API_URL}/rtv/${company}/${rtvId}${qs}`, {
       method: "DELETE",
       headers: getAuthHeaders(),
     })
