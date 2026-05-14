@@ -1634,6 +1634,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                       <Input value={aeExporter} onChange={(e) => setAeExporter(e.target.value)}
                         className="h-9 bg-white border-gray-200 text-xs" placeholder="Exporter" />
                     </div>
+                    {/* Rate / Value fields hidden — not used in current job-work flow.
                     <div className="space-y-1">
                       <Label className="text-xs font-medium text-gray-600">Rate</Label>
                       <Input type="number" step="0.01" min={0} value={aeRate || ""}
@@ -1647,6 +1648,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                         {aeQuantity > 0 && aeRate > 0 ? (aeQuantity * aeRate).toFixed(2) : "—"}
                       </div>
                     </div>
+                    */}
                     <div className="space-y-1">
                       <Label className="text-xs font-medium text-gray-600">Spl. Remarks</Label>
                       <Input value={aeSplRemarks} onChange={(e) => setAeSplRemarks(e.target.value)}
