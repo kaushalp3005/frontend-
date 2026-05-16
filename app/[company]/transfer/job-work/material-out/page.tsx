@@ -1917,25 +1917,31 @@ export default function MaterialOutPage({ params }: MaterialOutPageProps) {
 
       {/* Cold Transfer Summary Popup */}
       <Dialog open={coldTransferPopup.open} onOpenChange={() => {}}>
-        <DialogContent className="max-w-md" onPointerDownOutside={(e) => e.preventDefault()}>
-          <DialogHeader>
+        <DialogContent
+          className="w-[95vw] sm:max-w-2xl max-h-[90vh] flex flex-col p-0 gap-0"
+          onPointerDownOutside={(e) => e.preventDefault()}
+        >
+          <DialogHeader className="px-5 pt-5 pb-3 border-b shrink-0">
             <DialogTitle>Cold Storage - Material Out Summary</DialogTitle>
           </DialogHeader>
-          <div className="relative bg-gray-50 rounded-lg p-4 text-sm whitespace-pre-wrap font-mono leading-relaxed">
+          <div className="relative flex-1 min-h-0 overflow-y-auto px-5 py-4">
             <button
               type="button"
-              className="absolute top-2 right-2 p-1.5 rounded-md hover:bg-gray-200 transition-colors"
+              className="sticky top-0 float-right -mt-1 p-1.5 rounded-md hover:bg-gray-200 transition-colors bg-white/80 backdrop-blur z-10"
               onClick={() => {
                 navigator.clipboard.writeText(coldTransferPopup.message)
                 setPopupCopied(true)
                 setTimeout(() => setPopupCopied(false), 2000)
               }}
+              title="Copy summary"
             >
               {popupCopied ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4 text-gray-500" />}
             </button>
-            {coldTransferPopup.message}
+            <pre className="bg-gray-50 rounded-lg p-4 text-xs sm:text-sm whitespace-pre-wrap break-words font-mono leading-relaxed text-gray-800 m-0">
+{coldTransferPopup.message}
+            </pre>
           </div>
-          <DialogFooter>
+          <DialogFooter className="px-5 py-3 border-t shrink-0 bg-white">
             <Button
               type="button"
               onClick={() => {
