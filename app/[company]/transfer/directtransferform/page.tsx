@@ -270,7 +270,7 @@ function ColdStorageStockSearch({
   onSelect,
   company,
 }: {
-  onSelect: (record: ColdStorageStockRecord) => void
+  onSelect: (record: ColdStorageStockRecord, sourceCompany: string) => void
   company: string
 }) {
   const [coldCompany, setColdCompany] = useState(company.toLowerCase())
@@ -317,7 +317,7 @@ function ColdStorageStockSearch({
   }, [handleSearch])
 
   const handleSelect = (record: ColdStorageStockRecord) => {
-    onSelect(record)
+    onSelect(record, coldCompany)
     setShowResults(false)
     setLotNoSearch("")
     setDescSearch("")
@@ -527,6 +527,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     // Cold storage stock identifiers (not shown in UI)
     cs_box_id: string | null
     cs_transaction_no: string | null
+    cs_company: string | null
     cs_inward_no: string | null
     cs_total_inventory_kgs: number | null
     cs_item_mark: string | null
@@ -560,6 +561,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       cs_box_id: null,
       cs_transaction_no: null,
       cs_inward_no: null,
+      cs_company: null,
       cs_total_inventory_kgs: null,
       cs_item_mark: null,
     },
@@ -1037,6 +1039,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
           cs_box_id: null,
           cs_transaction_no: null,
           cs_inward_no: null,
+          cs_company: null,
           cs_total_inventory_kgs: null,
           cs_item_mark: null,
         })))
@@ -1076,6 +1079,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       cs_box_id: null,
       cs_transaction_no: null,
       cs_inward_no: null,
+      cs_company: null,
       cs_total_inventory_kgs: null,
       cs_item_mark: null,
     }
@@ -1101,8 +1105,11 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
   // Check if from warehouse is a cold storage
   const isColdStorageFrom = COLD_STORAGE_WAREHOUSES.includes(formData.fromWarehouse)
 
-  // Auto-fill article fields from cold storage stock record
-  const handleSelectColdStorageStock = (articleId: string, record: ColdStorageStockRecord) => {
+  // Auto-fill article fields from cold storage stock record.
+  // sourceCompany is the company-switcher value from ColdStorageStockSearch — needed
+  // because users on /cfpl/ can search /cdpl/ stocks (and vice versa); pickBoxes must
+  // be called against the same table the record came from.
+  const handleSelectColdStorageStock = (articleId: string, record: ColdStorageStockRecord, sourceCompany: string) => {
     console.log('🔍 [DEBUG] Cold Storage Stock Selected:', {
       box_id: record.box_id,
       transaction_no: record.transaction_no,
@@ -1130,6 +1137,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
           cs_box_id: record.box_id || null,
           cs_transaction_no: record.transaction_no || null,
           cs_inward_no: record.inward_no || null,
+          cs_company: sourceCompany,
           cs_total_inventory_kgs: (record.net_qty_on_cartons != null && record.weight_kg != null) ? record.net_qty_on_cartons * record.weight_kg : null,
           cs_item_mark: record.item_mark || null,
         }
@@ -1364,9 +1372,20 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         })
         return
       }
+      // Use the company from the in-article cold-storage search switcher — NEVER
+      // the URL/navbar company. The user can search cdpl stocks from a cfpl URL
+      // (and vice versa); pickBoxes must query the same table the record came from.
+      if (!article.cs_company) {
+        toast({
+          title: "Cannot Add Cold Storage Item",
+          description: "Re-select the stock record from the search — the source company is unknown.",
+          variant: "destructive",
+        })
+        return
+      }
       try {
         const pickResult = await ColdStorageApiService.pickBoxes({
-          company,
+          company: article.cs_company,
           item_description: article.item_description,
           lot_no: article.lot_number,
           inward_no: article.cs_inward_no,
@@ -1485,6 +1504,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       cs_box_id: null,
       cs_transaction_no: null,
       cs_inward_no: null,
+      cs_company: null,
       cs_total_inventory_kgs: null,
       cs_item_mark: null,
     }
@@ -2789,6 +2809,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                             cs_box_id: null,
                             cs_transaction_no: null,
                             cs_inward_no: null,
+                            cs_company: null,
                             cs_total_inventory_kgs: null,
                             cs_item_mark: null,
                             packaging_type: 0,
@@ -2828,7 +2849,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                   {/* Cold Storage Stock Search */}
                   <div className="bg-blue-50/50 border border-blue-200 rounded-lg p-3">
                     <ColdStorageStockSearch
-                      onSelect={(record) => handleSelectColdStorageStock(article.id, record)}
+                      onSelect={(record, sourceCompany) => handleSelectColdStorageStock(article.id, record, sourceCompany)}
                       company={company}
                     />
                   </div>

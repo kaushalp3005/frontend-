@@ -315,6 +315,7 @@ interface Article {
   cs_box_id: string | null
   cs_transaction_no: string | null
   cs_inward_no: string | null
+  cs_company: string | null
   cold_company: string
   item_mark: string
 }
@@ -375,6 +376,7 @@ const emptyArticle = (): Article => ({
   cs_box_id: null,
   cs_transaction_no: null,
   cs_inward_no: null,
+  cs_company: null,
   cold_company: "",
   item_mark: "",
 })
@@ -912,6 +914,7 @@ export default function MaterialOutPage({ params }: MaterialOutPageProps) {
         cs_box_id: record.box_id || null,
         cs_transaction_no: record.transaction_no || null,
         cs_inward_no: record.inward_no || null,
+        cs_company: coldCompany || null,
         cold_company: coldUnitName,
         item_mark: record.item_mark || "",
       }
@@ -951,13 +954,15 @@ export default function MaterialOutPage({ params }: MaterialOutPageProps) {
     // TRANS202605131331-style inventory loss (700 boxes collapsed to 1 on receive).
     let pickedBoxes: { id: number; box_id: string; transaction_no: string; weight_kg: number; [key: string]: any }[] = []
     if (isColdStorageArticle) {
-      if (!article.item_description || !article.lot_number || !article.cs_inward_no) {
-        toast({ title: "Cannot Add Cold Storage Item", description: "Re-select the stock record from the search — inward/lot details are missing, so per-box IDs cannot be fetched.", variant: "destructive" })
+      if (!article.item_description || !article.lot_number || !article.cs_inward_no || !article.cs_company) {
+        toast({ title: "Cannot Add Cold Storage Item", description: "Re-select the stock record from the search — inward/lot/company details are missing, so per-box IDs cannot be fetched.", variant: "destructive" })
         return
       }
       try {
+        // Use cs_company (from the in-article cold-storage search switcher), NOT the
+        // URL/navbar company — users can search across companies from the dropdown.
         const pickResult = await ColdStorageApiService.pickBoxes({
-          company,
+          company: article.cs_company,
           item_description: article.item_description,
           lot_no: article.lot_number,
           inward_no: article.cs_inward_no,
