@@ -946,9 +946,15 @@ export default function MaterialOutPage({ params }: MaterialOutPageProps) {
     const netWeightPerBox = isColdStorageArticle ? (article.net_weight || 0) : (qty > 0 ? (article.net_weight || 0) / qty : 0)
     const totalWeightPerBox = isColdStorageArticle ? (article.net_weight || 0) : (qty > 0 ? ((article.total_weight > 0 ? article.total_weight : article.net_weight || 0) / qty) : 0)
 
-    // For cold storage articles, pick individual box_ids in FIFO order from backend
+    // For cold storage articles, pick individual box_ids in FIFO order from backend.
+    // Each physical box MUST get a unique box_id — duplicating cs_box_id caused
+    // TRANS202605131331-style inventory loss (700 boxes collapsed to 1 on receive).
     let pickedBoxes: { id: number; box_id: string; transaction_no: string; weight_kg: number; [key: string]: any }[] = []
-    if (isColdStorageArticle && article.item_description && article.lot_number && article.cs_inward_no) {
+    if (isColdStorageArticle) {
+      if (!article.item_description || !article.lot_number || !article.cs_inward_no) {
+        toast({ title: "Cannot Add Cold Storage Item", description: "Re-select the stock record from the search — inward/lot details are missing, so per-box IDs cannot be fetched.", variant: "destructive" })
+        return
+      }
       try {
         const pickResult = await ColdStorageApiService.pickBoxes({
           company,
@@ -960,6 +966,17 @@ export default function MaterialOutPage({ params }: MaterialOutPageProps) {
         pickedBoxes = pickResult.boxes
       } catch (err) {
         console.error("pickBoxes API Failed:", err)
+        toast({ title: "Could Not Pick Boxes", description: `FIFO box-pick failed for ${article.item_description}. Each box needs a unique ID — refusing to add. (${(err as Error)?.message || 'network/server error'})`, variant: "destructive" })
+        return
+      }
+      if (pickedBoxes.length < qty) {
+        toast({ title: "Insufficient Boxes Available", description: `Requested ${qty} boxes of ${article.item_description}, but only ${pickedBoxes.length} unique boxes exist in cold storage for lot ${article.lot_number} / inward ${article.cs_inward_no}.`, variant: "destructive" })
+        return
+      }
+      const uniqueIds = new Set(pickedBoxes.map(b => b.box_id))
+      if (uniqueIds.size !== pickedBoxes.length) {
+        toast({ title: "Duplicate Box IDs From Source", description: `Cold storage returned duplicate box_id values for ${article.item_description}. Aborting — please report this to support.`, variant: "destructive" })
+        return
       }
     }
 
@@ -968,11 +985,12 @@ export default function MaterialOutPage({ params }: MaterialOutPageProps) {
     if (isColdStorageArticle) {
       // Create one entry per box for cold storage items
       for (let i = 0; i < qty; i++) {
+        // pickedBox is guaranteed present and unique by the guards above
         const pickedBox = pickedBoxes[i]
-        const boxId = pickedBox?.box_id || article.cs_box_id || ''
-        const transactionNo = pickedBox?.transaction_no || article.cs_transaction_no || ''
-        const boxNetWeight = pickedBox ? pickedBox.weight_kg : netWeightPerBox
-        const boxTotalWeight = pickedBox ? pickedBox.weight_kg : totalWeightPerBox
+        const boxId = pickedBox.box_id
+        const transactionNo = pickedBox.transaction_no
+        const boxNetWeight = pickedBox.weight_kg
+        const boxTotalWeight = pickedBox.weight_kg
 
         // Build cold storage snapshot from picked box data for restore on delete
         const snapshot = pickedBox ? {

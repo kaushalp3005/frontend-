@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { getDisplayWarehouseName } from "@/lib/constants/warehouses"
+import { getDisplayWarehouseName, isColdWarehouse } from "@/lib/constants/warehouses"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -831,8 +831,18 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
   const canSubmitFinal = isFullyAccounted || isWithinFinalTolerance
   const toleranceStatus = getLossToleranceStatus()
 
-  // Cold storage detection
-  const isColdStorageInward = miInwardWarehouse.toLowerCase().includes("cold")
+  // Cold storage detection — any warehouse flagged as "cold" in constants
+  // (Savla D-39, Savla D-514, Rishi, Supreme) triggers the Cold Storage Details panel.
+  const isColdStorageInward = isColdWarehouse(miInwardWarehouse)
+
+  // Auto-route cold_company from warehouse: Savla → CFPL, Rishi → CDPL.
+  // User can still override via the Company select inside Cold Storage Details.
+  useEffect(() => {
+    if (!miInwardWarehouse) return
+    const w = miInwardWarehouse.toLowerCase()
+    if (w.includes("savla") || w.includes("d-39") || w.includes("d-514")) setAeColdCompany("cfpl")
+    else if (w.includes("rishi")) setAeColdCompany("cdpl")
+  }, [miInwardWarehouse])
 
   // Process type display helpers
   const processType = miFoundRecord?.sub_category || ""

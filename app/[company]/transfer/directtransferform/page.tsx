@@ -1351,19 +1351,19 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     const netWeightPerBox = isColdStorageArticle ? netWeightKg : (qty > 0 ? netWeightKg / qty : 0)
     const totalWeightPerBox = isColdStorageArticle ? netWeightKg : (qty > 0 ? (totalWeightKg > 0 ? totalWeightKg / qty : netWeightKg / qty) : 0)
 
-    // For cold storage articles, pick individual box_ids in FIFO order from backend
+    // For cold storage articles, pick individual box_ids in FIFO order from backend.
+    // Each physical box MUST get a unique box_id — duplicating cs_box_id across the qty
+    // loop caused TRANS202605131331-style inventory loss (700 boxes collapsed to 1 on receive).
     let pickedBoxes: { id: number; box_id: string; transaction_no: string; weight_kg: number }[] = []
-    if (isColdStorageArticle && article.item_description && article.lot_number && article.cs_inward_no) {
-      console.log('📦 [DEBUG] Calling pickBoxes API:', {
-        company,
-        item_description: article.item_description,
-        lot_no: article.lot_number,
-        inward_no: article.cs_inward_no,
-        qty,
-        cs_box_id_fallback: article.cs_box_id,
-        cs_transaction_no_fallback: article.cs_transaction_no,
-      })
-
+    if (isColdStorageArticle) {
+      if (!article.item_description || !article.lot_number || !article.cs_inward_no) {
+        toast({
+          title: "Cannot Add Cold Storage Item",
+          description: "Re-select the stock record from the search — inward/lot details are missing, so per-box IDs cannot be fetched.",
+          variant: "destructive",
+        })
+        return
+      }
       try {
         const pickResult = await ColdStorageApiService.pickBoxes({
           company,
@@ -1373,19 +1373,31 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
           qty,
         })
         pickedBoxes = pickResult.boxes
-
-        console.log('✅ [DEBUG] pickBoxes API Success:', {
-          boxesReturned: pickedBoxes.length,
-          boxes: pickedBoxes,
-          allHaveBoxId: pickedBoxes.every(b => b.box_id),
-          allHaveTransactionNo: pickedBoxes.every(b => b.transaction_no),
-        })
       } catch (err) {
-        console.error("❌ [DEBUG] pickBoxes API Failed:", err)
-        console.log('⚠️ [DEBUG] Will fallback to:', {
-          cs_box_id: article.cs_box_id,
-          cs_transaction_no: article.cs_transaction_no,
+        console.error("pickBoxes API failed:", err)
+        toast({
+          title: "Could Not Pick Boxes",
+          description: `FIFO box-pick failed for ${article.item_description}. Each box needs a unique ID — refusing to add. (${(err as Error)?.message || 'network/server error'})`,
+          variant: "destructive",
         })
+        return
+      }
+      if (pickedBoxes.length < qty) {
+        toast({
+          title: "Insufficient Boxes Available",
+          description: `Requested ${qty} boxes of ${article.item_description}, but only ${pickedBoxes.length} unique boxes exist in cold storage for lot ${article.lot_number} / inward ${article.cs_inward_no}.`,
+          variant: "destructive",
+        })
+        return
+      }
+      const uniqueIds = new Set(pickedBoxes.map(b => b.box_id))
+      if (uniqueIds.size !== pickedBoxes.length) {
+        toast({
+          title: "Duplicate Box IDs From Source",
+          description: `Cold storage returned duplicate box_id values for ${article.item_description}. Aborting — please report this to support.`,
+          variant: "destructive",
+        })
+        return
       }
     }
 
@@ -1396,25 +1408,17 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       const uniqueId = boxIdCounterRef.current
       boxIdCounterRef.current += 1
 
-      // Use FIFO-picked box_id and transaction_no if available
+      // For cold storage: pickedBox is guaranteed unique by the guards above.
+      // For non-cold-storage: there is no per-box source ID, so sku_id is used as a label.
       const pickedBox = pickedBoxes[i]
-      const boxId = pickedBox?.box_id || article.cs_box_id || (article.sku_id ? String(article.sku_id) : 'N/A')
-      const transactionNo = pickedBox?.transaction_no || article.cs_transaction_no || 'DIRECT'
-      // For cold storage with FIFO picks: use individual weight_kg from each picked box row
-      const boxNetWeight = pickedBox ? pickedBox.weight_kg : netWeightPerBox
-      const boxGrossWeight = pickedBox ? pickedBox.weight_kg : totalWeightPerBox
-
-      console.log(`📦 [DEBUG] Creating Box Entry ${i + 1}/${qty}:`, {
-        boxId,
-        transactionNo,
-        source: pickedBox ? 'FIFO_API' : (article.cs_box_id ? 'FALLBACK_CS' : 'NONE'),
-        pickedBox,
-        fallbackData: {
-          cs_box_id: article.cs_box_id,
-          cs_transaction_no: article.cs_transaction_no,
-        },
-        willBeIncludedInSubmission: transactionNo !== 'DIRECT',
-      })
+      const boxId = isColdStorageArticle
+        ? pickedBox.box_id
+        : (article.sku_id ? String(article.sku_id) : 'N/A')
+      const transactionNo = isColdStorageArticle
+        ? pickedBox.transaction_no
+        : 'DIRECT'
+      const boxNetWeight = isColdStorageArticle ? pickedBox.weight_kg : netWeightPerBox
+      const boxGrossWeight = isColdStorageArticle ? pickedBox.weight_kg : totalWeightPerBox
 
       newEntries.push({
         id: uniqueId,

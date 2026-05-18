@@ -1429,7 +1429,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
             no_of_cartons: item.totalQty || null,
             weight_kg: item.totalWeight || null,
             rate: itemRate || null,
-            value: itemRate > 0 ? item.totalQty * itemRate : null,
+            value: itemRate > 0 ? item.totalWeight * itemRate : null,
             unit: item.uom || null,
             spl_remarks: ci.spl_remarks?.trim() || null,
             box_details: itemLineBoxes,
@@ -1706,7 +1706,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                   {uniqueColdItems.map((item, idx) => {
                     const ci = coldStorageItems[item.name] || { inward_dt: "", vakkal: "", lot_no: "", rate: "", exporter: "", storage_location: toWarehouse, item_mark: "", group_name: "" }
                     const itemRate = parseFloat(ci.rate) || 0
-                    const itemValue = item.totalQty * itemRate
+                    const itemValue = item.totalWeight * itemRate
 
                     return (
                       <div key={item.name} className="p-3 sm:p-4">
@@ -1790,11 +1790,11 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                             <Input type="text" value={ci.exporter} onChange={(e) => updateColdItem(item.name, "exporter", e.target.value)} placeholder="Exporter" className="h-8 text-xs bg-white border-gray-200" />
                           </div>
                           <div className="space-y-1">
-                            <Label className="text-[11px] font-medium text-gray-500">Rate</Label>
+                            <Label className="text-[11px] font-medium text-gray-500">Rate (₹/kg)</Label>
                             <Input type="number" step="any" value={ci.rate} onChange={(e) => updateColdItem(item.name, "rate", e.target.value)} placeholder="0.00" className="h-8 text-xs bg-white border-gray-200" />
                           </div>
                           <div className="space-y-1">
-                            <Label className="text-[11px] font-medium text-gray-500">Value (Qty × Rate)</Label>
+                            <Label className="text-[11px] font-medium text-gray-500">Value (Weight × Rate)</Label>
                             <div className="h-8 flex items-center px-2 bg-gray-50 border border-gray-200 rounded-md text-xs font-semibold text-gray-800">
                               {itemRate > 0 ? itemValue.toFixed(2) : "—"}
                             </div>
