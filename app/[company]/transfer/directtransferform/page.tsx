@@ -1763,6 +1763,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
               box_number: fetchedBox.box_number,
               box_id: fetchedBox.box_id,
               item_mark: fetchedBox.item_mark,
+              count: fetchedBox.count,
             }
           } catch (fetchError: any) {
             console.error('❌ Failed to fetch box by box_id:', fetchError)
@@ -1896,6 +1897,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                 box_number: matchingBox?.box_number || qrData.box_number,
                 box_id: matchingBox?.box_id || qrData.box_id,
                 item_mark: matchingBox?.item_mark || qrData.item_mark,
+                count: matchingBox?.count != null ? matchingBox.count : qrData.count,
               }
             }
           } catch (fetchError) {
@@ -1910,6 +1912,8 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         const materialType = boxData.material_type || ''
         const netWeightRaw = parseFloat(boxData.net_weight || 0)
         const grossWeightRaw = parseFloat(boxData.gross_weight || 0)
+        // PM material: pull Unit Pack Size/Count from boxes_v2.count
+        const pmCount = String(materialType).toUpperCase() === 'PM' && boxData.count != null ? String(boxData.count) : ''
 
         const newBox = {
           id: uniqueId,
@@ -1924,6 +1928,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
           subCategory: boxData.sub_category || 'N/A',
           netWeight: String(netWeightRaw),
           totalWeight: String(grossWeightRaw),
+          packageSize: pmCount,
           batchNumber: boxData.batch_number || 'N/A',
           lotNumber: boxData.lot_number || 'N/A',
           manufacturingDate: boxData.manufacturing_date || 'N/A',
