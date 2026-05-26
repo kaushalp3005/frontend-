@@ -63,6 +63,14 @@ const DATE_PRESETS = [
   { label: "All Time", fn: () => ["", ""] },
 ]
 
+// Case-folding helper — "FARD"/"Fard"/"fard" collapse to "Fard"
+const _titleFold = (s: string | null | undefined): string => {
+  if (!s) return ""
+  const t = String(s).trim()
+  if (!t) return ""
+  return t.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
 // Line-level row (rows are flattened header × lines)
 interface RTVRow {
   id: number; rtv_id: string; rtv_date: string | null; factory_unit: string; customer: string
@@ -74,7 +82,8 @@ interface RTVRow {
 function seedRow(h: RTVListItem): RTVRow {
   return {
     id: h.id, rtv_id: h.rtv_id, rtv_date: h.rtv_date,
-    factory_unit: h.factory_unit || "Unassigned", customer: h.customer || "Unknown",
+    factory_unit: _titleFold(h.factory_unit) || "Unassigned",
+    customer: h.customer || "Unknown",
     status: h.status || "Pending", month_label: monthLabel(h.rtv_date || h.created_ts),
     material_type: "", item_category: "", sub_category: "", item_description: "",
     uom: "", qty: num(h.total_qty), rate: 0, value: 0, net_weight: 0,
@@ -83,10 +92,13 @@ function seedRow(h: RTVListItem): RTVRow {
 function lineToRow(h: RTVListItem, l: RTVLine): RTVRow {
   return {
     id: h.id, rtv_id: h.rtv_id, rtv_date: h.rtv_date,
-    factory_unit: h.factory_unit || "Unassigned", customer: h.customer || "Unknown",
+    factory_unit: _titleFold(h.factory_unit) || "Unassigned",
+    customer: h.customer || "Unknown",
     status: h.status || "Pending", month_label: monthLabel(h.rtv_date || h.created_ts),
-    material_type: l.material_type || "", item_category: l.item_category || "",
-    sub_category: l.sub_category || "", item_description: l.item_description || "",
+    material_type: _titleFold(l.material_type),
+    item_category: _titleFold(l.item_category),
+    sub_category: _titleFold(l.sub_category),
+    item_description: l.item_description || "",
     uom: l.uom || "", qty: num(l.qty), rate: num(l.rate), value: num(l.value),
     net_weight: num(l.net_weight),
   }

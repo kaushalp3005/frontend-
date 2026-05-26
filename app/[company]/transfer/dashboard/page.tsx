@@ -22,7 +22,15 @@ import { useAuthStore } from "@/lib/stores/auth"
 
 const DASHBOARD_ALLOWED_EMAILS = ["yash@candorfoods.in", "b.hrithik@candorfoods.in"]
 import { transferDashboardApi, type TransferRecord, type TransferFilterOptions } from "@/lib/api/transferDashboardApi"
-import { getDisplayWarehouseName } from "@/lib/constants/warehouses"
+import { getDisplayWarehouseName, normalizeWarehouseName } from "@/lib/constants/warehouses"
+
+// Title-case fold for collapsing "FARD"/"Fard"/"fard" duplicates.
+const titleFold = (s: string | null | undefined): string => {
+  if (!s) return ""
+  const t = String(s).trim()
+  if (!t) return ""
+  return t.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
+}
 import { usePersistedState, setSerializers } from "@/lib/hooks/usePersistedState"
 
 interface Props { params: { company: string } }
@@ -142,7 +150,16 @@ export default function TransferDashboard({ params }: Props) {
         transferDashboardApi.getAllData(),
         transferDashboardApi.getFilterOptions(),
       ])
-      setAllRecords(data.records); setFilterOpts(opts)
+      // Canonicalize so case/case+alias duplicates collapse in chips + grouping.
+      const normalized: TransferRecord[] = (data.records || []).map((r) => ({
+        ...r,
+        from_warehouse: normalizeWarehouseName(r.from_warehouse) || r.from_warehouse || "",
+        to_warehouse: normalizeWarehouseName(r.to_warehouse) || r.to_warehouse || "",
+        item_category: titleFold(r.item_category),
+        sub_category: titleFold(r.sub_category),
+        material_type: titleFold(r.material_type),
+      }))
+      setAllRecords(normalized); setFilterOpts(opts)
     } catch (err) { setError(err instanceof Error ? err.message : "Failed to load") }
     finally { setLoading(false) }
   }, [])
@@ -240,7 +257,7 @@ export default function TransferDashboard({ params }: Props) {
     const sumNet = (rs: TransferRecord[]) => rs.reduce((s, r) => s + (r.net_weight || 0), 0)
     const sumGross = (rs: TransferRecord[]) => rs.reduce((s, r) => s + (r.total_weight || 0), 0)
 
-    return Array.from(l1Map.entries()).map(([label, records]) => {
+    const data = Array.from(l1Map.entries()).map(([label, records]) => {
       const tids = new Set(records.map(r => r.transfer_id))
       const net = sumNet(records)
       const gross = sumGross(records)
@@ -256,16 +273,68 @@ export default function TransferDashboard({ params }: Props) {
         const sGross = sumGross(recs)
         const sw = sNet || sGross
         const sb = recs.reduce((s, r) => s + (r.box_count || 0), 0)
-        const l3Map = new Map<string, TransferRecord[]>()
-        for (const r of recs) { const k = r.item_description || "Unknown"; if (!l3Map.has(k)) l3Map.set(k, []); l3Map.get(k)!.push(r) }
-        const items = Array.from(l3Map.entries()).map(([item, irecs]) => {
-          const iNet = sumNet(irecs)
-          const iGross = sumGross(irecs)
-          const iw = iNet || iGross
-          const ib = irecs.reduce((s, r) => s + (r.box_count || 0), 0)
-          return { item_description: item, material_type: irecs[0]?.material_type || "", total_weight: iw, total_net_weight: iNet, total_gross_weight: iGross, total_boxes: ib, tx_count: new Set(irecs.map(r => r.transfer_id)).size, records: irecs }
+
+        // L3 = item_category (new middle layer between L2 and items).
+        // Skipped when L1 or L2 is already item_category to avoid duplication.
+        const categoryAlreadyAtAncestor = groupBy === "item_category" || l2Pick === "item_category"
+        const l3CatMap = new Map<string, TransferRecord[]>()
+        for (const r of recs) {
+          const k = r.item_category || "Uncategorized"
+          if (!l3CatMap.has(k)) l3CatMap.set(k, [])
+          l3CatMap.get(k)!.push(r)
+        }
+
+        // Build category buckets, each with item_description children (the original L3 — now L4)
+        const categoryBuckets = Array.from(l3CatMap.entries()).map(([cat, crecs]) => {
+          const cNet = sumNet(crecs)
+          const cGross = sumGross(crecs)
+          const cw = cNet || cGross
+          const cb = crecs.reduce((s, r) => s + (r.box_count || 0), 0)
+          const itemMap = new Map<string, TransferRecord[]>()
+          for (const r of crecs) {
+            const k = r.item_description || "Unknown"
+            if (!itemMap.has(k)) itemMap.set(k, [])
+            itemMap.get(k)!.push(r)
+          }
+          const items = Array.from(itemMap.entries()).map(([item, irecs]) => {
+            const iNet = sumNet(irecs)
+            const iGross = sumGross(irecs)
+            const iw = iNet || iGross
+            const ib = irecs.reduce((s, r) => s + (r.box_count || 0), 0)
+            return {
+              item_description: item,
+              material_type: irecs[0]?.material_type || "",
+              total_weight: iw, total_net_weight: iNet, total_gross_weight: iGross,
+              total_boxes: ib,
+              tx_count: new Set(irecs.map(r => r.transfer_id)).size,
+              records: irecs,
+            }
+          }).sort((a, b) => b.total_weight - a.total_weight)
+          return {
+            category_label: cat,
+            tx_count: new Set(crecs.map(r => r.transfer_id)).size,
+            total_weight: cw, total_net_weight: cNet, total_gross_weight: cGross,
+            total_boxes: cb,
+            children: items,
+          }
         }).sort((a, b) => b.total_weight - a.total_weight)
-        return { sub_label: sl, tx_count: new Set(recs.map(r => r.transfer_id)).size, total_weight: sw, total_net_weight: sNet, total_gross_weight: sGross, total_boxes: sb, children: items, skipL2: false }
+
+        // If category layer would have only 1 bucket OR is redundant with an ancestor,
+        // skip it and surface item_description rows directly under L2.
+        const skipCategory = categoryAlreadyAtAncestor || categoryBuckets.length <= 1
+        const flatItems = categoryBuckets.flatMap(cb => cb.children)
+
+        return {
+          sub_label: sl,
+          tx_count: new Set(recs.map(r => r.transfer_id)).size,
+          total_weight: sw, total_net_weight: sNet, total_gross_weight: sGross,
+          total_boxes: sb,
+          // categoryBuckets when used (skipCategory=false), else fall back to flat items
+          categories: skipCategory ? [] : categoryBuckets,
+          children: skipCategory ? flatItems : [],
+          skipCategory,
+          skipL2: false,
+        }
       }).sort((a, b) => b.total_weight - a.total_weight)
 
       // If L1 has only 1 L2 child with same label — skip L2, go direct to items
@@ -680,8 +749,14 @@ export default function TransferDashboard({ params }: Props) {
                 <tbody>
                   {summary.map(l1 => {
                     const k1 = l1.group_label; const o1 = expanded.has(k1)
-                    // Items to render — if skipL2, flatten L2's children directly under L1
-                    const itemsForL1 = l1.skipL2 ? l1.children.flatMap(l2 => l2.children) : null
+                    // Items to render — if skipL2, flatten through whichever path each L2 used
+                    const itemsForL1 = l1.skipL2
+                      ? l1.children.flatMap(l2 =>
+                          l2.skipCategory
+                            ? l2.children
+                            : l2.categories.flatMap(cat => cat.children)
+                        )
+                      : null
                     return (<React.Fragment key={k1}>
                       <tr className="border-b cursor-pointer hover:opacity-90 transition-colors bg-[#0f172a] text-white font-semibold" onClick={() => toggle(k1)}>
                         <td className="px-3 py-2.5 pl-3">
@@ -705,7 +780,7 @@ export default function TransferDashboard({ params }: Props) {
                         </React.Fragment>)
                       })}
 
-                      {/* Normal L2 → L3 → L4 flow */}
+                      {/* Normal L2 → (L3 Category) → L4 Item → L5 Records flow */}
                       {o1 && !l1.skipL2 && l1.children.map(l2 => {
                         const k2 = k1 + "|||" + l2.sub_label; const o2 = expanded.has(k2)
                         return (<React.Fragment key={k2}>
@@ -715,11 +790,33 @@ export default function TransferDashboard({ params }: Props) {
                             <td className="text-right px-3 py-2">{showVal(l2.total_weight, l2.total_boxes, l2.total_net_weight, l2.total_gross_weight)}</td>
                             <td />
                           </tr>
-                          {o2 && l2.children.map(l3 => {
+
+                          {/* Skip-Category fallback — render items directly under L2 */}
+                          {o2 && l2.skipCategory && l2.children.map(l3 => {
                             const k3 = k2 + "|||" + l3.item_description; const o3 = expanded.has(k3)
                             return (<React.Fragment key={k3}>
                               <ItemRow k={k3} o={o3} l3={l3} indent="pl-14" toggle={toggle} showVal={showVal} />
                               {o3 && <TransferRows records={l3.records} showVal={showVal} indent="pl-20" onClickTransfer={setSelectedTransfer} />}
+                            </React.Fragment>)
+                          })}
+
+                          {/* Category layer — L3 Category → L4 Item → L5 Records */}
+                          {o2 && !l2.skipCategory && l2.categories.map(cat => {
+                            const k3 = k2 + "|||" + cat.category_label; const o3 = expanded.has(k3)
+                            return (<React.Fragment key={k3}>
+                              <tr className="border-b cursor-pointer hover:bg-slate-100/50 transition-colors bg-slate-50/70 dark:bg-slate-800/40 text-sm border-l-[2px] border-l-teal-300" onClick={() => toggle(k3)}>
+                                <td className="px-3 py-1.5 pl-14"><span className="inline-flex items-center gap-1.5">{o3 ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}<span className="text-xs uppercase tracking-wide text-muted-foreground">Cat:</span> {cat.category_label}</span></td>
+                                <td className="text-right px-3 py-1.5 tabular-nums text-xs">{cat.tx_count}</td>
+                                <td className="text-right px-3 py-1.5 text-xs">{showVal(cat.total_weight, cat.total_boxes, cat.total_net_weight, cat.total_gross_weight)}</td>
+                                <td />
+                              </tr>
+                              {o3 && cat.children.map(l4 => {
+                                const k4 = k3 + "|||" + l4.item_description; const o4 = expanded.has(k4)
+                                return (<React.Fragment key={k4}>
+                                  <ItemRow k={k4} o={o4} l3={l4} indent="pl-20" toggle={toggle} showVal={showVal} />
+                                  {o4 && <TransferRows records={l4.records} showVal={showVal} indent="pl-24" onClickTransfer={setSelectedTransfer} />}
+                                </React.Fragment>)
+                              })}
                             </React.Fragment>)
                           })}
                         </React.Fragment>)

@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef, useCallback } from "react"
+import { createPortal } from "react-dom"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useItemCategories, useSubCategories, useItemDescriptions, useCategorialItemDescriptions } from "@/lib/hooks/useDropdownData"
 import { SearchableSelect } from "@/components/ui/searchable-select"
@@ -21,6 +22,7 @@ import { useToast } from "@/hooks/use-toast"
 import { useFormPersistence } from "@/hooks/useFormPersistence"
 import HighPerformanceQRScanner from "@/components/transfer/high-performance-qr-scanner"
 import { ColdStorageApiService, type ColdStorageStockRecord } from "@/lib/api/coldStorageApiService"
+import { BoxScrollContainer } from "@/components/modules/inward/BoxScrollContainer"
 
 interface NewTransferRequestPageProps {
   params: {
@@ -265,6 +267,293 @@ function ItemDescriptionDropdown({
 // Cold storage warehouse values that trigger the stock search UI
 const COLD_STORAGE_WAREHOUSES = ["Cold Storage", "Rishi", "Savla D-39", "Savla D-514", "Supreme"]
 
+// Pending stock info for a result row (cartons reserved by Transfer Out, not yet received).
+// `transfers` is aggregated per challan; `boxes` is the deprecated box-level list.
+type PendingTransferEntry = {
+  challan_no: string
+  dispatched_at: string | null
+  from_site: string
+  to_site: string
+  cartons: number
+  weight_kg: number
+  box_count: number
+  dispatched_by: string
+  vehicle_no?: string
+  driver_name?: string
+  approved_by?: string
+  remark?: string
+  reason_code?: string
+  transfer_status?: string
+  has_variance?: boolean
+}
+type PendingInfo = {
+  pending_cartons: number
+  pending_kg: number
+  box_count: number
+  transfers?: PendingTransferEntry[]
+  // legacy — kept so older API responses still render
+  boxes?: Array<{
+    challan_no: string
+    dispatched_at: string | null
+    from_site: string
+    to_site: string
+    weight_kg: number
+    cartons: number
+  }>
+}
+
+const buildPendingKey = (lotNo?: string | null, itemDesc?: string | null) =>
+  `${(lotNo || "").trim().toLowerCase()}|${(itemDesc || "").trim().toLowerCase()}`
+
+// Cell renderer: shows (available − pending) qty with a hover/click tooltip listing pending transfers.
+// Tooltip renders via portal to document.body so it escapes the table's overflow:auto and
+// any z-index parents.
+function CartonCellWithPending({ record, pending }: { record: ColdStorageStockRecord; pending?: PendingInfo }) {
+  const [open, setOpen] = useState(false)
+  const triggerRef = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number; maxHeight: number }>({
+    left: 0, maxHeight: 300,
+  })
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const total = Number(record.net_qty_on_cartons ?? 0)
+  const reserved = Number(pending?.pending_cartons ?? 0)
+  const available = Math.max(0, total - reserved)
+
+  // Prefer the backend-aggregated `transfers` list (one row per challan with full
+  // totals). Fall back to client-side consolidation only if older API returns boxes.
+  const consolidatedTransfers: PendingTransferEntry[] = (() => {
+    if (!pending) return []
+    if (pending.transfers && pending.transfers.length > 0) return pending.transfers
+    const map = new Map<string, PendingTransferEntry>()
+    for (const b of pending.boxes || []) {
+      const key = b.challan_no || "(unknown)"
+      const e = map.get(key) || {
+        challan_no: key,
+        dispatched_at: b.dispatched_at,
+        from_site: b.from_site,
+        to_site: b.to_site,
+        cartons: 0,
+        weight_kg: 0,
+        box_count: 0,
+        dispatched_by: "",
+      }
+      e.cartons += Number(b.cartons || 1)
+      e.weight_kg += Number(b.weight_kg || 0)
+      e.box_count += 1
+      map.set(key, e)
+    }
+    return Array.from(map.values()).sort((a, b) => {
+      const ad = a.dispatched_at ? Date.parse(a.dispatched_at) : 0
+      const bd = b.dispatched_at ? Date.parse(b.dispatched_at) : 0
+      return bd - ad
+    })
+  })()
+
+  const computePosition = useCallback(() => {
+    if (!triggerRef.current) return
+    const rect = triggerRef.current.getBoundingClientRect()
+    const CARD_WIDTH = 320
+    const CARD_MAX_HEIGHT = 340
+    const MARGIN = 8
+    const GAP = 6
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+
+    let left = rect.right - CARD_WIDTH  // right-align under trigger
+    if (left < MARGIN) left = MARGIN
+    if (left + CARD_WIDTH > vw - MARGIN) left = Math.max(MARGIN, vw - CARD_WIDTH - MARGIN)
+
+    const spaceBelow = vh - rect.bottom - MARGIN
+    const spaceAbove = rect.top - MARGIN
+
+    if (spaceBelow >= 160 || spaceBelow >= spaceAbove) {
+      setPos({ top: rect.bottom + GAP, left, maxHeight: Math.min(CARD_MAX_HEIGHT, spaceBelow - GAP) })
+    } else {
+      setPos({ bottom: vh - rect.top + GAP, left, maxHeight: Math.min(CARD_MAX_HEIGHT, spaceAbove - GAP) })
+    }
+  }, [])
+
+  const handleOpen = useCallback(() => {
+    if (hideTimer.current) clearTimeout(hideTimer.current)
+    computePosition()
+    setOpen(true)
+  }, [computePosition])
+
+  const handleClose = useCallback(() => {
+    hideTimer.current = setTimeout(() => setOpen(false), 150)
+  }, [])
+
+  const cancelClose = useCallback(() => {
+    if (hideTimer.current) clearTimeout(hideTimer.current)
+  }, [])
+
+  if (!pending || reserved === 0) {
+    return <span>{total || "-"}</span>
+  }
+
+  return (
+    <>
+      <div
+        ref={triggerRef}
+        className="inline-block cursor-pointer"
+        onMouseEnter={handleOpen}
+        onMouseLeave={handleClose}
+        onClick={(e) => {
+          e.stopPropagation()
+          if (open) setOpen(false)
+          else handleOpen()
+        }}
+      >
+        <div className="font-semibold tabular-nums">{available}</div>
+        <div className="text-[10px] text-amber-700 mt-0.5 font-medium">
+          {reserved} ordered
+        </div>
+      </div>
+      {open && typeof document !== "undefined" && createPortal(
+        <div
+          onMouseEnter={cancelClose}
+          onMouseLeave={handleClose}
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: "fixed",
+            ...(pos.bottom !== undefined ? { bottom: pos.bottom } : { top: pos.top }),
+            left: pos.left,
+            width: 320,
+            maxHeight: pos.maxHeight,
+          }}
+          className="z-[9999] bg-white border border-amber-200 rounded-lg shadow-2xl p-2.5 text-left overflow-y-auto"
+        >
+          <div className="flex items-center justify-between mb-1.5 pb-1.5 border-b border-amber-100">
+            <div>
+              <div className="text-[11px] font-semibold text-amber-700">Pending Transfers</div>
+              <div className="text-[9.5px] text-gray-400">
+                {consolidatedTransfers.length} transfer{consolidatedTransfers.length !== 1 ? "s" : ""} in transit
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-[11px] font-bold text-amber-700 tabular-nums">
+                {reserved} ctns
+              </div>
+              <div className="text-[10px] text-gray-500 tabular-nums">
+                {Number(pending.pending_kg || 0).toFixed(2)} kg
+              </div>
+            </div>
+          </div>
+          <div className="space-y-2">
+            {consolidatedTransfers.length === 0 && (
+              <div className="text-[11px] text-gray-400 italic">No transactions found</div>
+            )}
+            {consolidatedTransfers.map((t, i) => (
+              <div key={i} className="text-[11px] text-gray-700 leading-tight bg-amber-50/40 rounded px-2 py-1.5 border border-amber-100">
+                {/* Header line: challan + date + status */}
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono text-[10.5px] font-semibold text-gray-800 truncate">{t.challan_no}</span>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {t.transfer_status && (
+                      <span className={`text-[9px] font-medium px-1 py-0.5 rounded ${
+                        t.transfer_status.toLowerCase() === "partial"
+                          ? "bg-orange-100 text-orange-700"
+                          : "bg-sky-100 text-sky-700"
+                      }`}>
+                        {t.transfer_status}
+                      </span>
+                    )}
+                    {t.has_variance && (
+                      <span className="text-[9px] font-medium px-1 py-0.5 rounded bg-red-100 text-red-700">
+                        Variance
+                      </span>
+                    )}
+                    {t.dispatched_at && (
+                      <span className="text-[10px] text-gray-500">
+                        {new Date(t.dispatched_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "2-digit" })}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Route */}
+                <div className="text-[10px] text-gray-600 mt-0.5">
+                  {t.from_site} <span className="text-gray-400">→</span> {t.to_site}
+                </div>
+
+                {/* Totals chips */}
+                <div className="flex items-center gap-1.5 flex-wrap mt-1 text-[10px]">
+                  <span className="bg-white border border-amber-200 rounded px-1.5 py-0.5 tabular-nums">
+                    <span className="text-gray-500">Cartons:</span>{" "}
+                    <span className="font-semibold text-amber-700">{Number(t.cartons).toLocaleString("en-IN")}</span>
+                  </span>
+                  <span className="bg-white border border-amber-200 rounded px-1.5 py-0.5 tabular-nums">
+                    <span className="text-gray-500">Weight:</span>{" "}
+                    <span className="font-semibold text-amber-700">{Number(t.weight_kg).toFixed(2)} kg</span>
+                  </span>
+                  {t.box_count > 0 && t.box_count !== Number(t.cartons) && (
+                    <span className="bg-white border border-amber-200 rounded px-1.5 py-0.5 tabular-nums">
+                      <span className="text-gray-500">Boxes:</span>{" "}
+                      <span className="font-semibold text-gray-700">{t.box_count}</span>
+                    </span>
+                  )}
+                </div>
+
+                {/* People */}
+                {(t.dispatched_by || t.approved_by) && (
+                  <div className="flex items-center gap-x-3 gap-y-0.5 flex-wrap mt-1 text-[10px] text-gray-600">
+                    {t.dispatched_by && (
+                      <span>
+                        <span className="text-gray-400">Dispatched by:</span>{" "}
+                        <span className="font-medium text-gray-800">{t.dispatched_by}</span>
+                      </span>
+                    )}
+                    {t.approved_by && t.approved_by !== t.dispatched_by && (
+                      <span>
+                        <span className="text-gray-400">Approved by:</span>{" "}
+                        <span className="font-medium text-gray-800">{t.approved_by}</span>
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* Logistics */}
+                {(t.vehicle_no || t.driver_name) && (
+                  <div className="flex items-center gap-x-3 gap-y-0.5 flex-wrap mt-0.5 text-[10px] text-gray-600">
+                    {t.vehicle_no && (
+                      <span>
+                        <span className="text-gray-400">Vehicle:</span>{" "}
+                        <span className="font-mono text-gray-800">{t.vehicle_no}</span>
+                      </span>
+                    )}
+                    {t.driver_name && (
+                      <span>
+                        <span className="text-gray-400">Driver:</span>{" "}
+                        <span className="font-medium text-gray-800">{t.driver_name}</span>
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* Reason / Remark */}
+                {t.reason_code && (
+                  <div className="mt-0.5 text-[10px] text-gray-600">
+                    <span className="text-gray-400">Reason:</span>{" "}
+                    <span className="font-medium text-gray-800">{t.reason_code}</span>
+                  </div>
+                )}
+                {t.remark && (
+                  <div className="mt-0.5 text-[10px] text-gray-600">
+                    <span className="text-gray-400">Remark:</span>{" "}
+                    <span className="italic text-gray-700">{t.remark}</span>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
+  )
+}
+
 // Cold Storage Stock Search Component (same as cold-storage/transfer-out)
 function ColdStorageStockSearch({
   onSelect,
@@ -279,6 +568,7 @@ function ColdStorageStockSearch({
   const [results, setResults] = useState<ColdStorageStockRecord[]>([])
   const [loading, setLoading] = useState(false)
   const [showResults, setShowResults] = useState(false)
+  const [pendingMap, setPendingMap] = useState<Map<string, PendingInfo>>(new Map())
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const doSearch = useCallback(async (lotNo: string, desc: string) => {
@@ -323,6 +613,51 @@ function ColdStorageStockSearch({
     setDescSearch("")
     setResults([])
   }
+
+  // Fetch pending qty (in-transit stock) for each unique (lot_no, item_description) pair
+  useEffect(() => {
+    if (!showResults || results.length === 0) {
+      setPendingMap(new Map())
+      return
+    }
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+    const uniqueKeys = new Map<string, { lot_no: string; item_description: string }>()
+    results.forEach((r) => {
+      const key = buildPendingKey(r.lot_no, r.item_description)
+      if (!uniqueKeys.has(key) && r.lot_no && r.item_description) {
+        uniqueKeys.set(key, { lot_no: r.lot_no, item_description: r.item_description })
+      }
+    })
+
+    let cancelled = false
+    ;(async () => {
+      const next = new Map<string, PendingInfo>()
+      await Promise.all(
+        Array.from(uniqueKeys.entries()).map(async ([key, { lot_no, item_description }]) => {
+          try {
+            const params = new URLSearchParams({
+              lot_no,
+              item_description,
+              from_company: coldCompany,
+            })
+            const res = await fetch(`${apiUrl}/interunit/pending-stock/by-lot?${params.toString()}`)
+            if (!res.ok) return
+            const data: PendingInfo = await res.json()
+            if (data && Number(data.pending_cartons) > 0) {
+              next.set(key, data)
+            }
+          } catch {
+            /* swallow — show 0 pending on failure */
+          }
+        })
+      )
+      if (!cancelled) setPendingMap(next)
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [results, showResults, coldCompany])
 
   return (
     <div className="space-y-3">
@@ -425,7 +760,12 @@ function ColdStorageStockSearch({
                     <td className="px-3 py-2 font-medium">{record.item_description || "-"}</td>
                     <td className="px-3 py-2">{record.item_mark || "-"}</td>
                     <td className="px-3 py-2 font-mono">{record.lot_no || "-"}</td>
-                    <td className="px-3 py-2 text-right">{record.net_qty_on_cartons ?? "-"}</td>
+                    <td className="px-3 py-2 text-right">
+                      <CartonCellWithPending
+                        record={record}
+                        pending={pendingMap.get(buildPendingKey(record.lot_no, record.item_description))}
+                      />
+                    </td>
                     <td className="px-3 py-2 text-right">{record.weight_kg ?? "-"}</td>
                     <td className="px-3 py-2 text-right">{(record.net_qty_on_cartons != null && record.weight_kg != null) ? (record.net_qty_on_cartons * record.weight_kg).toFixed(2) : "-"}</td>
                     <td className="px-3 py-2 text-center">
@@ -1420,7 +1760,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       }
     }
 
-    const newEntries = []
+    const newEntries: any[] = []
     const timeStamp = new Date().toLocaleTimeString()
 
     for (let i = 0; i < qty; i++) {
@@ -3439,11 +3779,15 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                 </p>
               </div>
             ) : (
-              <>
+              <BoxScrollContainer
+                boxCount={scannedBoxes.length}
+                boxForms={scannedBoxes.map((box, index) => ({ box_number: index + 1, lot_number: box.lotNumber || "", article_description: box.itemDescription || "" }))}
+              >
+                {(registerRef) => (<>
                 {/* Mobile Card View */}
                 <div className="md:hidden space-y-3">
                   {scannedBoxes.map((box, index) => (
-                    <div key={box.id} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+                    <div key={box.id} ref={(el) => registerRef(index + 1, el)} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
                       <div className="flex items-start justify-between mb-2">
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-bold text-blue-600 bg-blue-100 px-2 py-1 rounded">
@@ -3695,7 +4039,8 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                     )}
                   </div>
                 </div>
-              </>
+                </>)}
+              </BoxScrollContainer>
             )}
           </CardContent>
         </Card>

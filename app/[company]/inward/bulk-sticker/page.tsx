@@ -30,6 +30,8 @@ import {
 } from "@/types/inward"
 import { PermissionGuard } from "@/components/auth/permission-gate"
 import { ArticleEditor, type ArticleFields } from "@/components/modules/inward/ArticleEditor"
+import { BoxScrollContainer } from "@/components/modules/inward/BoxScrollContainer"
+import { LotRangeDedicator, type LotRange } from "@/components/modules/inward/LotRangeDedicator"
 import { dropdownApi } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { useToast } from "@/hooks/use-toast"
@@ -63,6 +65,9 @@ interface BulkArticleForm {
   box_count: string
   box_net_weight: string
   box_gross_weight: string
+  item_mark: string
+  spl_remarks: string
+  vakkal: string
 }
 
 const emptyArticleForm = (): BulkArticleForm => ({
@@ -85,6 +90,9 @@ const emptyArticleForm = (): BulkArticleForm => ({
   box_count: "",
   box_net_weight: "",
   box_gross_weight: "",
+  item_mark: "",
+  spl_remarks: "",
+  vakkal: "",
 })
 
 export default function BulkStickerPage({ params }: BulkStickerPageProps) {
@@ -123,6 +131,8 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
   // Articles (with ArticleEditor for item selection)
   const [articles, setArticles] = useState<ArticleFields[]>([{ item_description: "", skuStatus: "idle" }])
   const [articleForms, setArticleForms] = useState<BulkArticleForm[]>([emptyArticleForm()])
+  // Lot ranges per article index (used to assign lot_number per box range in submit)
+  const [lotRangesMap, setLotRangesMap] = useState<Record<number, LotRange[]>>({})
 
   // Vendor dropdown
   const [vendorList, setVendorList] = useState<Array<{ id: number; vendor_name: string; location: string | null }>>([])
@@ -224,7 +234,20 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
 
   const updateArticleForm = (idx: number, field: keyof BulkArticleForm, value: string) => {
     setArticleForms((prev) =>
-      prev.map((a, i) => (i === idx ? { ...a, [field]: value } : a))
+      prev.map((a, i) => {
+        if (i !== idx) return a
+        const updated = { ...a, [field]: value }
+        if (field === "box_count" || field === "box_net_weight" || field === "box_gross_weight") {
+          const count = parseFloat(field === "box_count" ? value : updated.box_count) || 0
+          const netPerBox = parseFloat(field === "box_net_weight" ? value : updated.box_net_weight) || 0
+          const grossPerBox = parseFloat(field === "box_gross_weight" ? value : updated.box_gross_weight) || 0
+          const netTotal = count * netPerBox
+          const grossTotal = count * grossPerBox
+          updated.net_weight = netTotal > 0 ? String(parseFloat(netTotal.toFixed(3))) : ""
+          updated.total_weight = grossTotal > 0 ? String(parseFloat(grossTotal.toFixed(3))) : ""
+        }
+        return updated
+      })
     )
   }
 
@@ -313,16 +336,24 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
           box_count: parseInt(a.box_count) || 1,
           box_net_weight: r3(a.box_net_weight),
           box_gross_weight: r3(a.box_gross_weight),
+          item_mark: a.item_mark || undefined,
+          spl_remarks: a.spl_remarks || undefined,
+          vakkal: a.vakkal || undefined,
         })),
-        boxes: articleForms.flatMap((a) => {
+        boxes: articleForms.flatMap((a, aIdx) => {
           const count = parseInt(a.box_count) || 1
-          return Array.from({ length: count }, (_, i) => ({
-            article_description: a.item_description,
-            box_number: i + 1,
-            net_weight: r3(a.box_net_weight),
-            gross_weight: r3(a.box_gross_weight),
-            lot_number: a.lot_number || undefined,
-          }))
+          const ranges = lotRangesMap[aIdx] || []
+          return Array.from({ length: count }, (_, i) => {
+            const boxNum = i + 1
+            const rangeMatch = ranges.find((r) => boxNum >= r.from && boxNum <= r.to)
+            return {
+              article_description: a.item_description,
+              box_number: boxNum,
+              net_weight: r3(a.box_net_weight),
+              gross_weight: r3(a.box_gross_weight),
+              lot_number: rangeMatch ? rangeMatch.lot : (a.lot_number || undefined),
+            }
+          })
         }),
       }
 
@@ -744,9 +775,16 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
                 </div>
               </CardHeader>
               <CardContent className="px-3 sm:px-6">
-                <div className="space-y-2">
-                  {articleGroup.boxes.map((box) => (
-                    <div key={box.box_id} className="flex items-center justify-between p-2 border rounded text-sm">
+                <BoxScrollContainer
+                  boxCount={articleGroup.boxes.length}
+                  boxForms={articleGroup.boxes.map((b) => ({ box_number: b.box_number, lot_number: b.lot_number, article_description: b.article_description }))}
+                >
+                  {(registerRef) => articleGroup.boxes.map((box) => (
+                    <div
+                      key={box.box_id}
+                      ref={(el) => registerRef(box.box_number, el)}
+                      className="flex items-center justify-between p-2 border rounded text-sm"
+                    >
                       <div className="flex items-center gap-3">
                         <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center">
                           <span className="text-xs font-medium">{box.box_number}</span>
@@ -783,7 +821,7 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
                       </div>
                     </div>
                   ))}
-                </div>
+                </BoxScrollContainer>
 
                 {/* Add More Boxes Form */}
                 {addMoreIdx === aIdx && (
@@ -1130,10 +1168,6 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
                     <Input value={articleForms[idx]?.quality_grade || ""} onChange={(e) => updateArticleForm(idx, "quality_grade", e.target.value)} className="h-9" />
                   </div>
                   <div className="space-y-1.5">
-                    <Label className="text-xs">UOM</Label>
-                    <Input value={articleForms[idx]?.uom || ""} onChange={(e) => updateArticleForm(idx, "uom", e.target.value)} className="h-9" />
-                  </div>
-                  <div className="space-y-1.5">
                     <Label className="text-xs">PO Quantity</Label>
                     <Input type="number" value={articleForms[idx]?.po_quantity || ""} onChange={(e) => updateArticleForm(idx, "po_quantity", e.target.value)} className="h-9" />
                   </div>
@@ -1142,14 +1176,12 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
                     <Input type="number" value={articleForms[idx]?.box_count || ""} readOnly className="h-9 bg-muted" />
                   </div>
                   <div className="space-y-1.5">
-                    <Label className="text-xs">Net Weight</Label>
-                    <Input type="number" value={articleForms[idx]?.net_weight || ""} onChange={(e) => updateArticleForm(idx, "net_weight", e.target.value)} className="h-9" />
+                    <Label className="text-xs">Net Weight <span className="text-muted-foreground text-[9px]">(auto)</span></Label>
+                    <Input type="number" value={articleForms[idx]?.net_weight || ""} readOnly className="h-9 bg-muted" />
                   </div>
                   <div className="space-y-1.5">
-                    <Label className="text-xs">Total Weight</Label>
-                    <Input type="number" step="0.001" value={articleForms[idx]?.total_weight || ""} onChange={(e) => {
-                      const v = e.target.value; const dot = v.indexOf('.'); if (dot !== -1 && v.length - dot - 1 > 3) return; updateArticleForm(idx, "total_weight", v);
-                    }} className="h-9" />
+                    <Label className="text-xs">Total Weight <span className="text-muted-foreground text-[9px]">(auto)</span></Label>
+                    <Input type="number" value={articleForms[idx]?.total_weight || ""} readOnly className="h-9 bg-muted" />
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-xs">Lot Number</Label>
@@ -1214,6 +1246,44 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
                     />
                   </div>
                 </div>
+
+                {/* Cold storage fields per article */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-semibold text-blue-700">Item Mark</Label>
+                    <Input
+                      value={articleForms[idx]?.item_mark || ""}
+                      onChange={(e) => updateArticleForm(idx, "item_mark", e.target.value)}
+                      placeholder="Item mark"
+                      className="h-9"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-semibold text-blue-700">Spl. Remarks</Label>
+                    <Input
+                      value={articleForms[idx]?.spl_remarks || ""}
+                      onChange={(e) => updateArticleForm(idx, "spl_remarks", e.target.value)}
+                      placeholder="Special remarks"
+                      className="h-9"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-semibold text-blue-700">Vakkal</Label>
+                    <Input
+                      value={articleForms[idx]?.vakkal || ""}
+                      onChange={(e) => updateArticleForm(idx, "vakkal", e.target.value)}
+                      placeholder="Vakkal"
+                      className="h-9"
+                    />
+                  </div>
+                </div>
+
+                {/* Lot Range Dedicator — cold storage only */}
+                <LotRangeDedicator
+                  warehouse={warehouse}
+                  totalBoxes={parseInt(articleForms[idx]?.box_count) || 0}
+                  onApply={(ranges) => setLotRangesMap((prev) => ({ ...prev, [idx]: ranges }))}
+                />
               </div>
             ))}
           </CardContent>

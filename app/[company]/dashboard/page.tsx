@@ -209,9 +209,36 @@ export default function DashboardPage({ params }: DashboardPageProps) {
           transfers: todayTransfers.status === 'fulfilled' ? todayTransfers.value : { count: 0, total: 0 }
         }
         setTodaySummary(resolvedToday)
-        // TODO: replace with real weekly/monthly API calls when backend supports them
-        setWeeklySummary(resolvedToday)
-        setMonthlySummary(resolvedToday)
+
+        // Real weekly / monthly summaries — date-range queries against the
+        // same endpoints that Today uses.
+        const now = new Date()
+        const isoToday = now.toISOString().split("T")[0]
+        const weekStart = new Date(now)
+        weekStart.setDate(now.getDate() - 6) // rolling 7 days including today
+        const isoWeekStart = weekStart.toISOString().split("T")[0]
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+        const isoMonthStart = monthStart.toISOString().split("T")[0]
+
+        const [weekI, weekO, weekT, monI, monO, monT] = await Promise.allSettled([
+          authApi.fetchPeriodInwardSummary(company, isoWeekStart, isoToday),
+          authApi.fetchPeriodOutwardSummary(company, isoWeekStart, isoToday),
+          authApi.fetchPeriodTransferSummary(company, isoWeekStart, isoToday),
+          authApi.fetchPeriodInwardSummary(company, isoMonthStart, isoToday),
+          authApi.fetchPeriodOutwardSummary(company, isoMonthStart, isoToday),
+          authApi.fetchPeriodTransferSummary(company, isoMonthStart, isoToday),
+        ])
+        const zero = { count: 0, total: 0 }
+        setWeeklySummary({
+          inward: weekI.status === "fulfilled" ? weekI.value : zero,
+          outward: weekO.status === "fulfilled" ? weekO.value : zero,
+          transfers: weekT.status === "fulfilled" ? weekT.value : zero,
+        })
+        setMonthlySummary({
+          inward: monI.status === "fulfilled" ? monI.value : zero,
+          outward: monO.status === "fulfilled" ? monO.value : zero,
+          transfers: monT.status === "fulfilled" ? monT.value : zero,
+        })
 
       } catch (err) {
         console.error('Dashboard data fetch error:', err)

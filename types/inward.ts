@@ -71,6 +71,9 @@ export interface ArticleV2 {
   unit_rate?: number
   total_amount?: number
   carton_weight?: number
+  item_mark?: string
+  spl_remarks?: string
+  vakkal?: string
   created_at?: string
 }
 
@@ -241,8 +244,6 @@ export interface ApprovePayload {
     remark?: string
     service?: boolean
     rtv?: boolean
-    item_mark?: string
-    spl_remarks?: string
   }
   articles: Array<{
     item_description: string
@@ -259,6 +260,9 @@ export interface ApprovePayload {
     unit_rate?: number
     total_amount?: number
     carton_weight?: number
+    item_mark?: string
+    spl_remarks?: string
+    vakkal?: string
   }>
   boxes: Array<{
     article_description: string
@@ -296,6 +300,9 @@ export interface BulkStickerArticle {
   box_count: number
   box_net_weight?: number
   box_gross_weight?: number
+  item_mark?: string
+  spl_remarks?: string
+  vakkal?: string
 }
 
 export interface BulkStickerPayload {

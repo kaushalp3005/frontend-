@@ -22,6 +22,7 @@ import QRCode from 'qrcode'
 import type { Company } from "@/types/auth"
 import { useAuthStore } from "@/lib/stores/auth"
 import { useToast } from "@/hooks/use-toast"
+import { BoxScrollContainer } from "@/components/modules/inward/BoxScrollContainer"
 
 // ─── Article Entry types ───
 interface GeneratedArticle {
@@ -489,7 +490,9 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
       const lossConfig = data.loss_config as LossConfig | null
 
       setMiItems(lines.map((line: any, idx: number) => {
-        const sentKgs = Number(line.quantity_kgs || line.net_weight || 0)
+        // Dispatched qty must use NET weight first; gross/quantity_kgs is only
+        // a fallback for legacy records where net_weight is empty/0.
+        const sentKgs = Number(line.net_weight || line.quantity_kgs || 0)
         const sentBoxes = Number(line.quantity_boxes || 0)
         const prevFg = Number(line.prev_fg_kgs || 0)
         const prevWaste = Number(line.prev_waste_kgs || 0)
@@ -556,7 +559,9 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
 
         const lines = data.line_items || []
         setMiItems(lines.map((line: any, idx: number) => {
-          const sentKgs = Number(line.quantity_kgs || line.net_weight || 0)
+          // Dispatched qty must use NET weight first; gross/quantity_kgs is only
+        // a fallback for legacy records where net_weight is empty/0.
+        const sentKgs = Number(line.net_weight || line.quantity_kgs || 0)
           const sentBoxes = Number(line.quantity_boxes || 0)
           const prevFg = Number(line.prev_fg_kgs || 0)
           const prevWaste = Number(line.prev_waste_kgs || 0)
@@ -1700,6 +1705,11 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                     </div>
                   </div>
 
+                  <BoxScrollContainer
+                    boxCount={aeGeneratedArticles.length}
+                    boxForms={aeGeneratedArticles.map((art) => ({ box_number: art.box_number, lot_number: "", article_description: art.item_description }))}
+                  >
+                    {(registerRef) => (
                   <div className="overflow-x-auto border rounded-lg">
                     <table className="w-full text-sm">
                       <thead className="bg-gray-50 border-b">
@@ -1717,7 +1727,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                       </thead>
                       <tbody>
                         {aeGeneratedArticles.map((art, idx) => (
-                          <tr key={`${art.box_id}-${idx}`} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50/50"}>
+                          <tr key={`${art.box_id}-${idx}`} ref={(el) => registerRef(art.box_number, el)} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50/50"}>
                             <td className="px-3 py-1.5 text-xs text-gray-500">{idx + 1}</td>
                             <td className="px-3 py-1.5 text-xs font-mono text-indigo-700">{art.transaction_no}</td>
                             <td className="px-3 py-1.5 text-xs font-mono font-semibold">{art.box_id}</td>
@@ -1756,6 +1766,8 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                       </tbody>
                     </table>
                   </div>
+                    )}
+                  </BoxScrollContainer>
 
                   {/* Total Net Wt vs FG Received indicator */}
                   {aeFgLimit > 0 && (

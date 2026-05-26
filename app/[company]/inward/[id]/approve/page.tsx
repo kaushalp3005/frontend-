@@ -36,6 +36,8 @@ import { PermissionGuard } from "@/components/auth/permission-gate"
 import { useAuthStore } from "@/lib/stores/auth"
 import { cn } from "@/lib/utils"
 import { getAllWarehouseCodes, isColdWarehouse } from "@/lib/constants/warehouses"
+import { BoxScrollContainer } from "@/components/modules/inward/BoxScrollContainer"
+import { LotRangeDedicator, type LotRange } from "@/components/modules/inward/LotRangeDedicator"
 import QRCode from "qrcode"
 
 interface ApprovePageProps {
@@ -63,6 +65,9 @@ interface ArticleForm {
   unit_rate: string
   total_amount: string
   carton_weight: string
+  item_mark: string
+  spl_remarks: string
+  vakkal: string
 }
 
 interface BoxForm {
@@ -101,10 +106,6 @@ export default function ApprovePage({ params }: ApprovePageProps) {
   const [isOtherManager, setIsOtherManager] = useState(false)
   const [remark, setRemark] = useState("")
 
-  // Cold storage linkage fields (shown when cold warehouse selected)
-  const [itemMark, setItemMark] = useState("")
-  const [splRemarks, setSplRemarks] = useState("")
-
   // Articles (pre-filled from PO data, approver fills remaining fields)
   const [articleForms, setArticleForms] = useState<ArticleForm[]>([])
 
@@ -128,6 +129,15 @@ export default function ApprovePage({ params }: ApprovePageProps) {
   const [editingBoxIndices, setEditingBoxIndices] = useState<Set<number>>(new Set())
   const [editSnapshots, setEditSnapshots] = useState<Map<number, BoxForm>>(new Map())
   const [printingBoxIdx, setPrintingBoxIdx] = useState<number | null>(null)
+
+  // Per-article box pagination (200 boxes per page)
+  const BOX_PAGE_SIZE = 200
+  const [boxPageMap, setBoxPageMap] = useState<Record<string, number>>({})
+  const [highlightBoxMap, setHighlightBoxMap] = useState<Record<string, { boxNumber: number; key: number } | null>>({})
+
+  const getBoxPage = (articleDesc: string) => boxPageMap[articleDesc] ?? 1
+  const setBoxPage = (articleDesc: string, page: number) =>
+    setBoxPageMap((prev) => ({ ...prev, [articleDesc]: page }))
 
   // Submit state
   const [submitting, setSubmitting] = useState(false)
@@ -169,8 +179,6 @@ export default function ApprovePage({ params }: ApprovePageProps) {
         setApprovalAuthority(savedManager)
         setRemark(txn.remark || "")
         setWarehouse(txn.warehouse || "")
-        setItemMark((txn as any).item_mark || "")
-        setSplRemarks((txn as any).spl_remarks || "")
         setOriginalValues({
           warehouse: txn.warehouse,
           vehicle_number: txn.vehicle_number,
@@ -185,8 +193,6 @@ export default function ApprovePage({ params }: ApprovePageProps) {
           dn_number: txn.dn_number,
           approval_authority: txn.approval_authority,
           remark: txn.remark,
-          item_mark: (txn as any).item_mark,
-          spl_remarks: (txn as any).spl_remarks,
         })
 
         // Initialize existing boxes — create a default box per article if none exist
@@ -246,6 +252,9 @@ export default function ApprovePage({ params }: ApprovePageProps) {
               unit_rate: a.unit_rate?.toString() || "",
               total_amount: a.total_amount?.toString() || "",
               carton_weight: a.carton_weight?.toString() || "",
+              item_mark: a.item_mark || "",
+              spl_remarks: a.spl_remarks || "",
+              vakkal: a.vakkal || "",
             }
           })
         )
@@ -456,6 +465,16 @@ export default function ApprovePage({ params }: ApprovePageProps) {
     setBulkAddQty("")
     setBulkAddNetWeight("")
     setBulkAddGrossWeight("")
+  }
+
+  const applyLotRanges = (articleDescription: string, ranges: LotRange[]) => {
+    setBoxForms((prev) =>
+      prev.map((box) => {
+        if (box.article_description !== articleDescription) return box
+        const match = ranges.find((r) => box.box_number >= r.from && box.box_number <= r.to)
+        return match ? { ...box, lot_number: match.lot } : box
+      })
+    )
   }
 
   const updateBox = (idx: number, field: keyof BoxForm, value: string | number) => {
@@ -701,10 +720,6 @@ export default function ApprovePage({ params }: ApprovePageProps) {
           remark: remark || originalValues.remark || undefined,
           service: isServiceOrder,
           rtv: isRtv,
-          ...(isColdWarehouse(warehouse) ? {
-            item_mark: itemMark || originalValues.item_mark || undefined,
-            spl_remarks: splRemarks || originalValues.spl_remarks || undefined,
-          } : {}),
         },
         articles: articleForms.map((a) => ({
           item_description: a.item_description,
@@ -721,6 +736,11 @@ export default function ApprovePage({ params }: ApprovePageProps) {
           unit_rate: a.unit_rate ? parseFloat(a.unit_rate) : undefined,
           total_amount: a.total_amount ? parseFloat(a.total_amount) : undefined,
           carton_weight: a.carton_weight ? parseFloat(a.carton_weight) : undefined,
+          ...(isColdWarehouse(warehouse) ? {
+            item_mark: a.item_mark || undefined,
+            spl_remarks: a.spl_remarks || undefined,
+            vakkal: a.vakkal || undefined,
+          } : {}),
         })),
         boxes: boxForms.map((b) => ({
           article_description: b.article_description,
@@ -962,23 +982,6 @@ export default function ApprovePage({ params }: ApprovePageProps) {
               <Label className="text-xs">Remark</Label>
               <Textarea value={remark} onChange={(e) => setRemark(e.target.value)} rows={2} className="resize-none" />
             </div>
-            {/* Cold storage linkage fields */}
-            {isColdWarehouse(warehouse) && (
-              <>
-                <Separator />
-                <p className="text-xs font-medium text-blue-700">Cold Storage Fields</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Item Mark</Label>
-                    <Input value={itemMark} onChange={(e) => setItemMark(e.target.value)} className="h-9" placeholder="Item mark for cold storage" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Spl. Remarks</Label>
-                    <Input value={splRemarks} onChange={(e) => setSplRemarks(e.target.value)} className="h-9" placeholder="Special remarks" />
-                  </div>
-                </div>
-              </>
-            )}
           </CardContent>
         </Card>
 
@@ -1084,113 +1087,139 @@ export default function ApprovePage({ params }: ApprovePageProps) {
                   </div>
                 </div>
 
-                {/* Boxes for this article */}
-                <div className="mt-2 pt-2 border-t space-y-2">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                      <Box className="h-3 w-3" />
-                      Boxes ({boxForms.filter((b) => b.article_description === article.item_description).length})
-                    </p>
-                    <div className="flex items-center gap-1.5">
+                {/* Cold storage fields per article */}
+                {isColdWarehouse(warehouse) && (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2 border-t">
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-blue-700">Item Mark</Label>
+                      <Input value={article.item_mark} onChange={(e) => updateArticle(idx, "item_mark", e.target.value)} className="h-8 text-xs" placeholder="Item mark" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-blue-700">Spl. Remarks</Label>
+                      <Input value={article.spl_remarks} onChange={(e) => updateArticle(idx, "spl_remarks", e.target.value)} className="h-8 text-xs" placeholder="Special remarks" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-blue-700">Vakkal</Label>
+                      <Input value={article.vakkal} onChange={(e) => updateArticle(idx, "vakkal", e.target.value)} className="h-8 text-xs" placeholder="Vakkal" />
+                    </div>
+                  </div>
+                )}
+
+                {/* Lot Range Dedicator — cold storage only */}
+                <LotRangeDedicator
+                  warehouse={warehouse}
+                  totalBoxes={boxForms.filter((b) => b.article_description === article.item_description).length}
+                  onApply={(ranges) => applyLotRanges(article.item_description, ranges)}
+                />
+
+                {/* Bulk Add Boxes Form */}
+                {bulkAddArticle === article.item_description && (
+                  <div className="mt-2 p-2.5 rounded-lg border bg-blue-50/50 space-y-2">
+                    <p className="text-[11px] font-semibold text-muted-foreground">Bulk Add Boxes</p>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="space-y-0.5">
+                        <Label className="text-[10px]">Quantity (boxes) <span className="text-destructive">*</span></Label>
+                        <Input
+                          type="number"
+                          min="1"
+                          value={bulkAddQty}
+                          onChange={(e) => setBulkAddQty(e.target.value)}
+                          placeholder="No. of boxes"
+                          className="h-7 text-xs"
+                        />
+                      </div>
+                      <div className="space-y-0.5">
+                        <Label className="text-[10px]">Net Weight (per box)</Label>
+                        <Input
+                          type="number"
+                          step="0.001"
+                          value={bulkAddNetWeight}
+                          onChange={(e) => setBulkAddNetWeight(e.target.value)}
+                          placeholder="kg"
+                          className="h-7 text-xs"
+                        />
+                      </div>
+                      <div className="space-y-0.5">
+                        <Label className="text-[10px]">Gross Weight (per box)</Label>
+                        <Input
+                          type="number"
+                          step="0.001"
+                          value={bulkAddGrossWeight}
+                          onChange={(e) => setBulkAddGrossWeight(e.target.value)}
+                          placeholder="kg"
+                          className="h-7 text-xs"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
                       <Button
-                        variant="outline"
                         size="sm"
                         className="h-6 text-xs gap-1"
-                        onClick={() => addBox(article.item_description)}
+                        onClick={() => addBulkBoxes(article.item_description)}
+                        disabled={!bulkAddQty || parseInt(bulkAddQty) < 1}
                       >
-                        <Plus className="h-3 w-3" /> Add Box
+                        <Plus className="h-3 w-3" />
+                        Add {parseInt(bulkAddQty) || 0} Boxes
                       </Button>
                       <Button
-                        variant="outline"
+                        variant="ghost"
                         size="sm"
-                        className="h-6 text-xs gap-1"
-                        onClick={() => {
-                          if (bulkAddArticle === article.item_description) {
-                            setBulkAddArticle(null)
-                          } else {
-                            setBulkAddArticle(article.item_description)
-                            setBulkAddQty("")
-                            setBulkAddNetWeight("")
-                            setBulkAddGrossWeight("")
-                          }
-                        }}
+                        className="h-6 text-xs"
+                        onClick={() => setBulkAddArticle(null)}
                       >
-                        <Plus className="h-3 w-3" /> Bulk Add
+                        Cancel
                       </Button>
                     </div>
                   </div>
+                )}
 
-                  {/* Bulk Add Boxes Form */}
-                  {bulkAddArticle === article.item_description && (
-                    <div className="p-2.5 rounded-lg border bg-blue-50/50 space-y-2">
-                      <p className="text-[11px] font-semibold text-muted-foreground">Bulk Add Boxes</p>
-                      <div className="grid grid-cols-3 gap-2">
-                        <div className="space-y-0.5">
-                          <Label className="text-[10px]">Quantity (boxes) <span className="text-destructive">*</span></Label>
-                          <Input
-                            type="number"
-                            min="1"
-                            value={bulkAddQty}
-                            onChange={(e) => setBulkAddQty(e.target.value)}
-                            placeholder="No. of boxes"
-                            className="h-7 text-xs"
-                          />
-                        </div>
-                        <div className="space-y-0.5">
-                          <Label className="text-[10px]">Net Weight (per box)</Label>
-                          <Input
-                            type="number"
-                            step="0.001"
-                            value={bulkAddNetWeight}
-                            onChange={(e) => setBulkAddNetWeight(e.target.value)}
-                            placeholder="kg"
-                            className="h-7 text-xs"
-                          />
-                        </div>
-                        <div className="space-y-0.5">
-                          <Label className="text-[10px]">Gross Weight (per box)</Label>
-                          <Input
-                            type="number"
-                            step="0.001"
-                            value={bulkAddGrossWeight}
-                            onChange={(e) => setBulkAddGrossWeight(e.target.value)}
-                            placeholder="kg"
-                            className="h-7 text-xs"
-                          />
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          size="sm"
-                          className="h-6 text-xs gap-1"
-                          onClick={() => addBulkBoxes(article.item_description)}
-                          disabled={!bulkAddQty || parseInt(bulkAddQty) < 1}
-                        >
-                          <Plus className="h-3 w-3" />
-                          Add {parseInt(bulkAddQty) || 0} Boxes
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 text-xs"
-                          onClick={() => setBulkAddArticle(null)}
-                        >
-                          Cancel
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                  {boxForms
-                    .map((box, boxIdx) => ({ box, boxIdx }))
-                    .filter(({ box }) => box.article_description === article.item_description)
+                {(() => {
+                  const articleDesc = article.item_description
+                  const allArticleBoxes = boxForms.filter((b) => b.article_description === articleDesc)
+                  const artPage = getBoxPage(articleDesc)
+                  const artTotalPages = Math.max(1, Math.ceil(allArticleBoxes.length / BOX_PAGE_SIZE))
+                  const pageStart = (artPage - 1) * BOX_PAGE_SIZE
+                  const pageBoxes = allArticleBoxes.slice(pageStart, pageStart + BOX_PAGE_SIZE)
+
+                  return (
+                <BoxScrollContainer
+                  boxCount={allArticleBoxes.length}
+                  currentPage={artPage}
+                  totalPages={artTotalPages}
+                  onPageChange={(page) => setBoxPage(articleDesc, page)}
+                  onNavigate={(boxNum) => {
+                    const targetPage = Math.ceil(boxNum / BOX_PAGE_SIZE)
+                    setBoxPage(articleDesc, targetPage)
+                    setHighlightBoxMap((prev) => ({ ...prev, [articleDesc]: { boxNumber: boxNum, key: Date.now() } }))
+                  }}
+                  highlightBox={highlightBoxMap[articleDesc] ?? null}
+                  onAddBox={() => addBox(articleDesc)}
+                  onBulkAdd={() => {
+                    if (bulkAddArticle === articleDesc) {
+                      setBulkAddArticle(null)
+                    } else {
+                      setBulkAddArticle(articleDesc)
+                      setBulkAddQty("")
+                      setBulkAddNetWeight("")
+                      setBulkAddGrossWeight("")
+                    }
+                  }}
+                  boxForms={allArticleBoxes.map((b) => ({ box_number: b.box_number, lot_number: b.lot_number, article_description: b.article_description }))}
+                >
+                  {(registerRef) => pageBoxes
+                    .map((box) => ({ box, boxIdx: boxForms.indexOf(box) }))
                     .map(({ box, boxIdx }) => {
                       const isLocked = box.is_printed && !editingBoxIndices.has(boxIdx)
                       const isPrinting = printingBoxIdx === boxIdx
                       return (
-                      <div key={boxIdx} className={cn(
-                        "p-2 rounded space-y-2 sm:space-y-0",
-                        isLocked ? "bg-emerald-50/50 border border-emerald-200/50" : "bg-muted/30"
-                      )}>
+                      <div
+                        key={boxIdx}
+                        ref={(el) => registerRef(box.box_number, el)}
+                        className={cn(
+                          "p-2 rounded space-y-2 sm:space-y-0",
+                          isLocked ? "bg-emerald-50/50 border border-emerald-200/50" : "bg-muted/30"
+                        )}
+                      >
                         {/* Box header row */}
                         <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
                           <DropdownMenu>
@@ -1322,7 +1351,9 @@ export default function ApprovePage({ params }: ApprovePageProps) {
                       </div>
                       )
                     })}
-                </div>
+                </BoxScrollContainer>
+                  )
+                })()}
               </div>
             ))}
           </CardContent>

@@ -378,6 +378,47 @@ export const authApi = {
     }
   },
 
+  // Generic period-summary helper — used for today / week / month
+  async _fetchPeriodSummary(
+    url: string,
+  ): Promise<{ count: number; total: number }> {
+    try {
+      const response = await fetch(url, {
+        method: "GET",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+      })
+      if (!response.ok) {
+        if (response.status === 404) return { count: 0, total: 0 }
+        throw new Error(`Period summary failed: ${response.status}`)
+      }
+      const data = await response.json()
+      return {
+        count: data.total || data.records?.length || 0,
+        total: data.total || data.records?.length || 0,
+      }
+    } catch (err) {
+      console.warn("Period summary error:", err)
+      return { count: 0, total: 0 }
+    }
+  },
+
+  async fetchPeriodInwardSummary(companyCode: string, fromDate: string, toDate: string) {
+    const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/inward/${companyCode}?from_date=${fromDate}&to_date=${toDate}&per_page=1000&page=1`
+    return this._fetchPeriodSummary(apiUrl)
+  },
+
+  async fetchPeriodOutwardSummary(companyCode: string, fromDate: string, toDate: string) {
+    const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/outward/${companyCode}?from_date=${fromDate}&to_date=${toDate}&per_page=1000&page=1`
+    return this._fetchPeriodSummary(apiUrl)
+  },
+
+  async fetchPeriodTransferSummary(_companyCode: string, fromDate: string, toDate: string) {
+    // Correct route is /interunit/requests (the legacy /transfer/requests
+    // helpers throughout this file 404 silently — flagged in the audit).
+    const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/interunit/requests?from_date=${fromDate}&to_date=${toDate}&per_page=1000&page=1`
+    return this._fetchPeriodSummary(apiUrl)
+  },
+
   // Daily Summary Functions
   async fetchTodayInwardSummary(companyCode: string): Promise<{ count: number; total: number }> {
     try {

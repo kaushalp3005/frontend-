@@ -56,19 +56,41 @@ export default function DeliveryChallan({
     return () => clearTimeout(timer)
   }, [])
 
-  // Check if any line has PM material type
-  const hasPMItems = items.some((item: any) =>
-    (item.material_type || item.rm_pm_fg_type || "").toUpperCase() === "PM"
-  )
+  // Determines whether an item should carry a Count value
+  const isCountableItem = (item: any) => {
+    const mt = (item.material_type || item.rm_pm_fg_type || "").toUpperCase()
+    const cat = (item.item_category || "").toUpperCase()
+    return mt === "PM" || cat === "PACKAGING"
+  }
 
-  // Compute total count (sum of unit_pack_size × qty for PM items)
+  // Check if any line has PM material type (kept for Gate Pass display)
+  const hasPMItems = items.some(isCountableItem)
+
+  // Show the Count column in the DC when PM/packaging items exist OR origin is A-68
+  const fromWarehouseIsA68 =
+    /(^|[^a-z])a[-\s]?68([^a-z]|$)/i.test(fromWarehouse || "") ||
+    /(^|[^a-z])a[-\s]?68([^a-z]|$)/i.test(warehouseAddresses[fromWarehouse]?.name || "")
+  const showCountColumn = hasPMItems || fromWarehouseIsA68
+
+  // Compute total count (sum of unit_pack_size × qty for PM/packaging items)
   const totalPMCount = items
-    .filter((item: any) => (item.material_type || item.rm_pm_fg_type || "").toUpperCase() === "PM")
+    .filter(isCountableItem)
     .reduce((sum: number, item: any) => {
       const packSize = parseFloat(String(item.unit_pack_size || item.pack_size || "0")) || 0
       const qty = parseFloat(String(item.qty || item.quantity || "1")) || 1
       return sum + packSize * qty
     }, 0)
+
+  // Per-row count helper (consolidated qty × unit_pack_size)
+  const itemCountFor = (item: any) => {
+    if (!isCountableItem(item)) return 0
+    const ups = parseFloat(String(item.unit_pack_size || item.pack_size || "0")) || 0
+    const qty = parseFloat(String(item.qty || item.quantity || "1")) || 1
+    return ups * qty
+  }
+
+  // Total column count for colSpan computations (default 8, +1 when Count column is visible)
+  const DC_COLS = showCountColumn ? 9 : 8
 
   // Consolidate items: group by item description and sum quantities/weights
   const consolidatedItems = React.useMemo(() => {
@@ -115,15 +137,15 @@ export default function DeliveryChallan({
   const renderDCHeader = (pageNum: number, isLastPage: boolean) => (
     <>
       <tr>
-        <td colSpan={8} style={{ 
-          textAlign: 'center', 
-          padding: '15px', 
+        <td colSpan={DC_COLS} style={{
+          textAlign: 'center',
+          padding: '15px',
           borderBottom: '2px solid #000'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '20px' }}>
-            <img 
-              src="/candor-logo.jpg" 
-              alt="Candor Foods Logo" 
+            <img
+              src="/candor-logo.jpg"
+              alt="Candor Foods Logo"
               style={{ height: '60px', width: 'auto' }}
             />
             <div>
@@ -135,22 +157,22 @@ export default function DeliveryChallan({
         </td>
       </tr>
       <tr>
-        <td colSpan={4} style={{ padding: '8px', border: '1px solid #000' }}>
+        <td colSpan={Math.ceil(DC_COLS / 2)} style={{ padding: '8px', border: '1px solid #000' }}>
           <strong>Transfer No:</strong> {dcNumber}
         </td>
-        <td colSpan={4} style={{ padding: '8px', border: '1px solid #000' }}>
+        <td colSpan={Math.floor(DC_COLS / 2)} style={{ padding: '8px', border: '1px solid #000' }}>
           <strong>Date:</strong> {requestDate}
         </td>
       </tr>
       <tr>
-        <td colSpan={4} style={{ padding: '8px', border: '1px solid #000', verticalAlign: 'top' }}>
+        <td colSpan={Math.ceil(DC_COLS / 2)} style={{ padding: '8px', border: '1px solid #000', verticalAlign: 'top' }}>
           <strong>FROM: Candor Foods</strong><br />
           <div style={{ marginTop: '5px', fontSize: '11px' }}>
             <div style={{ fontWeight: 'bold' }}>{warehouseAddresses[fromWarehouse]?.name || fromWarehouse}</div>
             <div style={{ color: '#666', marginTop: '3px' }}>{warehouseAddresses[fromWarehouse]?.address || ''}</div>
           </div>
         </td>
-        <td colSpan={4} style={{ padding: '8px', border: '1px solid #000', verticalAlign: 'top' }}>
+        <td colSpan={Math.floor(DC_COLS / 2)} style={{ padding: '8px', border: '1px solid #000', verticalAlign: 'top' }}>
           <strong>TO: Candor Foods</strong><br />
           <div style={{ marginTop: '5px', fontSize: '11px' }}>
             <div style={{ fontWeight: 'bold' }}>{warehouseAddresses[toWarehouse]?.name || toWarehouse}</div>
@@ -159,16 +181,16 @@ export default function DeliveryChallan({
         </td>
       </tr>
       <tr>
-        <td colSpan={4} style={{ padding: '8px', border: '1px solid #000' }}>
+        <td colSpan={Math.ceil(DC_COLS / 2)} style={{ padding: '8px', border: '1px solid #000' }}>
           <strong>Vehicle No:</strong> {vehicleNumber}
         </td>
-        <td colSpan={4} style={{ padding: '8px', border: '1px solid #000' }}>
+        <td colSpan={Math.floor(DC_COLS / 2)} style={{ padding: '8px', border: '1px solid #000' }}>
           <strong>Driver Name:</strong> {driverName}
         </td>
       </tr>
-      {hasPMItems && (
+      {showCountColumn && (
         <tr>
-          <td colSpan={8} style={{
+          <td colSpan={DC_COLS} style={{
             padding: '8px 12px', border: '1px solid #000', backgroundColor: '#fdf8f4',
             fontWeight: 'bold', fontSize: '12px', color: '#8B4049', letterSpacing: '0.3px'
           }}>
@@ -177,14 +199,17 @@ export default function DeliveryChallan({
         </tr>
       )}
       <tr style={{ backgroundColor: '#e0e0e0' }}>
-        <td style={{ padding: '6px 4px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', fontSize: '11px' }}>S.No</td>
-        <td style={{ padding: '6px 6px', border: '1px solid #000', fontWeight: 'bold', fontSize: '11px' }}>Item Description</td>
-        <td style={{ padding: '6px 4px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', fontSize: '11px' }}>Category</td>
-        <td style={{ padding: '6px 4px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', fontSize: '11px' }}>No. of Boxes</td>
-        <td style={{ padding: '6px 4px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', fontSize: '11px' }}>Qty</td>
-        <td style={{ padding: '6px 4px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', fontSize: '11px' }}>UOM</td>
-        <td style={{ padding: '6px 4px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', fontSize: '11px' }}>Pack Size (kg)</td>
-        <td style={{ padding: '6px 4px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'right', fontSize: '11px' }}>Net Wt (kg)</td>
+        <td style={{ padding: '6px 6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', fontSize: '10.5px', whiteSpace: 'nowrap' }}>S.No</td>
+        <td style={{ padding: '6px 8px', border: '1px solid #000', fontWeight: 'bold', fontSize: '10.5px' }}>Item Description</td>
+        <td style={{ padding: '6px 8px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', fontSize: '10.5px', whiteSpace: 'nowrap' }}>Category</td>
+        <td style={{ padding: '6px 6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', fontSize: '10.5px', whiteSpace: 'nowrap' }}>No. of Boxes</td>
+        <td style={{ padding: '6px 6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', fontSize: '10.5px', whiteSpace: 'nowrap' }}>Qty</td>
+        <td style={{ padding: '6px 6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', fontSize: '10.5px', whiteSpace: 'nowrap' }}>UOM</td>
+        <td style={{ padding: '6px 6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', fontSize: '10.5px', whiteSpace: 'nowrap' }}>Pack Size (kg)</td>
+        <td style={{ padding: '6px 6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'right', fontSize: '10.5px', whiteSpace: 'nowrap' }}>Net Wt (kg)</td>
+        {showCountColumn && (
+          <td style={{ padding: '6px 6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'right', fontSize: '10.5px', whiteSpace: 'nowrap' }}>Count</td>
+        )}
       </tr>
     </>
   )
@@ -199,18 +224,38 @@ export default function DeliveryChallan({
             borderCollapse: 'collapse',
             fontFamily: 'Arial, sans-serif',
             fontSize: '12px',
-            tableLayout: 'fixed',
+            // Auto layout: every column sizes to fit its actual content.
+            // Item Description is the only flexible (wrap) column; numeric
+            // columns stay nowrap so they hug their values.
+            tableLayout: 'auto',
             marginBottom: pageIndex === itemPages.length - 1 ? '20px' : '0'
           }}>
             <colgroup>
-              <col style={{ width: '5%' }} />
-              <col style={{ width: '32%' }} />
-              <col style={{ width: '12%' }} />
-              <col style={{ width: '9%' }} />
-              <col style={{ width: '8%' }} />
-              <col style={{ width: '7%' }} />
-              <col style={{ width: '11%' }} />
-              <col style={{ width: '16%' }} />
+              {showCountColumn ? (
+                <>
+                  <col />
+                  {/* Item Description grabs leftover space */}
+                  <col style={{ width: 'auto' }} />
+                  <col />
+                  <col />
+                  <col />
+                  <col />
+                  <col />
+                  <col />
+                  <col />
+                </>
+              ) : (
+                <>
+                  <col />
+                  <col style={{ width: 'auto' }} />
+                  <col />
+                  <col />
+                  <col />
+                  <col />
+                  <col />
+                  <col />
+                </>
+              )}
             </colgroup>
             <thead>
               {renderDCHeader(pageIndex + 1, pageIndex === itemPages.length - 1)}
@@ -219,30 +264,38 @@ export default function DeliveryChallan({
             <tbody>
               {pageItems.map((item, itemIndex) => {
                 const globalIndex = pageIndex * itemsPerPage + itemIndex
+                const rowCount = itemCountFor(item)
                 return (
                   <tr key={globalIndex}>
-                    <td style={{ padding: '5px 4px', border: '1px solid #000', textAlign: 'center', fontSize: '11px' }}>{globalIndex + 1}</td>
-                    <td style={{ padding: '5px 6px', border: '1px solid #000', fontSize: '11px', wordBreak: 'break-word' }}>
+                    <td style={{ padding: '5px 6px', border: '1px solid #000', textAlign: 'center', fontSize: '10.5px', whiteSpace: 'nowrap' }}>{globalIndex + 1}</td>
+                    <td style={{ padding: '5px 8px', border: '1px solid #000', fontSize: '10.5px', wordBreak: 'break-word' }}>
                       {item.item_desc_raw || item.item_description || 'N/A'}
                     </td>
-                    <td style={{ padding: '5px 4px', border: '1px solid #000', textAlign: 'center', fontSize: '11px', wordBreak: 'break-word' }}>
+                    <td style={{ padding: '5px 8px', border: '1px solid #000', textAlign: 'center', fontSize: '10.5px', whiteSpace: 'nowrap' }}>
                       {item.item_category || 'N/A'}
                     </td>
-                    <td style={{ padding: '5px 4px', border: '1px solid #000', textAlign: 'center', fontWeight: 'bold', fontSize: '11px' }}>
+                    <td style={{ padding: '5px 6px', border: '1px solid #000', textAlign: 'center', fontWeight: 'bold', fontSize: '10.5px', whiteSpace: 'nowrap' }}>
                       {Number(item.box_count || 0).toLocaleString('en-IN')}
                     </td>
-                    <td style={{ padding: '5px 4px', border: '1px solid #000', textAlign: 'center', fontWeight: 'bold', fontSize: '11px' }}>
+                    <td style={{ padding: '5px 6px', border: '1px solid #000', textAlign: 'center', fontWeight: 'bold', fontSize: '10.5px', whiteSpace: 'nowrap' }}>
                       {Number(item.qty || item.quantity || 0).toLocaleString('en-IN')}
                     </td>
-                    <td style={{ padding: '5px 4px', border: '1px solid #000', textAlign: 'center', fontSize: '11px' }}>
+                    <td style={{ padding: '5px 6px', border: '1px solid #000', textAlign: 'center', fontSize: '10.5px', whiteSpace: 'nowrap' }}>
                       {item.uom || 'N/A'}
                     </td>
-                    <td style={{ padding: '5px 4px', border: '1px solid #000', textAlign: 'center', fontSize: '11px' }}>
+                    <td style={{ padding: '5px 6px', border: '1px solid #000', textAlign: 'center', fontSize: '10.5px', whiteSpace: 'nowrap' }}>
                       {item.pack_size && item.pack_size !== '0' ? Number(item.pack_size).toLocaleString('en-IN', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) : 'N/A'}
                     </td>
-                    <td style={{ padding: '5px 4px', border: '1px solid #000', textAlign: 'right', fontSize: '11px' }}>
+                    <td style={{ padding: '5px 6px', border: '1px solid #000', textAlign: 'right', fontSize: '10.5px', whiteSpace: 'nowrap' }}>
                       {Number(item.net_weight || 0).toLocaleString('en-IN', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                     </td>
+                    {showCountColumn && (
+                      <td style={{ padding: '5px 6px', border: '1px solid #000', textAlign: 'right', fontWeight: 'bold', fontSize: '10.5px', whiteSpace: 'nowrap' }}>
+                        {rowCount > 0
+                          ? rowCount.toLocaleString('en-IN')
+                          : <span style={{ color: '#aaa', fontWeight: 'normal' }}>—</span>}
+                      </td>
+                    )}
                   </tr>
                 )
               })}
@@ -252,35 +305,45 @@ export default function DeliveryChallan({
                 <>
                   {/* Totals row — each value aligns directly under its column header */}
                   <tr style={{ backgroundColor: '#f0ebe3' }}>
-                    <td colSpan={3} style={{ padding: '8px 6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'right', fontSize: '11px' }}>
+                    <td colSpan={3} style={{ padding: '8px 8px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'right', fontSize: '10.5px', whiteSpace: 'nowrap' }}>
                       TOTAL ({consolidatedItems.length} item{consolidatedItems.length !== 1 ? 's' : ''}):
                     </td>
-                    <td style={{ padding: '8px 4px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', fontSize: '11px' }}>
+                    <td style={{ padding: '8px 6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', fontSize: '10.5px', whiteSpace: 'nowrap' }}>
                       {Number(items.length || 0).toLocaleString('en-IN')}
                     </td>
-                    <td style={{ padding: '8px 4px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', fontSize: '11px' }}>
+                    <td style={{ padding: '8px 6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', fontSize: '10.5px', whiteSpace: 'nowrap' }}>
                       {Number(totalQtyRequired || 0).toLocaleString('en-IN')}
                     </td>
-                    <td style={{ padding: '8px 4px', border: '1px solid #000', fontSize: '11px' }}>&nbsp;</td>
-                    <td style={{ padding: '8px 4px', border: '1px solid #000', fontSize: '11px' }}>&nbsp;</td>
-                    <td style={{ padding: '8px 4px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'right', fontSize: '11px' }}>
+                    <td style={{ padding: '8px 6px', border: '1px solid #000', fontSize: '10.5px' }}>&nbsp;</td>
+                    <td style={{ padding: '8px 6px', border: '1px solid #000', fontSize: '10.5px' }}>&nbsp;</td>
+                    <td style={{ padding: '8px 6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'right', fontSize: '10.5px', whiteSpace: 'nowrap' }}>
                       {Number(consolidatedItems.reduce((s, it) => s + (parseFloat(it.net_weight as unknown as string) || 0), 0)).toLocaleString('en-IN', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                     </td>
+                    {showCountColumn && (
+                      <td style={{
+                        padding: '8px 6px', border: '1px solid #000',
+                        fontWeight: 'bold', textAlign: 'right', fontSize: '10.5px',
+                        color: '#8B4049', backgroundColor: '#fdf8f4',
+                        whiteSpace: 'nowrap'
+                      }}>
+                        {totalPMCount > 0 ? totalPMCount.toLocaleString('en-IN') : '—'}
+                      </td>
+                    )}
                   </tr>
 
                   <tr>
-                    <td colSpan={8} style={{ padding: '10px', border: '1px solid #000' }}>
+                    <td colSpan={DC_COLS} style={{ padding: '10px', border: '1px solid #000' }}>
                       <strong>Reason:</strong> {reasonDescription}
                     </td>
                   </tr>
                   <tr>
-                    <td colSpan={8} style={{ padding: '10px', border: '1px solid #000', fontSize: '11px' }}>
+                    <td colSpan={DC_COLS} style={{ padding: '10px', border: '1px solid #000', fontSize: '11px' }}>
                       <strong>Auth Sign :</strong> _________________________
                     </td>
                   </tr>
 
                   <tr>
-                    <td colSpan={8} style={{
+                    <td colSpan={DC_COLS} style={{
                       padding: '15px 10px',
                       borderTop: '2px solid #000',
                       textAlign: 'center',
@@ -398,7 +461,7 @@ export default function DeliveryChallan({
             <td style={{ padding: '6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center' }}>Net Wt (Kg)</td>
             {hasPMItems && <td style={{ padding: '6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center' }}>Count</td>}
           </tr>
-          {consolidatedItems.slice(0, 5).map((item, index) => {
+          {consolidatedItems.map((item, index) => {
             const isPM = (item.material_type || item.rm_pm_fg_type || "").toUpperCase() === "PM"
             const itemCount = isPM
               ? (parseFloat(String(item.unit_pack_size || item.pack_size || "0")) || 0) * (parseFloat(String(item.qty || "1")) || 1)
@@ -428,13 +491,6 @@ export default function DeliveryChallan({
               </tr>
             )
           })}
-          {consolidatedItems.length > 5 && (
-            <tr>
-              <td colSpan={hasPMItems ? 6 : 5} style={{ padding: '5px', border: '1px solid #000', textAlign: 'center', fontStyle: 'italic', color: '#666' }}>
-                ... and {consolidatedItems.length - 5} more items (See Delivery Challan above for full details)
-              </td>
-            </tr>
-          )}
 
           {/* Summary Totals */}
           <tr style={{ backgroundColor: '#f8f9fa' }}>

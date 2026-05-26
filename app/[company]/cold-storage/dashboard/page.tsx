@@ -1,6 +1,7 @@
 "use client"
 
-import React, { useState, useEffect, useCallback, useRef, useMemo } from "react"
+import React, { useState, useEffect, useCallback, useRef, useMemo, createContext, useContext } from "react"
+import { createPortal } from "react-dom"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -65,6 +66,35 @@ type ExpandKey = string
 const makeKey = (...p: string[]): ExpandKey => p.join("|||")
 
 // ── Lot redirect helper ────────────────────────────────────────────
+// Async resolver: asks the backend which module owns the transaction.
+// Returns { url, exists } — if exists=false the Open button is disabled
+// and a Rectify CTA is shown instead (legacy / pre-IMS data).
+async function resolveLotRedirect(
+  company: string,
+  inwardNo: string | null | undefined,
+): Promise<{ url: string | null; exists: boolean }> {
+  if (!inwardNo) return { url: null, exists: false }
+  const trimmed = inwardNo.trim()
+  if (!trimmed) return { url: null, exists: false }
+  try {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+    const res = await fetch(
+      `${apiUrl}/cold-storage/dashboard/resolve-transaction?transaction_no=${encodeURIComponent(trimmed)}`,
+    )
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json()
+    if (data.exists_in_ims && data.url_path) {
+      return { url: `/${company}${data.url_path}`, exists: true }
+    }
+    return { url: null, exists: false }
+  } catch {
+    return { url: null, exists: false }
+  }
+}
+
+// Synchronous fallback for callers that need an immediate href (legacy paths).
+// Mirrors the previous prefix-based logic so old code paths still work while
+// the new <LotRedirectLink> component (below) does the proper resolver lookup.
 function getLotRedirectHref(company: string, inwardNo: string | null | undefined): string | null {
   if (!inwardNo) return null
   const trimmed = inwardNo.trim()
@@ -73,8 +103,10 @@ function getLotRedirectHref(company: string, inwardNo: string | null | undefined
   if (upper.startsWith("TR-") || upper.startsWith("TR2")) {
     return `/${company}/inward/${encodeURIComponent(trimmed)}`
   }
-  // TRANS... or unknown → cold storage entry
-  return `/${company}/cold-storage/entry/${encodeURIComponent(trimmed)}`
+  if (upper.startsWith("TRANS")) {
+    return null  // unresolved — render disabled in callers that check for null
+  }
+  return null
 }
 
 // ── Layer styles ───────────────────────────────────────────────────
@@ -85,6 +117,42 @@ const L_BG = [
   "bg-white dark:bg-slate-900/80 text-slate-600 dark:text-slate-400",
 ]
 const L_PL = ["pl-3", "pl-8", "pl-14", "pl-20"]
+
+// ── Ageing bracket helper ──────────────────────────────────────────
+// Cutoffs match backend dashboard_server.py:
+//   Months → <183 / 183-365 / 365-548 / 548-730 / >=730 days
+//   Days   → <30  / 30-60 / 60-90 / 90-180 / >=180  days
+// Legend colors (per dashboard legend): emerald, lime, amber, orange, red.
+type AgeingMode = "months" | "days"
+const AgeingModeContext = createContext<AgeingMode>("months")
+const BRACKET_LABELS_MONTHS = ["< 6 Months", "6-12 Months", "12-18 Months", "18-24 Months", "> 24 Months"] as const
+const BRACKET_LABELS_DAYS = ["< 30D", "30-60D", "60-90D", "90-180D", "> 180D"] as const
+const BRACKET_COLORS = [
+  "bg-emerald-50 text-emerald-700 border border-emerald-200",
+  "bg-lime-50 text-lime-700 border border-lime-200",
+  "bg-amber-50 text-amber-700 border border-amber-200",
+  "bg-orange-50 text-orange-700 border border-orange-200",
+  "bg-red-50 text-red-700 border border-red-200",
+]
+function getAgeingBracketInfo(ageingDays: number | null | undefined, mode: AgeingMode) {
+  if (ageingDays == null) return { label: "—", index: -1, colorCls: "bg-muted text-muted-foreground" }
+  let idx: number
+  if (mode === "days") {
+    if (ageingDays < 30) idx = 0
+    else if (ageingDays < 60) idx = 1
+    else if (ageingDays < 90) idx = 2
+    else if (ageingDays < 180) idx = 3
+    else idx = 4
+  } else {
+    if (ageingDays < 183) idx = 0
+    else if (ageingDays < 365) idx = 1
+    else if (ageingDays < 548) idx = 2
+    else if (ageingDays < 730) idx = 3
+    else idx = 4
+  }
+  const labels = mode === "days" ? BRACKET_LABELS_DAYS : BRACKET_LABELS_MONTHS
+  return { label: labels[idx], index: idx, colorCls: BRACKET_COLORS[idx] }
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // MAIN DASHBOARD
@@ -181,6 +249,34 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
   const ageingRef = useRef<HTMLDivElement>(null)
   const concRef = useRef<HTMLDivElement>(null)
   const tableRef = activeTab === "stock" ? stockRef : activeTab === "ageing" ? ageingRef : concRef
+  const snapshotPanelRef = useRef<HTMLDivElement>(null)
+  const copyPanelRef = useRef<HTMLDivElement>(null)
+
+  // Close Snapshot / Copy popups on outside click or Escape key.
+  useEffect(() => {
+    if (!snapshotLayerOpen && !copyLayerOpen) return
+    const onMouseDown = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (snapshotLayerOpen && snapshotPanelRef.current && !snapshotPanelRef.current.contains(t)) {
+        setSnapshotLayerOpen(false)
+      }
+      if (copyLayerOpen && copyPanelRef.current && !copyPanelRef.current.contains(t)) {
+        setCopyLayerOpen(false)
+      }
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setSnapshotLayerOpen(false)
+        setCopyLayerOpen(false)
+      }
+    }
+    document.addEventListener("mousedown", onMouseDown)
+    document.addEventListener("keydown", onKey)
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown)
+      document.removeEventListener("keydown", onKey)
+    }
+  }, [snapshotLayerOpen, copyLayerOpen])
 
   // Canonical (deduped) location list for filter dropdown
   const locations = useMemo(() => {
@@ -989,6 +1085,7 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
   // ═══════════════════════════════════════════════════════════════
   return (
     <PermissionGuard module="cold-storage" action="view">
+     <AgeingModeContext.Provider value={ageingMode}>
       <div className="p-3 sm:p-4 md:p-6 max-w-[1600px] mx-auto space-y-4">
 
         {/* ── HEADER ── */}
@@ -1026,7 +1123,7 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
             <Button variant="outline" size="sm" className="h-8 gap-1 text-xs" onClick={() => fetchData(true)} disabled={refreshing}>
               <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} /><span className="hidden sm:inline">Refresh</span>
             </Button>
-            <div className="relative">
+            <div className="relative" ref={snapshotPanelRef}>
               <Button variant="outline" size="sm" className="h-8 gap-1 text-xs" onClick={() => { setSnapshotLayerOpen(v => !v); setCopyLayerOpen(false) }} disabled={snapping}>
                 {snapping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Camera className="h-3.5 w-3.5" />}<span className="hidden sm:inline">{snapping ? "Capturing..." : "Snapshot"}</span>
               </Button>
@@ -1067,7 +1164,7 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
                 </div>
               )}
             </div>
-            <div className="relative">
+            <div className="relative" ref={copyPanelRef}>
               <Button variant="outline" size="sm" className="h-8 gap-1 text-xs" onClick={() => { setCopyLayerOpen(v => !v); setSnapshotLayerOpen(false) }}>
                 <Copy className="h-3.5 w-3.5" /><span className="hidden sm:inline">{copied ? "Copied!" : "Copy"}</span>
               </Button>
@@ -1296,7 +1393,7 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
                               className="cursor-pointer bg-gradient-to-r from-cyan-900 to-blue-900 text-white hover:from-cyan-800 hover:to-blue-800 transition-colors border-b-2 border-cyan-500/30"
                               onClick={() => toggle(whKey)}
                             >
-                              <td className="px-4 py-3 font-bold text-sm">
+                              <td className="px-4 py-3 font-bold text-sm whitespace-nowrap">
                                 <span className="inline-flex items-center gap-2">
                                   {isWhExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                                   <span className="inline-flex items-center gap-1.5">
@@ -1398,7 +1495,7 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
                           return (
                             <React.Fragment key={whKey}>
                               <tr className="cursor-pointer bg-gradient-to-r from-cyan-900 to-blue-900 text-white hover:from-cyan-800 hover:to-blue-800 transition-colors border-b-2 border-cyan-500/30" onClick={() => toggle(whKey)}>
-                                <td className="px-4 py-3 font-bold text-sm">
+                                <td className="px-4 py-3 font-bold text-sm whitespace-nowrap">
                                   <span className="inline-flex items-center gap-2">
                                     {isWhExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                                     <span className="inline-flex items-center gap-1.5">
@@ -1459,7 +1556,7 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
                               className="cursor-pointer bg-gradient-to-r from-cyan-900 to-blue-900 text-white hover:from-cyan-800 hover:to-blue-800 transition-colors border-b-2 border-cyan-500/30"
                               onClick={() => toggle(whKey)}
                             >
-                              <td className="px-4 py-3 font-bold text-sm">
+                              <td className="px-4 py-3 font-bold text-sm whitespace-nowrap">
                                 <span className="inline-flex items-center gap-2">
                                   {isWhExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                                   <span className="inline-flex items-center gap-1.5">
@@ -1533,7 +1630,28 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
                         <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                         <XAxis type="number" tickFormatter={v => fmtCr(v)} tick={{ fontSize: 11 }} />
                         <YAxis type="category" dataKey="item_subgroup" width={120} tick={{ fontSize: 11 }} />
-                        <ReTooltip formatter={(v: number, _: any, p: any) => [`${fmtCr(v)} · ${p.payload.portfolio_pct}% · ${p.payload.lot_count} lots`, ""]} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+                        <ReTooltip
+                          contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                          content={({ active, payload }) => {
+                            if (!active || !payload || !payload.length) return null
+                            const it = payload[0].payload
+                            const fragLabel = it.fragmentation === "high" ? "🔴 High" : it.fragmentation === "medium" ? "🟡 Medium" : "🟢 Normal"
+                            return (
+                              <div className="bg-white dark:bg-slate-900 border rounded-md shadow-lg p-2.5 text-xs space-y-0.5 max-w-[280px]">
+                                <p className="font-semibold text-sm">{it.item_subgroup}</p>
+                                <p className="text-muted-foreground">Group: <span className="text-foreground font-medium">{it.group_name}</span></p>
+                                <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 mt-1.5 pt-1.5 border-t">
+                                  <p className="text-muted-foreground">Kgs:</p><p className="text-right tabular-nums">{fmtKgs(it.total_kgs)}</p>
+                                  <p className="text-muted-foreground">Value:</p><p className="text-right tabular-nums">{fmtCr(it.total_value)}</p>
+                                  <p className="text-muted-foreground">Portfolio:</p><p className="text-right tabular-nums">{it.portfolio_pct}%</p>
+                                  <p className="text-muted-foreground">Avg Rate:</p><p className="text-right tabular-nums">{fmtRate(it.avg_rate)}/Kg</p>
+                                  <p className="text-muted-foreground">Lots:</p><p className="text-right tabular-nums">{it.lot_count}</p>
+                                  <p className="text-muted-foreground">Fragmentation:</p><p className="text-right">{fragLabel}</p>
+                                </div>
+                              </div>
+                            )
+                          }}
+                        />
                         <Bar dataKey="total_value" radius={[0, 4, 4, 0]}>
                           {concentrationData.items.slice(0, 10).map((it, i) => <Cell key={i} fill={it.portfolio_pct > 10 ? "#ef4444" : it.portfolio_pct > 5 ? "#f59e0b" : "#14b8a6"} />)}
                         </Bar>
@@ -1742,6 +1860,7 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
           </TabsContent>
         </Tabs>
       </div>
+     </AgeingModeContext.Provider>
     </PermissionGuard>
   )
 }
@@ -1785,7 +1904,7 @@ function StockL2({ l1, l2, ex, toggle, l3t, lc, ll }: SProps & { l2: StockLayer2
     return (<>
       <tr className={cn("border-b cursor-pointer transition-colors hover:bg-slate-200/50 dark:hover:bg-slate-700/50", L_BG[1])}
         onClick={() => l3t(l1.storage_location, l1.group_name, l2.item_subgroup, l3.item_mark)}>
-        <td className={cn("px-3 py-2", L_PL[1])}>
+        <td className={cn("px-3 py-2 whitespace-nowrap", L_PL[1])}>
           <span className="inline-flex items-center gap-1.5">
             {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
             {l2.item_subgroup}
@@ -1816,7 +1935,7 @@ function StockL2({ l1, l2, ex, toggle, l3t, lc, ll }: SProps & { l2: StockLayer2
   const k = makeKey(l1.storage_location, l1.group_name, l2.item_subgroup); const open = ex.has(k)
   return (<>
     <tr className={cn("border-b cursor-pointer transition-colors hover:bg-slate-200/50 dark:hover:bg-slate-700/50", L_BG[1])} onClick={() => toggle(k)}>
-      <td className={cn("px-3 py-2", L_PL[1])}>
+      <td className={cn("px-3 py-2 whitespace-nowrap", L_PL[1])}>
         <span className="inline-flex items-center gap-1.5">{open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}{l2.item_subgroup}</span>
       </td>
       <td className="text-right px-3 py-2 tabular-nums">{fmtKgs(l2.total_kgs)}</td>
@@ -1834,7 +1953,7 @@ function StockL3({ l1, l2, l3, ex, l3t, lc, ll }: { l1: StockLayer1; l2: StockLa
   const ap = l3.age_profile; const total = (ap?.age_0_6 || 0) + (ap?.age_6_12 || 0) + (ap?.age_12_18 || 0) + (ap?.age_18_24 || 0) + (ap?.age_24_plus || 0)
   return (<>
     <tr className={cn("border-b cursor-pointer transition-colors hover:bg-slate-100/80 dark:hover:bg-slate-800/60", L_BG[2])} onClick={() => l3t(l1.storage_location, l1.group_name, l2.item_subgroup, l3.item_mark)}>
-      <td className={cn("px-3 py-2", L_PL[2])}>
+      <td className={cn("px-3 py-2 whitespace-nowrap", L_PL[2])}>
         <span className="inline-flex items-center gap-1.5">{open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}{l3.item_mark}</span>
         {/* Age Profile Bar */}
         {total > 0 && (
@@ -1860,12 +1979,18 @@ function StockL3({ l1, l2, l3, ex, l3t, lc, ll }: { l1: StockLayer1; l2: StockLa
 
 // ── Lot hover popup content ────────────────────────────────────────
 function LotHoverContent({ lot, company }: { lot: LotDetail; company: string }) {
-  const redirectHref = getLotRedirectHref(company, lot.inward_no)
-  const ageColor =
-    lot.ageing_bracket === "> 24 Months" ? "bg-red-50 text-red-700 border-red-200" :
-    lot.ageing_bracket === "18-24 Months" ? "bg-amber-50 text-amber-700 border-amber-200" :
-    lot.ageing_bracket === "12-18 Months" ? "bg-amber-50 text-amber-700 border-amber-200" :
-    "bg-emerald-50 text-emerald-700 border-emerald-200"
+  const ageingMode = useContext(AgeingModeContext)
+  const [resolved, setResolved] = useState<{ url: string | null; exists: boolean } | null>(null)
+  const [rectifyOpen, setRectifyOpen] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    setResolved(null)
+    resolveLotRedirect(company, lot.inward_no).then((r) => {
+      if (!cancelled) setResolved(r)
+    })
+    return () => { cancelled = true }
+  }, [company, lot.inward_no])
+  const ageInfo = getAgeingBracketInfo(lot.ageing_days, ageingMode)
   const devColor =
     lot.deviation_level === "anomaly" ? "text-red-600" :
     lot.deviation_level === "review" ? "text-amber-600" :
@@ -1876,9 +2001,9 @@ function LotHoverContent({ lot, company }: { lot: LotDetail; company: string }) 
       <div className="px-4 py-3 bg-gradient-to-r from-cyan-50 to-blue-50 dark:from-cyan-950/30 dark:to-blue-950/30">
         <div className="flex items-center justify-between gap-2">
           <p className="text-sm font-semibold">Lot {lot.lot_no}</p>
-          {lot.ageing_bracket && (
-            <Badge variant="outline" className={cn("text-[10px]", ageColor)}>
-              {lot.ageing_days ?? "—"}d · {lot.ageing_bracket}
+          {lot.ageing_days != null && (
+            <Badge variant="outline" className={cn("text-[10px]", ageInfo.colorCls)}>
+              {lot.ageing_days}d · {ageInfo.label}
             </Badge>
           )}
         </div>
@@ -1970,26 +2095,131 @@ function LotHoverContent({ lot, company }: { lot: LotDetail; company: string }) 
         )}
       </div>
 
-      {redirectHref && (
-        <div className="px-4 py-2 bg-muted/20">
+      <div className="px-4 py-2 bg-muted/20 space-y-1.5">
+        {resolved === null ? (
+          <Button size="sm" variant="outline" className="w-full h-8 text-xs gap-1.5" disabled>
+            <Loader2 className="h-3 w-3 animate-spin" /> Resolving…
+          </Button>
+        ) : resolved.exists && resolved.url ? (
           <Button asChild size="sm" variant="outline" className="w-full h-8 text-xs gap-1.5">
-            <Link href={redirectHref}>
+            <Link href={resolved.url}>
               Open Transaction
               <ChevronRight className="h-3 w-3" />
             </Link>
           </Button>
-        </div>
+        ) : (
+          <>
+            <Button size="sm" variant="outline" className="w-full h-8 text-xs gap-1.5 cursor-not-allowed opacity-60" disabled
+              title="Legacy data — no IMS record for this transaction">
+              Legacy data · No IMS record
+            </Button>
+            <Button size="sm" variant="outline" className="w-full h-8 text-xs gap-1.5 border-amber-300 text-amber-700 hover:bg-amber-50"
+              onClick={() => setRectifyOpen(true)}>
+              Rectify lot
+              <ChevronRight className="h-3 w-3" />
+            </Button>
+          </>
+        )}
+      </div>
+      {rectifyOpen && (
+        <RectifyLotDialog
+          lot={lot}
+          company={company}
+          onClose={() => setRectifyOpen(false)}
+        />
       )}
     </div>
+  )
+}
+
+// ── Rectify dialog: edit warehouse/group/sub-group on a mis-labelled lot ──
+function RectifyLotDialog({
+  lot, company, onClose,
+}: { lot: LotDetail; company: string; onClose: () => void }) {
+  const [unit, setUnit] = useState((lot as any).unit || "")
+  const [storageLocation, setStorageLocation] = useState((lot as any).storage_location || "")
+  const [groupName, setGroupName] = useState((lot as any).group_name || "")
+  const [itemSubgroup, setItemSubgroup] = useState((lot as any).item_subgroup || "")
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const save = async () => {
+    setSaving(true); setError(null)
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const params = new URLSearchParams({ company: company.toLowerCase() })
+      if (unit) params.set("unit", unit)
+      if (storageLocation) params.set("storage_location", storageLocation)
+      if (groupName) params.set("group_name", groupName)
+      if (itemSubgroup) params.set("item_subgroup", itemSubgroup)
+      const res = await fetch(
+        `${apiUrl}/cold-storage/dashboard/lots/${encodeURIComponent(lot.inward_no || "")}/rectify?${params.toString()}`,
+        { method: "POST" },
+      )
+      if (!res.ok) throw new Error(await res.text())
+      onClose()
+      if (typeof window !== "undefined") window.location.reload()
+    } catch (e: any) {
+      setError(e?.message || "Update failed")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 p-4"
+         onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="bg-white rounded-lg shadow-2xl w-full max-w-md p-5">
+        <h3 className="text-base font-semibold mb-1">Rectify lot</h3>
+        <p className="text-xs text-muted-foreground mb-3">
+          Edit warehouse / group / sub-group for every row sharing this inward no.
+        </p>
+        <div className="space-y-2">
+          <label className="block">
+            <span className="text-[11px] font-medium text-gray-600">Unit (warehouse code)</span>
+            <input value={unit} onChange={(e) => setUnit(e.target.value)}
+              placeholder="e.g. D-39, Rishi, Supreme"
+              className="mt-0.5 w-full h-8 px-2 text-sm border rounded" />
+          </label>
+          <label className="block">
+            <span className="text-[11px] font-medium text-gray-600">Storage location</span>
+            <input value={storageLocation} onChange={(e) => setStorageLocation(e.target.value)}
+              className="mt-0.5 w-full h-8 px-2 text-sm border rounded" />
+          </label>
+          <label className="block">
+            <span className="text-[11px] font-medium text-gray-600">Group</span>
+            <input value={groupName} onChange={(e) => setGroupName(e.target.value)}
+              placeholder="e.g. Dates, Raisins"
+              className="mt-0.5 w-full h-8 px-2 text-sm border rounded" />
+          </label>
+          <label className="block">
+            <span className="text-[11px] font-medium text-gray-600">Sub-group</span>
+            <input value={itemSubgroup} onChange={(e) => setItemSubgroup(e.target.value)}
+              placeholder="e.g. Fard, Khalas, Ajwa"
+              className="mt-0.5 w-full h-8 px-2 text-sm border rounded" />
+          </label>
+        </div>
+        {error && <p className="text-xs text-red-600 mt-2">{error}</p>}
+        <div className="flex items-center justify-end gap-2 mt-4">
+          <Button variant="outline" size="sm" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button size="sm" onClick={save} disabled={saving}>
+            {saving ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}
+            Save
+          </Button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   )
 }
 
 function StockLotRow({ lot, avgRate }: { lot: LotDetail; avgRate: number }) {
   const params = useParams()
   const company = params?.company as string
+  const ageingMode = useContext(AgeingModeContext)
   const devCls = lot.deviation_level === "anomaly" ? "bg-[#fee2e2] text-[#991b1b]" : lot.deviation_level === "review" ? "bg-[#fef3c7] text-[#92400e]" : "bg-[#dcfce7] text-[#166534]"
   const devIcon = lot.deviation_level === "normal" ? "●" : lot.deviation_pct > 0 ? "▲" : "▼"
-  const ageBadge = lot.ageing_bracket === "> 24 Months" ? "bg-[#fee2e2] text-[#991b1b]" : lot.ageing_bracket === "18-24 Months" ? "bg-[#fef3c7] text-[#92400e]" : "bg-muted text-muted-foreground"
+  const ageInfo = getAgeingBracketInfo(lot.ageing_days, ageingMode)
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -2000,20 +2230,20 @@ function StockLotRow({ lot, avgRate }: { lot: LotDetail; avgRate: number }) {
             "hover:bg-slate-200/60 dark:hover:bg-slate-700/60"
           )}
         >
-          <td className={cn("px-3 py-2", L_PL[3])}>
+          <td className={cn("px-3 py-2 whitespace-nowrap", L_PL[3])}>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
               <span className="font-medium text-foreground">Lot {lot.lot_no}</span>
               {lot.inward_dt && <span className="text-muted-foreground">{format(new Date(lot.inward_dt), "dd MMM yyyy")}</span>}
               {lot.inward_no && <span className="text-muted-foreground">GRN: {lot.inward_no}</span>}
               {lot.box_count > 1 && <span className="text-blue-600 dark:text-blue-400 font-medium">{lot.box_count} boxes</span>}
               {lot.no_of_cartons > 0 && <span className="text-muted-foreground">{lot.no_of_cartons} ctns &times; {lot.weight_kg} Kg</span>}
-              {lot.ageing_days !== null && (
-                <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full font-medium", ageBadge)}>
-                  {lot.ageing_days}d &middot; {lot.ageing_bracket}
-                </span>
-              )}
             </div>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5">
+              {lot.ageing_days != null && (
+                <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full font-medium", ageInfo.colorCls)}>
+                  {lot.ageing_days}d &middot; {ageInfo.label}
+                </span>
+              )}
               {lot.item_description && <span className="text-muted-foreground">{lot.item_description}</span>}
               {lot.exporter && <span className="text-muted-foreground">Exp: {lot.exporter}</span>}
               {lot.spl_remarks && <span className="text-muted-foreground italic">{lot.spl_remarks}</span>}
@@ -2099,7 +2329,7 @@ function AgeL2({ l1, l2, view, ex, toggle, l3t, lc, ll }: AProps & { l2: AgeingL
     return (<>
       <tr className={cn("border-b cursor-pointer hover:bg-slate-200/50 dark:hover:bg-slate-700/50 transition-colors", L_BG[1])}
         onClick={() => l3t(l1.storage_location, l1.group_name, l2.item_subgroup, l3.item_mark)}>
-        <td className={cn("px-3 py-2", L_PL[1])}>
+        <td className={cn("px-3 py-2 whitespace-nowrap", L_PL[1])}>
           <span className="inline-flex items-center gap-1.5">
             {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
             {l2.item_subgroup}
@@ -2117,7 +2347,7 @@ function AgeL2({ l1, l2, view, ex, toggle, l3t, lc, ll }: AProps & { l2: AgeingL
   const k = makeKey(l1.storage_location, l1.group_name, l2.item_subgroup); const open = ex.has(k)
   return (<>
     <tr className={cn("border-b cursor-pointer hover:bg-slate-200/50 dark:hover:bg-slate-700/50 transition-colors", L_BG[1])} onClick={() => toggle(k)}>
-      <td className={cn("px-3 py-2", L_PL[1])}>
+      <td className={cn("px-3 py-2 whitespace-nowrap", L_PL[1])}>
         <span className="inline-flex items-center gap-1.5">{open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}{l2.item_subgroup}</span>
       </td>
       <AgeingCells d={l2} view={view} />
@@ -2131,7 +2361,7 @@ function AgeL3({ l1, l2, l3, view, ex, l3t, lc, ll }: { l1: AgeingLayer1; l2: Ag
   const lots = lc[k]?.lots; const isLd = ll.has(k)
   return (<>
     <tr className={cn("border-b cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/60 transition-colors", L_BG[2])} onClick={() => l3t(l1.storage_location, l1.group_name, l2.item_subgroup, l3.item_mark)}>
-      <td className={cn("px-3 py-2", L_PL[2])}>
+      <td className={cn("px-3 py-2 whitespace-nowrap", L_PL[2])}>
         <span className="inline-flex items-center gap-1.5">{open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}{l3.item_mark}</span>
       </td>
       <AgeingCells d={l3} view={view} />
@@ -2145,10 +2375,9 @@ function AgeL3({ l1, l2, l3, view, ex, l3t, lc, ll }: { l1: AgeingLayer1; l2: Ag
 function AgeLotRow({ lot, view }: { lot: LotDetail; view: AView }) {
   const params = useParams()
   const company = params?.company as string
-  const brackets = ["< 6 Months", "6-12 Months", "12-18 Months", "18-24 Months", "> 24 Months"]
-  const isAmber = lot.ageing_bracket === "18-24 Months"
-  const isRed = lot.ageing_bracket === "> 24 Months"
-  const badgeCls = isRed ? "bg-[#fee2e2] text-[#991b1b]" : isAmber ? "bg-[#fef3c7] text-[#92400e]" : "bg-muted text-muted-foreground"
+  const ageingMode = useContext(AgeingModeContext)
+  const ageInfo = getAgeingBracketInfo(lot.ageing_days, ageingMode)
+  const brackets = ageingMode === "days" ? BRACKET_LABELS_DAYS : BRACKET_LABELS_MONTHS
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -2159,20 +2388,24 @@ function AgeLotRow({ lot, view }: { lot: LotDetail; view: AView }) {
             "hover:bg-slate-200/60 dark:hover:bg-slate-700/60"
           )}
         >
-          <td className={cn("px-3 py-2", L_PL[3])}>
+          <td className={cn("px-3 py-2 whitespace-nowrap", L_PL[3])}>
             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
               <span className="font-medium text-foreground">Lot {lot.lot_no}</span>
               {lot.inward_dt && <span className="text-muted-foreground">{format(new Date(lot.inward_dt), "dd MMM yyyy")}</span>}
               {lot.inward_no && <span className="text-muted-foreground">GRN: {lot.inward_no}</span>}
               {lot.box_count > 1 && <span className="text-blue-600 dark:text-blue-400 font-medium">{lot.box_count} boxes</span>}
               {lot.no_of_cartons > 0 && <span className="text-muted-foreground">{lot.no_of_cartons} ctns</span>}
-              {lot.ageing_days !== null && <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full font-medium", badgeCls)}>{lot.ageing_days}d &middot; {lot.ageing_bracket}</span>}
             </div>
+            {lot.ageing_days != null && (
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
+                <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full font-medium", ageInfo.colorCls)}>{lot.ageing_days}d &middot; {ageInfo.label}</span>
+              </div>
+            )}
           </td>
-          {brackets.map(b => {
-            const match = lot.ageing_bracket === b
-            const cellAmber = b === "18-24 Months" && match
-            const cellRed = b === "> 24 Months" && match
+          {brackets.map((b, idx) => {
+            const match = ageInfo.index === idx
+            const cellAmber = idx === 3 && match  // 4th bracket (18-24M / 90-180D)
+            const cellRed = idx === 4 && match    // 5th bracket (>24M / >180D)
             return (
               <td key={b} className={cn("text-right px-3 py-1.5 tabular-nums",
                 cellAmber && "bg-[#fef3c7] text-[#92400e] font-medium",
@@ -2231,7 +2464,7 @@ function AgeDayL2({ l1, l2, view, ex, toggle }: ADayProps & { l2: AgeingDayLayer
   const k = makeKey(l1.storage_location, l1.group_name, l2.item_subgroup); const open = ex.has(k)
   return (<>
     <tr className={cn("border-b cursor-pointer hover:bg-slate-200/50 dark:hover:bg-slate-700/50 transition-colors", L_BG[1])} onClick={() => toggle(k)}>
-      <td className={cn("px-3 py-2", L_PL[1])}>
+      <td className={cn("px-3 py-2 whitespace-nowrap", L_PL[1])}>
         <span className="inline-flex items-center gap-1.5">{open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}{l2.item_subgroup}</span>
       </td>
       <AgeDayCells d={l2} view={view} />
@@ -2243,7 +2476,7 @@ function AgeDayL2({ l1, l2, view, ex, toggle }: ADayProps & { l2: AgeingDayLayer
 function AgeDayL3({ l3, view }: { l3: AgeingDayLayer3; view: AView }) {
   return (
     <tr className={cn("border-b transition-colors", L_BG[2])}>
-      <td className={cn("px-3 py-2", L_PL[2])}>
+      <td className={cn("px-3 py-2 whitespace-nowrap", L_PL[2])}>
         <span className="inline-flex items-center gap-1.5">{l3.item_mark}</span>
       </td>
       <AgeDayCells d={l3} view={view} />

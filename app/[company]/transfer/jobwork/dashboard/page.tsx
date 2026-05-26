@@ -1,6 +1,6 @@
-"use client"
+﻿"use client"
 
-import React, { useState, useMemo } from "react"
+import React, { useState, useMemo, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -13,6 +13,9 @@ import type {
   JobworkSummaryRow,
   InwardReceipt,
   GroupByOption,
+  ProcessType,
+  JWOStatus,
+  LossStatus,
 } from "@/types/jobwork"
 import {
   Copy, Download, Send, Loader2, ChevronDown,
@@ -20,79 +23,12 @@ import {
   TrendingUp, AlertTriangle, Clock, CheckCircle, BarChart3,
 } from "lucide-react"
 
-// ═══════════════════════════════════════════════════════════════
-// MOCK FLAT DATA — every JWO as a row, all filtering is client-side
-// ═══════════════════════════════════════════════════════════════
-
-const ALL_JWOS: JobworkDetailRow[] = [
-  { id: 1, jwo_id: "JWO-2026-001", dispatch_date: "2026-01-10", vendor_name: "Raju Cracking Works", item_name: "Almond Inshell", process_type: "Cracking", qty_dispatched: 5000, fg_received: 3600, waste_received: 700, rejection: 100, unaccounted_balance: 600, actual_loss_pct: 12.0, loss_status: "Excess Loss", jwo_status: "Fully Received", turnaround_days: 14 },
-  { id: 2, jwo_id: "JWO-2026-004", dispatch_date: "2026-01-22", vendor_name: "Raju Cracking Works", item_name: "Walnut Inshell", process_type: "Cracking", qty_dispatched: 3200, fg_received: 2350, waste_received: 450, rejection: 80, unaccounted_balance: 320, actual_loss_pct: 7.5, loss_status: "Normal", jwo_status: "Reconciled", turnaround_days: 20 },
-  { id: 3, jwo_id: "JWO-2026-007", dispatch_date: "2026-02-05", vendor_name: "Raju Cracking Works", item_name: "Pistachio Inshell", process_type: "Cracking", qty_dispatched: 4500, fg_received: 3200, waste_received: 600, rejection: 90, unaccounted_balance: 610, actual_loss_pct: 9.1, loss_status: "Normal", jwo_status: "Closed", turnaround_days: 16 },
-  { id: 4, jwo_id: "JWO-2026-011", dispatch_date: "2026-02-18", vendor_name: "Raju Cracking Works", item_name: "Almond Inshell", process_type: "Cracking", qty_dispatched: 2800, fg_received: 2050, waste_received: 380, rejection: 50, unaccounted_balance: 320, actual_loss_pct: 8.6, loss_status: "Normal", jwo_status: "Fully Received", turnaround_days: 19 },
-  { id: 5, jwo_id: "JWO-2026-015", dispatch_date: "2026-03-01", vendor_name: "Raju Cracking Works", item_name: "Walnut Inshell", process_type: "Cracking", qty_dispatched: 3500, fg_received: 2400, waste_received: 520, rejection: 80, unaccounted_balance: 500, actual_loss_pct: 10.3, loss_status: "Underweight Waste", jwo_status: "Partially Received", turnaround_days: null },
-  { id: 6, jwo_id: "JWO-2026-018", dispatch_date: "2026-03-10", vendor_name: "Raju Cracking Works", item_name: "Pistachio Inshell", process_type: "Cracking", qty_dispatched: 2500, fg_received: 0, waste_received: 0, rejection: 0, unaccounted_balance: 2500, actual_loss_pct: 0, loss_status: "Pending", jwo_status: "Open", turnaround_days: null },
-  { id: 7, jwo_id: "JWO-2026-020", dispatch_date: "2026-02-10", vendor_name: "Raju Cracking Works", item_name: "Almond Inshell", process_type: "Cracking", qty_dispatched: 2200, fg_received: 1600, waste_received: 300, rejection: 40, unaccounted_balance: 260, actual_loss_pct: 8.2, loss_status: "Normal", jwo_status: "Closed", turnaround_days: 21 },
-  { id: 8, jwo_id: "JWO-2026-022", dispatch_date: "2026-01-15", vendor_name: "Raju Cracking Works", item_name: "Cashew Whole", process_type: "Cracking", qty_dispatched: 1800, fg_received: 1300, waste_received: 250, rejection: 50, unaccounted_balance: 200, actual_loss_pct: 7.8, loss_status: "Normal", jwo_status: "Reconciled", turnaround_days: 17 },
-  { id: 9, jwo_id: "JWO-2026-025", dispatch_date: "2026-02-22", vendor_name: "Raju Cracking Works", item_name: "Pistachio Inshell", process_type: "Cracking", qty_dispatched: 2000, fg_received: 1500, waste_received: 280, rejection: 30, unaccounted_balance: 190, actual_loss_pct: 6.5, loss_status: "Normal", jwo_status: "Closed", turnaround_days: 13 },
-  { id: 10, jwo_id: "JWO-2026-028", dispatch_date: "2026-03-05", vendor_name: "Raju Cracking Works", item_name: "Walnut Inshell", process_type: "Cracking", qty_dispatched: 1500, fg_received: 1000, waste_received: 220, rejection: 30, unaccounted_balance: 250, actual_loss_pct: 11.7, loss_status: "Excess Loss", jwo_status: "Fully Received", turnaround_days: 18 },
-  { id: 11, jwo_id: "JWO-2026-030", dispatch_date: "2026-03-12", vendor_name: "Raju Cracking Works", item_name: "Almond Inshell", process_type: "Cracking", qty_dispatched: 1800, fg_received: 1200, waste_received: 250, rejection: 0, unaccounted_balance: 350, actual_loss_pct: 0, loss_status: "Pending", jwo_status: "Open", turnaround_days: null },
-  { id: 12, jwo_id: "JWO-2026-032", dispatch_date: "2026-03-18", vendor_name: "Raju Cracking Works", item_name: "Cashew Whole", process_type: "Cracking", qty_dispatched: 1700, fg_received: 1200, waste_received: 250, rejection: 0, unaccounted_balance: 250, actual_loss_pct: 0, loss_status: "Pending", jwo_status: "Partially Received", turnaround_days: null },
-  { id: 13, jwo_id: "JWO-2026-002", dispatch_date: "2026-01-12", vendor_name: "Sharma Processors", item_name: "Dates (with seed)", process_type: "Deseeding", qty_dispatched: 4000, fg_received: 2800, waste_received: 600, rejection: 80, unaccounted_balance: 520, actual_loss_pct: 13.0, loss_status: "Excess Loss", jwo_status: "Reconciled", turnaround_days: 25 },
-  { id: 14, jwo_id: "JWO-2026-005", dispatch_date: "2026-01-28", vendor_name: "Sharma Processors", item_name: "Dried Figs", process_type: "Slicing", qty_dispatched: 2500, fg_received: 1900, waste_received: 300, rejection: 40, unaccounted_balance: 260, actual_loss_pct: 7.2, loss_status: "Normal", jwo_status: "Closed", turnaround_days: 18 },
-  { id: 15, jwo_id: "JWO-2026-009", dispatch_date: "2026-02-08", vendor_name: "Sharma Processors", item_name: "Apricot Whole", process_type: "Dicing", qty_dispatched: 3000, fg_received: 2100, waste_received: 400, rejection: 70, unaccounted_balance: 430, actual_loss_pct: 10.7, loss_status: "Excess Loss", jwo_status: "Fully Received", turnaround_days: 22 },
-  { id: 16, jwo_id: "JWO-2026-013", dispatch_date: "2026-02-20", vendor_name: "Sharma Processors", item_name: "Dates (with seed)", process_type: "Deseeding", qty_dispatched: 3500, fg_received: 2600, waste_received: 480, rejection: 60, unaccounted_balance: 360, actual_loss_pct: 7.3, loss_status: "Normal", jwo_status: "Closed", turnaround_days: 20 },
-  { id: 17, jwo_id: "JWO-2026-016", dispatch_date: "2026-03-02", vendor_name: "Sharma Processors", item_name: "Raisins Golden", process_type: "Stuffing", qty_dispatched: 2000, fg_received: 1500, waste_received: 280, rejection: 30, unaccounted_balance: 190, actual_loss_pct: 6.5, loss_status: "Normal", jwo_status: "Fully Received", turnaround_days: 19 },
-  { id: 18, jwo_id: "JWO-2026-019", dispatch_date: "2026-03-08", vendor_name: "Sharma Processors", item_name: "Dried Figs", process_type: "Slicing", qty_dispatched: 2200, fg_received: 1600, waste_received: 280, rejection: 40, unaccounted_balance: 280, actual_loss_pct: 9.1, loss_status: "Normal", jwo_status: "Reconciled", turnaround_days: 16 },
-  { id: 19, jwo_id: "JWO-2026-023", dispatch_date: "2026-03-14", vendor_name: "Sharma Processors", item_name: "Apricot Whole", process_type: "Dicing", qty_dispatched: 2500, fg_received: 1700, waste_received: 300, rejection: 50, unaccounted_balance: 450, actual_loss_pct: 12.0, loss_status: "Underweight Waste", jwo_status: "Partially Received", turnaround_days: null },
-  { id: 20, jwo_id: "JWO-2026-026", dispatch_date: "2026-03-20", vendor_name: "Sharma Processors", item_name: "Dates (with seed)", process_type: "Deseeding", qty_dispatched: 2300, fg_received: 1600, waste_received: 160, rejection: 50, unaccounted_balance: 490, actual_loss_pct: 14.3, loss_status: "Excess Loss", jwo_status: "Fully Received", turnaround_days: 24 },
-  { id: 21, jwo_id: "JWO-2026-003", dispatch_date: "2026-01-18", vendor_name: "Patel Deseeding Unit", item_name: "Dates (with seed)", process_type: "Deseeding", qty_dispatched: 3500, fg_received: 2700, waste_received: 450, rejection: 50, unaccounted_balance: 300, actual_loss_pct: 6.0, loss_status: "Normal", jwo_status: "Closed", turnaround_days: 12 },
-  { id: 22, jwo_id: "JWO-2026-008", dispatch_date: "2026-02-06", vendor_name: "Patel Deseeding Unit", item_name: "Dates (with seed)", process_type: "Deseeding", qty_dispatched: 3000, fg_received: 2200, waste_received: 400, rejection: 60, unaccounted_balance: 340, actual_loss_pct: 8.3, loss_status: "Normal", jwo_status: "Reconciled", turnaround_days: 16 },
-  { id: 23, jwo_id: "JWO-2026-012", dispatch_date: "2026-02-19", vendor_name: "Patel Deseeding Unit", item_name: "Dates (with seed)", process_type: "Deseeding", qty_dispatched: 2800, fg_received: 2140, waste_received: 350, rejection: 40, unaccounted_balance: 270, actual_loss_pct: 6.8, loss_status: "Normal", jwo_status: "Closed", turnaround_days: 14 },
-  { id: 24, jwo_id: "JWO-2026-017", dispatch_date: "2026-03-04", vendor_name: "Patel Deseeding Unit", item_name: "Dates (with seed)", process_type: "Deseeding", qty_dispatched: 2500, fg_received: 1800, waste_received: 350, rejection: 30, unaccounted_balance: 320, actual_loss_pct: 8.8, loss_status: "Normal", jwo_status: "Fully Received", turnaround_days: 17 },
-  { id: 25, jwo_id: "JWO-2026-024", dispatch_date: "2026-03-15", vendor_name: "Patel Deseeding Unit", item_name: "Dates (with seed)", process_type: "Deseeding", qty_dispatched: 2200, fg_received: 1700, waste_received: 250, rejection: 30, unaccounted_balance: 220, actual_loss_pct: 7.0, loss_status: "Pending", jwo_status: "Open", turnaround_days: null },
-  { id: 26, jwo_id: "JWO-2026-006", dispatch_date: "2026-02-01", vendor_name: "Gujarat Dry Fruits Processing", item_name: "Cashew Whole", process_type: "Thermopacking", qty_dispatched: 3000, fg_received: 2200, waste_received: 400, rejection: 60, unaccounted_balance: 340, actual_loss_pct: 7.6, loss_status: "Normal", jwo_status: "Closed", turnaround_days: 10 },
-  { id: 27, jwo_id: "JWO-2026-014", dispatch_date: "2026-02-21", vendor_name: "Gujarat Dry Fruits Processing", item_name: "Raisins Golden", process_type: "Thermopacking", qty_dispatched: 2800, fg_received: 2100, waste_received: 380, rejection: 60, unaccounted_balance: 260, actual_loss_pct: 6.3, loss_status: "Normal", jwo_status: "Reconciled", turnaround_days: 11 },
-  { id: 28, jwo_id: "JWO-2026-021", dispatch_date: "2026-03-06", vendor_name: "Gujarat Dry Fruits Processing", item_name: "Almond Inshell", process_type: "Thermopacking", qty_dispatched: 2700, fg_received: 1900, waste_received: 320, rejection: 60, unaccounted_balance: 420, actual_loss_pct: 6.5, loss_status: "Normal", jwo_status: "Closed", turnaround_days: 14 },
-  { id: 29, jwo_id: "JWO-2026-010", dispatch_date: "2026-02-12", vendor_name: "Mehta Thermopacking", item_name: "Pistachio Inshell", process_type: "Thermopacking", qty_dispatched: 2500, fg_received: 1800, waste_received: 340, rejection: 45, unaccounted_balance: 315, actual_loss_pct: 8.4, loss_status: "Normal", jwo_status: "Open", turnaround_days: null },
-  { id: 30, jwo_id: "JWO-2026-027", dispatch_date: "2026-03-16", vendor_name: "Mehta Thermopacking", item_name: "Cashew Whole", process_type: "Thermopacking", qty_dispatched: 2000, fg_received: 1400, waste_received: 260, rejection: 40, unaccounted_balance: 300, actual_loss_pct: 10.0, loss_status: "Underweight Waste", jwo_status: "Partially Received", turnaround_days: null },
-  { id: 31, jwo_id: "JWO-2026-029", dispatch_date: "2026-01-25", vendor_name: "Singh Slicing Co.", item_name: "Dried Figs", process_type: "Slicing", qty_dispatched: 1800, fg_received: 1000, waste_received: 280, rejection: 40, unaccounted_balance: 480, actual_loss_pct: 17.8, loss_status: "Excess Loss", jwo_status: "Reconciled", turnaround_days: 22 },
-  { id: 32, jwo_id: "JWO-2026-031", dispatch_date: "2026-02-15", vendor_name: "Singh Slicing Co.", item_name: "Apricot Whole", process_type: "Slicing", qty_dispatched: 1500, fg_received: 1100, waste_received: 200, rejection: 30, unaccounted_balance: 170, actual_loss_pct: 7.6, loss_status: "Normal", jwo_status: "Closed", turnaround_days: 18 },
-  { id: 33, jwo_id: "JWO-2026-033", dispatch_date: "2026-03-01", vendor_name: "Singh Slicing Co.", item_name: "Dried Figs", process_type: "Slicing", qty_dispatched: 1200, fg_received: 800, waste_received: 200, rejection: 30, unaccounted_balance: 170, actual_loss_pct: 9.4, loss_status: "Normal", jwo_status: "Fully Received", turnaround_days: 20 },
-  { id: 34, jwo_id: "JWO-2026-034", dispatch_date: "2026-03-19", vendor_name: "Singh Slicing Co.", item_name: "Apricot Whole", process_type: "Dicing", qty_dispatched: 1500, fg_received: 300, waste_received: 240, rejection: 40, unaccounted_balance: 920, actual_loss_pct: 0, loss_status: "Pending", jwo_status: "Open", turnaround_days: null },
-]
-
-const MOCK_JWO_RECEIPTS: Record<number, InwardReceipt[]> = {
-  1: [
-    { id: 101, jwo_id: 1, ir_number: "IR-2026-001", ir_date: "2026-01-16", receipt_type: "Partial", fg_qty_received: 2000, waste_qty_received: 350, rejection_qty: 50, actual_loss_pct: 4.0, loss_status: "Normal", remarks: "First batch - good quality", created_at: "2026-01-16" },
-    { id: 102, jwo_id: 1, ir_number: "IR-2026-004", ir_date: "2026-01-22", receipt_type: "Partial", fg_qty_received: 1000, waste_qty_received: 200, rejection_qty: 30, actual_loss_pct: 8.4, loss_status: "Normal", remarks: "Second batch received", created_at: "2026-01-22" },
-    { id: 103, jwo_id: 1, ir_number: "IR-2026-008", ir_date: "2026-01-24", receipt_type: "Final", fg_qty_received: 600, waste_qty_received: 150, rejection_qty: 20, actual_loss_pct: 12.0, loss_status: "Excess Loss", remarks: "Final batch - excess loss noted", created_at: "2026-01-24" },
-  ],
-  2: [
-    { id: 104, jwo_id: 2, ir_number: "IR-2026-006", ir_date: "2026-02-02", receipt_type: "Partial", fg_qty_received: 1500, waste_qty_received: 250, rejection_qty: 40, actual_loss_pct: 5.6, loss_status: "Normal", remarks: "Good condition", created_at: "2026-02-02" },
-    { id: 105, jwo_id: 2, ir_number: "IR-2026-012", ir_date: "2026-02-11", receipt_type: "Final", fg_qty_received: 850, waste_qty_received: 200, rejection_qty: 40, actual_loss_pct: 7.5, loss_status: "Normal", remarks: "Completed", created_at: "2026-02-11" },
-  ],
-  5: [
-    { id: 106, jwo_id: 5, ir_number: "IR-2026-020", ir_date: "2026-03-10", receipt_type: "Partial", fg_qty_received: 1500, waste_qty_received: 320, rejection_qty: 50, actual_loss_pct: 6.6, loss_status: "Normal", remarks: "First lot received", created_at: "2026-03-10" },
-    { id: 107, jwo_id: 5, ir_number: "IR-2026-025", ir_date: "2026-03-18", receipt_type: "Partial", fg_qty_received: 900, waste_qty_received: 200, rejection_qty: 30, actual_loss_pct: 10.3, loss_status: "Underweight Waste", remarks: "Underweight detected", created_at: "2026-03-18" },
-  ],
-  13: [
-    { id: 108, jwo_id: 13, ir_number: "IR-2026-002", ir_date: "2026-01-20", receipt_type: "Partial", fg_qty_received: 1500, waste_qty_received: 300, rejection_qty: 40, actual_loss_pct: 4.0, loss_status: "Normal", remarks: "Deseeded dates - clean batch", created_at: "2026-01-20" },
-    { id: 109, jwo_id: 13, ir_number: "IR-2026-007", ir_date: "2026-01-30", receipt_type: "Partial", fg_qty_received: 800, waste_qty_received: 180, rejection_qty: 20, actual_loss_pct: 9.0, loss_status: "Normal", remarks: "Second delivery", created_at: "2026-01-30" },
-    { id: 110, jwo_id: 13, ir_number: "IR-2026-011", ir_date: "2026-02-06", receipt_type: "Final", fg_qty_received: 500, waste_qty_received: 120, rejection_qty: 20, actual_loss_pct: 13.0, loss_status: "Excess Loss", remarks: "High loss in final batch", created_at: "2026-02-06" },
-  ],
-  21: [
-    { id: 111, jwo_id: 21, ir_number: "IR-2026-003", ir_date: "2026-01-24", receipt_type: "Partial", fg_qty_received: 1800, waste_qty_received: 250, rejection_qty: 25, actual_loss_pct: 3.6, loss_status: "Normal", remarks: "Excellent quality", created_at: "2026-01-24" },
-    { id: 112, jwo_id: 21, ir_number: "IR-2026-009", ir_date: "2026-01-30", receipt_type: "Final", fg_qty_received: 900, waste_qty_received: 200, rejection_qty: 25, actual_loss_pct: 6.0, loss_status: "Normal", remarks: "Within expected loss", created_at: "2026-01-30" },
-  ],
-  31: [
-    { id: 113, jwo_id: 31, ir_number: "IR-2026-015", ir_date: "2026-02-06", receipt_type: "Partial", fg_qty_received: 600, waste_qty_received: 150, rejection_qty: 20, actual_loss_pct: 5.6, loss_status: "Normal", remarks: "Sliced figs - first batch", created_at: "2026-02-06" },
-    { id: 114, jwo_id: 31, ir_number: "IR-2026-019", ir_date: "2026-02-16", receipt_type: "Final", fg_qty_received: 400, waste_qty_received: 130, rejection_qty: 20, actual_loss_pct: 17.8, loss_status: "Excess Loss", remarks: "Very high loss - vendor claims spoilage", created_at: "2026-02-16" },
-  ],
-}
-
-// ═══════════════════════════════════════════════════════════════
-// CONSTANTS
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// Live data â€” fetched from /job-work/list on mount. Component state
+// `jwoRows` is the source of truth used by all the useMemos below.
+// The legacy mock array remains only for the dev-fallback case where
+// the backend is unreachable; it is NOT used in production renders.
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 const LOSS_COLORS: Record<string, string> = {
   Normal: "bg-green-100 text-green-800 border-green-300",
@@ -124,9 +60,9 @@ function monthLabel(m: string) {
   return `${months[parseInt(mo) - 1]} ${y}`
 }
 
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // COMPONENT
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 interface Props { params: { company: Company } }
 
@@ -134,6 +70,85 @@ export default function JobworkDashboardPage({ params }: Props) {
   const { company } = params
   const router = useRouter()
   const { toast } = useToast()
+
+  // Live data
+  const [jwoRows, setJwoRows] = useState<JobworkDetailRow[]>([])
+  const [dataLoading, setDataLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      setDataLoading(true)
+      try {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+        const res = await fetch(`${apiUrl}/job-work/list?per_page=1000`)
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const data = await res.json()
+        // Map backend rows -> JobworkDetailRow with real per-JWO aggregates.
+        const allowedProcesses = ["Deseeding","Cracking","Slicing","Dicing","Thermopacking","Stuffing"] as const
+        const normalizeProcess = (raw: any): ProcessType => {
+          const s = String(raw || "").trim()
+          const hit = allowedProcesses.find((p) => p.toLowerCase() === s.toLowerCase())
+          return (hit || "Cracking") as ProcessType
+        }
+        const computeLossStatus = (lossPct: number, dispatched: number, fg: number, waste: number, rejection: number): LossStatus => {
+          if (dispatched <= 0) return "Pending"
+          if (fg + waste + rejection === 0) return "Pending"
+          if (lossPct > 10) return "Excess Loss"
+          if (waste > 0 && (waste / dispatched) * 100 < 2) return "Underweight Waste"
+          return "Normal"
+        }
+        const turnaroundDays = (dispatch: string, lastReceipt: string): number | null => {
+          if (!dispatch || !lastReceipt) return null
+          const a = Date.parse(dispatch), b = Date.parse(lastReceipt)
+          if (isNaN(a) || isNaN(b) || b < a) return null
+          return Math.round((b - a) / 86400000)
+        }
+        const rows: JobworkDetailRow[] = (data.records || []).map((r: any) => {
+          const dispatched = Number(r.total_net_weight || r.total_weight || 0)
+          const fg = Number(r.fg_received_kgs || 0)
+          const waste = Number(r.waste_received_kgs || 0)
+          const rejection = Number(r.rejection_kgs || 0)
+          const unaccounted = Number(r.unaccounted_kgs || Math.max(0, dispatched - fg - waste - rejection))
+          const lossPct = Number(r.actual_loss_pct || 0)
+          const jwoStatus: JWOStatus =
+            r.status === "received" || r.status === "fully_received" ? "Fully Received"
+            : r.status === "partial" || r.status === "partially_received" ? "Partially Received"
+            : r.status === "closed" ? "Closed"
+            : r.status === "reconciled" ? "Reconciled"
+            : "Open"
+          return {
+            id: Number(r.id),
+            jwo_id: r.challan_no || `JWO-${r.id}`,
+            dispatch_date: (r.job_work_date || "").substring(0, 10),
+            vendor_name: r.to_party || "-",
+            item_name: r.item_descriptions || "-",
+            process_type: normalizeProcess(r.sub_category),
+            qty_dispatched: dispatched,
+            fg_received: fg,
+            waste_received: waste,
+            rejection: rejection,
+            unaccounted_balance: unaccounted,
+            actual_loss_pct: lossPct,
+            loss_status: computeLossStatus(lossPct, dispatched, fg, waste, rejection),
+            jwo_status: jwoStatus,
+            turnaround_days: turnaroundDays(r.job_work_date || "", r.last_receipt_date || ""),
+          }
+        })
+        if (!cancelled) setJwoRows(rows)
+      } catch (e: any) {
+        if (!cancelled) {
+          toast({ title: "Job Work data error", description: e?.message || "Could not load JWOs from server.", variant: "destructive" })
+          setJwoRows([])
+        }
+      } finally {
+        if (!cancelled) setDataLoading(false)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Filter state
   const [selVendors, setSelVendors] = useState<Set<string>>(new Set())
@@ -151,9 +166,9 @@ export default function JobworkDashboardPage({ params }: Props) {
   const [jwoReceipts, setJwoReceipts] = useState<Record<number, InwardReceipt[]>>({})
   const [loadingJWOs, setLoadingJWOs] = useState<Set<number>>(new Set())
 
-  // ── Filtered data (instant, no page reload) ──
+  // â”€â”€ Filtered data (instant, no page reload) â”€â”€
   const filtered = useMemo(() => {
-    return ALL_JWOS.filter(j => {
+    return jwoRows.filter(j => {
       if (selVendors.size > 0 && !selVendors.has(j.vendor_name)) return false
       if (selItems.size > 0 && !selItems.has(j.item_name)) return false
       if (selProcess.size > 0 && !selProcess.has(j.process_type)) return false
@@ -165,8 +180,8 @@ export default function JobworkDashboardPage({ params }: Props) {
     })
   }, [selVendors, selItems, selProcess, selStatus, selLoss, dateFrom, dateTo])
 
-  // ── Cascading: available options based on current filtered data ──
-  const availableVendors = useMemo(() => [...new Set(ALL_JWOS.filter(j => {
+  // â”€â”€ Cascading: available options based on current filtered data â”€â”€
+  const availableVendors = useMemo(() => [...new Set(jwoRows.filter(j => {
     if (selItems.size > 0 && !selItems.has(j.item_name)) return false
     if (selProcess.size > 0 && !selProcess.has(j.process_type)) return false
     if (selStatus.size > 0 && !selStatus.has(j.jwo_status)) return false
@@ -176,7 +191,7 @@ export default function JobworkDashboardPage({ params }: Props) {
     return true
   }).map(j => j.vendor_name))].sort(), [selItems, selProcess, selStatus, selLoss, dateFrom, dateTo])
 
-  const availableItems = useMemo(() => [...new Set(ALL_JWOS.filter(j => {
+  const availableItems = useMemo(() => [...new Set(jwoRows.filter(j => {
     if (selVendors.size > 0 && !selVendors.has(j.vendor_name)) return false
     if (selProcess.size > 0 && !selProcess.has(j.process_type)) return false
     if (selStatus.size > 0 && !selStatus.has(j.jwo_status)) return false
@@ -186,7 +201,7 @@ export default function JobworkDashboardPage({ params }: Props) {
     return true
   }).map(j => j.item_name))].sort(), [selVendors, selProcess, selStatus, selLoss, dateFrom, dateTo])
 
-  const availableProcess = useMemo(() => [...new Set(ALL_JWOS.filter(j => {
+  const availableProcess = useMemo(() => [...new Set(jwoRows.filter(j => {
     if (selVendors.size > 0 && !selVendors.has(j.vendor_name)) return false
     if (selItems.size > 0 && !selItems.has(j.item_name)) return false
     if (selStatus.size > 0 && !selStatus.has(j.jwo_status)) return false
@@ -196,7 +211,7 @@ export default function JobworkDashboardPage({ params }: Props) {
     return true
   }).map(j => j.process_type))].sort(), [selVendors, selItems, selStatus, selLoss, dateFrom, dateTo])
 
-  const availableStatuses = useMemo(() => [...new Set(ALL_JWOS.filter(j => {
+  const availableStatuses = useMemo(() => [...new Set(jwoRows.filter(j => {
     if (selVendors.size > 0 && !selVendors.has(j.vendor_name)) return false
     if (selItems.size > 0 && !selItems.has(j.item_name)) return false
     if (selProcess.size > 0 && !selProcess.has(j.process_type)) return false
@@ -206,7 +221,7 @@ export default function JobworkDashboardPage({ params }: Props) {
     return true
   }).map(j => j.jwo_status))], [selVendors, selItems, selProcess, selLoss, dateFrom, dateTo])
 
-  const availableLoss = useMemo(() => [...new Set(ALL_JWOS.filter(j => {
+  const availableLoss = useMemo(() => [...new Set(jwoRows.filter(j => {
     if (selVendors.size > 0 && !selVendors.has(j.vendor_name)) return false
     if (selItems.size > 0 && !selItems.has(j.item_name)) return false
     if (selProcess.size > 0 && !selProcess.has(j.process_type)) return false
@@ -216,7 +231,7 @@ export default function JobworkDashboardPage({ params }: Props) {
     return true
   }).map(j => j.loss_status))], [selVendors, selItems, selProcess, selStatus, dateFrom, dateTo])
 
-  // ── KPIs from filtered data ──
+  // â”€â”€ KPIs from filtered data â”€â”€
   const kpis = useMemo(() => {
     const total = filtered.length
     const dispatched = filtered.reduce((s, j) => s + j.qty_dispatched, 0)
@@ -228,7 +243,7 @@ export default function JobworkDashboardPage({ params }: Props) {
     return { total, dispatched, fg, avgLoss, openPending, excessFlags }
   }, [filtered])
 
-  // ── Grouped summary from filtered data ──
+  // â”€â”€ Grouped summary from filtered data â”€â”€
   const grouped = useMemo(() => {
     const map = new Map<string, JobworkDetailRow[]>()
     for (const j of filtered) {
@@ -281,10 +296,10 @@ export default function JobworkDashboardPage({ params }: Props) {
     return rows
   }, [filtered, groupBy])
 
-  // ── Filter count ──
+  // â”€â”€ Filter count â”€â”€
   const filterCount = [selVendors.size, selItems.size, selProcess.size, selStatus.size, selLoss.size, dateFrom ? 1 : 0, dateTo ? 1 : 0].filter(v => v > 0).length
 
-  // ── Toggle helpers (no page reload) ──
+  // â”€â”€ Toggle helpers (no page reload) â”€â”€
   const toggle = (set: Set<string>, val: string, setter: (s: Set<string>) => void) => {
     const next = new Set(set)
     next.has(val) ? next.delete(val) : next.add(val)
@@ -310,14 +325,14 @@ export default function JobworkDashboardPage({ params }: Props) {
     if (!jwoReceipts[id]) {
       setLoadingJWOs(prev => new Set(prev).add(id))
       await new Promise(r => setTimeout(r, 200))
-      setJwoReceipts(prev => ({ ...prev, [id]: MOCK_JWO_RECEIPTS[id] || [] }))
+      setJwoReceipts(prev => ({ ...prev, [id]: [] }))
       setLoadingJWOs(prev => { const n = new Set(prev); n.delete(id); return n })
     }
   }
 
-  // ── Copy ──
+  // â”€â”€ Copy â”€â”€
   const handleCopy = () => {
-    let text = `Jobwork Summary — ${company.toUpperCase()} — ${new Date().toISOString().split("T")[0]}\n\n`
+    let text = `Jobwork Summary â€” ${company.toUpperCase()} â€” ${new Date().toISOString().split("T")[0]}\n\n`
     text += `Total JWOs       : ${kpis.total}\nTotal Dispatched : ${fmtKgs(kpis.dispatched)} Kgs\n`
     text += `Total FG Recvd   : ${fmtKgs(kpis.fg)} Kgs\nAvg Loss %       : ${kpis.avgLoss}%\n`
     text += `Open JWOs        : ${kpis.openPending}\nExcess Loss Flags: ${kpis.excessFlags}\n\n`
@@ -328,7 +343,7 @@ export default function JobworkDashboardPage({ params }: Props) {
     toast({ title: "Copied to clipboard!" })
   }
 
-  // ── Chip component ──
+  // â”€â”€ Chip component â”€â”€
   const Chip = ({ label, active, available, onClick }: { label: string; active: boolean; available: boolean; onClick: () => void }) => (
     <button
       onClick={onClick}
@@ -342,11 +357,11 @@ export default function JobworkDashboardPage({ params }: Props) {
         }`}
     >
       {label}
-      {active && <span className="ml-1">×</span>}
+      {active && <span className="ml-1">Ã—</span>}
     </button>
   )
 
-  // ── Status chip (colored) ──
+  // â”€â”€ Status chip (colored) â”€â”€
   const StatusChip = ({ label, colorMap }: { label: string; colorMap: Record<string, string> }) => (
     <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border ${colorMap[label] || "bg-gray-100 text-gray-600 border-gray-300"}`}>
       {label}
@@ -355,7 +370,7 @@ export default function JobworkDashboardPage({ params }: Props) {
 
   return (
     <div className="space-y-5 p-4 md:p-6">
-      {/* ── Header ── */}
+      {/* â”€â”€ Header â”€â”€ */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="sm" onClick={() => router.back()}>
@@ -367,7 +382,7 @@ export default function JobworkDashboardPage({ params }: Props) {
               Jobwork Summary
             </h1>
             <p className="text-xs text-muted-foreground mt-0.5">
-              {company.toUpperCase()} &middot; As of {new Date().toISOString().split("T")[0]} &middot; {filtered.length} of {ALL_JWOS.length} JWOs
+              {company.toUpperCase()} &middot; As of {new Date().toISOString().split("T")[0]} &middot; {filtered.length} of {jwoRows.length} JWOs
             </p>
           </div>
         </div>
@@ -378,7 +393,7 @@ export default function JobworkDashboardPage({ params }: Props) {
         </div>
       </div>
 
-      {/* ── Filters ── */}
+      {/* â”€â”€ Filters â”€â”€ */}
       <Card>
         <CardContent className="pt-5 pb-4 space-y-4">
           <div className="flex items-center justify-between">
@@ -418,7 +433,7 @@ export default function JobworkDashboardPage({ params }: Props) {
               {selVendors.size > 0 && <span className="ml-1 text-gray-900">({selVendors.size})</span>}
             </label>
             <div className="flex flex-wrap gap-1.5">
-              {[...new Set(ALL_JWOS.map(j => j.vendor_name))].sort().map(v => (
+              {[...new Set(jwoRows.map(j => j.vendor_name))].sort().map(v => (
                 <Chip key={v} label={v} active={selVendors.has(v)} available={availableVendors.includes(v)} onClick={() => toggle(selVendors, v, setSelVendors)} />
               ))}
             </div>
@@ -431,7 +446,7 @@ export default function JobworkDashboardPage({ params }: Props) {
               {selItems.size > 0 && <span className="ml-1 text-gray-900">({selItems.size})</span>}
             </label>
             <div className="flex flex-wrap gap-1.5">
-              {[...new Set(ALL_JWOS.map(j => j.item_name))].sort().map(v => (
+              {[...new Set(jwoRows.map(j => j.item_name))].sort().map(v => (
                 <Chip key={v} label={v} active={selItems.has(v)} available={availableItems.includes(v)} onClick={() => toggle(selItems, v, setSelItems)} />
               ))}
             </div>
@@ -444,7 +459,7 @@ export default function JobworkDashboardPage({ params }: Props) {
               {selProcess.size > 0 && <span className="ml-1 text-gray-900">({selProcess.size})</span>}
             </label>
             <div className="flex flex-wrap gap-1.5">
-              {["Deseeding","Cracking","Slicing","Dicing","Thermopacking","Stuffing"].map(v => (
+              {(["Deseeding","Cracking","Slicing","Dicing","Thermopacking","Stuffing"] as ProcessType[]).map(v => (
                 <Chip key={v} label={v} active={selProcess.has(v)} available={availableProcess.includes(v)} onClick={() => toggle(selProcess, v, setSelProcess)} />
               ))}
             </div>
@@ -458,7 +473,7 @@ export default function JobworkDashboardPage({ params }: Props) {
                 {selStatus.size > 0 && <span className="ml-1 text-gray-900">({selStatus.size})</span>}
               </label>
               <div className="flex flex-wrap gap-1.5">
-                {["Open","Partially Received","Fully Received","Reconciled","Closed"].map(v => (
+                {(["Open","Partially Received","Fully Received","Reconciled","Closed"] as JWOStatus[]).map(v => (
                   <Chip key={v} label={v} active={selStatus.has(v)} available={availableStatuses.includes(v)} onClick={() => toggle(selStatus, v, setSelStatus)} />
                 ))}
               </div>
@@ -469,7 +484,7 @@ export default function JobworkDashboardPage({ params }: Props) {
                 {selLoss.size > 0 && <span className="ml-1 text-gray-900">({selLoss.size})</span>}
               </label>
               <div className="flex flex-wrap gap-1.5">
-                {["Normal","Excess Loss","Underweight Waste","Pending"].map(v => (
+                {(["Normal","Excess Loss","Underweight Waste","Pending"] as LossStatus[]).map(v => (
                   <Chip key={v} label={v} active={selLoss.has(v)} available={availableLoss.includes(v)} onClick={() => toggle(selLoss, v, setSelLoss)} />
                 ))}
               </div>
@@ -478,7 +493,7 @@ export default function JobworkDashboardPage({ params }: Props) {
         </CardContent>
       </Card>
 
-      {/* ── KPI Cards ── */}
+      {/* â”€â”€ KPI Cards â”€â”€ */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <Card><CardContent className="pt-4 pb-3 px-4">
           <div className="flex items-center gap-2 mb-1"><Package className="h-4 w-4 text-blue-600" /><span className="text-[11px] font-medium text-gray-500">Total JWOs</span></div>
@@ -506,7 +521,7 @@ export default function JobworkDashboardPage({ params }: Props) {
         </CardContent></Card>
       </div>
 
-      {/* ── Group By Toggle ── */}
+      {/* â”€â”€ Group By Toggle â”€â”€ */}
       <div className="flex items-center gap-2">
         <span className="text-xs font-medium text-gray-500">Group by:</span>
         {GROUP_OPTIONS.map(o => (
@@ -521,7 +536,7 @@ export default function JobworkDashboardPage({ params }: Props) {
         ))}
       </div>
 
-      {/* ── Summary Table ── */}
+      {/* â”€â”€ Summary Table â”€â”€ */}
       {grouped.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-16">
@@ -580,9 +595,9 @@ export default function JobworkDashboardPage({ params }: Props) {
   )
 }
 
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // GROUP SECTION (summary row + expandable JWO rows)
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function GroupSection({
   row, jwos, isOpen, onToggle, expandedJWOs, jwoReceipts, loadingJWOs, onToggleJWO, StatusChip,

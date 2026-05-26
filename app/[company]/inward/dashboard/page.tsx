@@ -26,13 +26,22 @@ import {
 import { coldStorageDashboardApi } from "@/lib/api/coldStorageDashboardApi"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import { usePersistedState, setSerializers } from "@/lib/hooks/usePersistedState"
-import { getDisplayWarehouseName, isColdWarehouse } from "@/lib/constants/warehouses"
+import { getDisplayWarehouseName, isColdWarehouse, normalizeWarehouseName } from "@/lib/constants/warehouses"
 
 interface Props { params: { company: string } }
 
 const fmtN = (n: number) => (n !== null && n !== undefined) ? Math.round(n).toLocaleString("en-IN") : "0"
 const fmtV = (n: number) => (n !== null && n !== undefined && n !== 0) ? "₹" + Math.round(n).toLocaleString("en-IN") : "₹0"
 const fmtR = (n: number) => n ? "₹" + n.toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "—"
+
+// Title-case helper for collapsing case duplicates ("ALMOND"/"almond" → "Almond").
+// Empty strings stay empty (don't bucket as "Uncategorized" here — caller decides).
+const titleFold = (s: string | null | undefined): string => {
+  if (!s) return ""
+  const t = String(s).trim()
+  if (!t) return ""
+  return t.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
+}
 
 type ViewMode = "kgs" | "value" | "both"
 type GroupByKey = "warehouse" | "vendor" | "customer" | "item_category" | "sub_category" | "material_type" | "month" | "purchased_by"
@@ -125,7 +134,17 @@ export default function InwardDashboard({ params }: Props) {
         inwardDashboardApi.getAllData(company),
         inwardDashboardApi.getFilterOptions(company),
       ])
-      setAllRecords(data.records); setFilterOpts(opts)
+      // Canonicalize every record up-front so chips, grouping, and filtering
+      // all see the same normalized values (no "ALMOND" vs "almond" duplicates,
+      // "old_savla" merges with "Savla D-39", etc.).
+      const normalized: InwardRecord[] = (data.records || []).map((r) => ({
+        ...r,
+        warehouse: normalizeWarehouseName(r.warehouse) || r.warehouse || "",
+        item_category: titleFold(r.item_category),
+        sub_category: titleFold(r.sub_category),
+        material_type: titleFold(r.material_type),
+      }))
+      setAllRecords(normalized); setFilterOpts(opts)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load")
     } finally { setLoading(false) }

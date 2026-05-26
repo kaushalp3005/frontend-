@@ -39,6 +39,9 @@ import { cn } from "@/lib/utils"
 import { useToast } from "@/hooks/use-toast"
 import { useAuthStore } from "@/lib/stores/auth"
 import { ArticleEditor, type ArticleFields } from "@/components/modules/inward/ArticleEditor"
+import { isColdWarehouse } from "@/lib/constants/warehouses"
+import { BoxScrollContainer } from "@/components/modules/inward/BoxScrollContainer"
+import { LotRangeDedicator, type LotRange } from "@/components/modules/inward/LotRangeDedicator"
 import QRCode from "qrcode"
 
 /**
@@ -114,6 +117,9 @@ interface ArticleApprovalForm {
   box_count: string
   box_net_weight: string
   box_gross_weight: string
+  item_mark: string
+  spl_remarks: string
+  vakkal: string
 }
 
 interface BoxForm {
@@ -368,6 +374,9 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
           box_count: "",
           box_net_weight: "",
           box_gross_weight: "",
+          item_mark: "",
+          spl_remarks: "",
+          vakkal: "",
         })))
         setBoxForms([])
         setStep("review")
@@ -598,6 +607,11 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
             box_count: parseInt(a.box_count) || 1,
             box_net_weight: r3(a.box_net_weight),
             box_gross_weight: r3(a.box_gross_weight),
+            ...(isColdWarehouse(warehouse) ? {
+              item_mark: a.item_mark || undefined,
+              spl_remarks: a.spl_remarks || undefined,
+              vakkal: a.vakkal || undefined,
+            } : {}),
           })),
           boxes: boxForms.map((b) => ({
             article_description: b.article_description,
@@ -761,6 +775,9 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
         box_count: "",
         box_net_weight: "",
         box_gross_weight: "",
+        item_mark: "",
+        spl_remarks: "",
+        vakkal: "",
       },
     ])
   }
@@ -941,6 +958,16 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
     ]
     setBoxForms(newBoxes)
     recomputeArticleFromBoxes(newBoxes, articleDescription)
+  }
+
+  const applyLotRanges = (articleDescription: string, ranges: LotRange[]) => {
+    setBoxForms((prev) =>
+      prev.map((box) => {
+        if (box.article_description !== articleDescription) return box
+        const match = ranges.find((r) => box.box_number >= r.from && box.box_number <= r.to)
+        return match ? { ...box, lot_number: match.lot } : box
+      })
+    )
   }
 
   const updateBox = (idx: number, field: keyof BoxForm, value: string | number) => {
@@ -2368,6 +2395,39 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
                             </div>
                           </div>
 
+                          {/* Cold storage fields per article */}
+                          {isColdWarehouse(warehouse) && (
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-2 pt-2 border-t">
+                              <div className="space-y-1">
+                                <Label className="text-[11px] text-blue-700">Item Mark</Label>
+                                <Input
+                                  value={approvalForm.item_mark}
+                                  onChange={(e) => updateArticleApproval(idx, "item_mark", e.target.value)}
+                                  placeholder="Item mark"
+                                  className="h-8 text-xs"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-[11px] text-blue-700">Spl. Remarks</Label>
+                                <Input
+                                  value={approvalForm.spl_remarks}
+                                  onChange={(e) => updateArticleApproval(idx, "spl_remarks", e.target.value)}
+                                  placeholder="Special remarks"
+                                  className="h-8 text-xs"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-[11px] text-blue-700">Vakkal</Label>
+                                <Input
+                                  value={approvalForm.vakkal}
+                                  onChange={(e) => updateArticleApproval(idx, "vakkal", e.target.value)}
+                                  placeholder="Vakkal"
+                                  className="h-8 text-xs"
+                                />
+                              </div>
+                            </div>
+                          )}
+
                           {/* Print range controls */}
                           <div className="flex items-end gap-2 flex-wrap mt-2 pt-2 border-t">
                             <div className="space-y-1">
@@ -2428,34 +2488,35 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
                             </Button>
                           </div>
 
-                          {/* Boxes for this article */}
-                          <div className="mt-2 pt-2 border-t space-y-2">
-                            <div className="flex items-center justify-between">
-                              <p className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                                <Box className="h-3 w-3" />
-                                Boxes ({boxForms.filter((b) => b.article_description === approvalForm.item_description).length})
-                              </p>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-6 text-xs gap-1"
-                                onClick={() => addBox(approvalForm.item_description)}
-                                disabled={!approvalForm.item_description}
-                              >
-                                <Plus className="h-3 w-3" /> Add Box
-                              </Button>
-                            </div>
-                            {boxForms
+                          {/* Lot Range Dedicator — cold storage only */}
+                          <LotRangeDedicator
+                            warehouse={warehouse}
+                            totalBoxes={boxForms.filter((b) => b.article_description === approvalForm.item_description).length}
+                            onApply={(ranges) => applyLotRanges(approvalForm.item_description, ranges)}
+                          />
+
+                          <BoxScrollContainer
+                            boxCount={boxForms.filter((b) => b.article_description === approvalForm.item_description).length}
+                            onAddBox={() => addBox(approvalForm.item_description)}
+                            boxForms={boxForms
+                              .filter((b) => b.article_description === approvalForm.item_description)
+                              .map((b) => ({ box_number: b.box_number, lot_number: b.lot_number, article_description: b.article_description }))}
+                          >
+                            {(registerRef) => boxForms
                               .map((box, boxIdx) => ({ box, boxIdx }))
                               .filter(({ box }) => box.article_description === approvalForm.item_description)
                               .map(({ box, boxIdx }) => {
                                 const isLocked = box.is_printed && !editingBoxIndices.has(boxIdx)
                                 const isPrinting = printingBoxIdx === boxIdx
                                 return (
-                                  <div key={boxIdx} className={cn(
-                                    "p-2 rounded space-y-2 sm:space-y-0",
-                                    isLocked ? "bg-emerald-50/50 border border-emerald-200/50" : "bg-muted/30"
-                                  )}>
+                                  <div
+                                    key={boxIdx}
+                                    ref={(el) => registerRef(box.box_number, el)}
+                                    className={cn(
+                                      "p-2 rounded space-y-2 sm:space-y-0",
+                                      isLocked ? "bg-emerald-50/50 border border-emerald-200/50" : "bg-muted/30"
+                                    )}
+                                  >
                                     {/* Box header row */}
                                     <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
                                       <DropdownMenu>
@@ -2587,7 +2648,7 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
                                   </div>
                                 )
                               })}
-                          </div>
+                          </BoxScrollContainer>
                         </>
                       )}
                     </div>
