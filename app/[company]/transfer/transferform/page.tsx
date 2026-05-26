@@ -20,6 +20,7 @@ import { InterunitApiService } from "@/lib/interunitApiService"
 import { useToast } from "@/hooks/use-toast"
 import { useFormPersistence } from "@/hooks/useFormPersistence"
 import HighPerformanceQRScanner from "@/components/transfer/high-performance-qr-scanner"
+import { BoxScrollContainer } from "@/components/modules/inward/BoxScrollContainer"
 
 interface NewTransferRequestPageProps {
   params: {
@@ -2648,11 +2649,15 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                 </p>
               </div>
             ) : (
-              <>
+              <BoxScrollContainer
+                boxCount={scannedBoxes.length}
+                boxForms={scannedBoxes.map((box, index) => ({ box_number: index + 1, lot_number: box.lotNumber || "", article_description: box.itemDescription || "" }))}
+              >
+                {(registerRef) => (<>
                 {/* Mobile Card View */}
-                <div className="md:hidden space-y-3 max-h-[400px] overflow-y-auto">
+                <div className="md:hidden space-y-3">
                   {scannedBoxes.map((box, index) => (
-                    <div key={box.id} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+                    <div key={box.id} ref={(el) => registerRef(index + 1, el)} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
                       <div className="flex items-start justify-between mb-2">
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-bold text-blue-600 bg-blue-100 px-2 py-1 rounded">
@@ -2750,7 +2755,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                 </div>
 
                 {/* Desktop Table View */}
-                <div className="hidden md:block overflow-x-auto max-h-[400px] overflow-y-auto">
+                <div className="hidden md:block overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-gray-200 bg-gray-50">
@@ -2898,7 +2903,8 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                     </div>
                   </div>
                 </div>
-              </>
+                </>)}
+              </BoxScrollContainer>
             )}
           </CardContent>
         </Card>

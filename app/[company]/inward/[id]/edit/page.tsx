@@ -23,6 +23,7 @@ import { useToast } from "@/hooks/use-toast"
 import { PermissionGuard } from "@/components/auth/permission-gate"
 import QRCode from "qrcode"
 import { ArticleEditor, type ArticleFields } from "@/components/modules/inward/ArticleEditor"
+import { BoxScrollContainer } from "@/components/modules/inward/BoxScrollContainer"
 
 interface EditInwardPageProps {
   params: { company: Company; id: string }
@@ -599,15 +600,23 @@ export default function EditInwardPage({ params }: EditInwardPageProps) {
 
                   {/* Existing boxes summary */}
                   {articleBoxes.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5">
-                      {articleBoxes.map((box) => (
-                        <Badge key={`${box.article_description}-${box.box_number}`} variant="outline" className="text-[10px] gap-1">
-                          #{box.box_number}
-                          {box.net_weight != null && <span>N:{box.net_weight}kg</span>}
-                          {box.gross_weight != null && <span>G:{box.gross_weight}kg</span>}
-                        </Badge>
+                    <BoxScrollContainer
+                      boxCount={articleBoxes.length}
+                      boxForms={articleBoxes.map((b) => ({ box_number: b.box_number, lot_number: b.lot_number, article_description: b.article_description }))}
+                    >
+                      {(registerRef) => articleBoxes.map((box) => (
+                        <span
+                          key={`${box.article_description}-${box.box_number}`}
+                          ref={(el) => registerRef(box.box_number, el)}
+                        >
+                          <Badge variant="outline" className="text-[10px] gap-1">
+                            #{box.box_number}
+                            {box.net_weight != null && <span>N:{box.net_weight}kg</span>}
+                            {box.gross_weight != null && <span>G:{box.gross_weight}kg</span>}
+                          </Badge>
+                        </span>
                       ))}
-                    </div>
+                    </BoxScrollContainer>
                   )}
 
                   {/* Bulk Add Form */}
