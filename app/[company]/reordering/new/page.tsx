@@ -548,7 +548,7 @@ export default function NewRTVPage({ params }: NewRTVPageProps) {
     }
   }
 
-  // ─── Submit: Create then Approve ───────────────────────────────
+  // ─── Submit: Create ────────────────────────────────────────────
 
   const handleSubmit = async () => {
     if (!factoryUnit.trim() || !customer.trim()) {
@@ -566,61 +566,9 @@ export default function NewRTVPage({ params }: NewRTVPageProps) {
       setSubmitting(true)
       setSubmitError(null)
 
-      // Step 1: Create RTV (or return cached ID)
       const { id: rtvId, rtv_id: rtvStringId } = await ensureRtvCreated()
 
-      // Step 2: Approve immediately
-      try {
-        await rtvApi.approveRTV(company, rtvId, {
-          approved_by: user?.email || "unknown",
-          header: {
-            factory_unit: factoryUnit || undefined,
-            customer: customer || undefined,
-            invoice_number: invoiceNumber || undefined,
-            challan_no: challanNo || undefined,
-            dn_no: dnNo || undefined,
-            sales_poc: salesPoc || undefined,
-            business_head: businessHead || undefined,
-            remark: remark || undefined,
-          },
-          lines: validLines.map((l) => ({
-            item_description: l.item_description,
-            uom: l.uom || undefined,
-            qty: l.qty || undefined,
-            rate: l.rate || undefined,
-            value: l.value || undefined,
-            carton_weight: l.carton_weight || undefined,
-            net_weight: l.net_weight || undefined,
-            material_type: l.material_type || undefined,
-            item_category: l.item_category || undefined,
-            sub_category: l.sub_category || undefined,
-            sale_group: l.sale_group || undefined,
-          })),
-          boxes: boxForms.map((b) => {
-            const parentLine = validLines.find((l) => l.item_description === b.article_description)
-            return {
-              article_description: b.article_description,
-              box_number: b.box_number,
-              uom: parentLine?.uom || undefined,
-              conversion: b.conversion || undefined,
-              net_weight: b.net_weight || undefined,
-              gross_weight: b.gross_weight || undefined,
-              count: b.count ? parseInt(b.count) : undefined,
-            }
-          }),
-        })
-      } catch (approveErr) {
-        console.error("Approve failed (RTV was created):", approveErr)
-        toast({
-          title: "RTV created but approval failed",
-          description: `${rtvStringId} was created. It is pending in the list.`,
-          variant: "destructive",
-        })
-        router.push(`/${company}/reordering`)
-        return
-      }
-
-      toast({ title: "RTV Created & Approved", description: `${rtvStringId} created and approved successfully.` })
+      toast({ title: "RTV Created", description: `${rtvStringId} created. Approval pending.` })
       router.push(`/${company}/reordering/${rtvId}`)
     } catch (err) {
       console.error("Submit failed:", err)
@@ -647,7 +595,7 @@ export default function NewRTVPage({ params }: NewRTVPageProps) {
           </Button>
           <div className="min-w-0">
             <h1 className="text-lg sm:text-xl md:text-2xl font-bold tracking-tight">New RTV</h1>
-            <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">Create and approve a new Return to Vendor entry</p>
+            <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">Create a new Return to Vendor entry</p>
           </div>
         </div>
 
@@ -992,7 +940,7 @@ export default function NewRTVPage({ params }: NewRTVPageProps) {
           </Button>
           <Button onClick={handleSubmit} disabled={submitting} className="gap-1.5">
             {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            Create & Approve
+            Create
           </Button>
         </div>
 
