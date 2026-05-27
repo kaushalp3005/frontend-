@@ -380,6 +380,22 @@ export default function InnerColdTransferPage({ params }: InnerColdTransferPageP
 
   // ── Cold Storage Stock Selection ──
 
+  const deriveWarehouseFromRecord = (storageLocation: string | null, unit: string | null): string => {
+    const loc = (storageLocation || "").trim()
+    const u = (unit || "").trim()
+    // Direct case-insensitive match
+    const direct = COLD_STORAGE_LOCATIONS.find(k => k.toLowerCase() === loc.toLowerCase())
+    if (direct) return direct
+    // Savla stored as "Savla" + unit "D-39"/"D-514"
+    if (loc.toLowerCase() === "savla") {
+      if (/d-?39/i.test(u)) return "Savla D-39"
+      if (/d-?514/i.test(u)) return "Savla D-514"
+    }
+    // Partial match: loc contains one of the known locations
+    const partial = COLD_STORAGE_LOCATIONS.find(k => loc.toLowerCase().includes(k.toLowerCase()) || k.toLowerCase().includes(loc.toLowerCase()))
+    return partial || ""
+  }
+
   const handleSelectColdStorageStock = (articleId: string, record: ColdStorageStockRecord) => {
     const availableBoxes = record.net_qty_on_cartons ? Math.ceil(record.net_qty_on_cartons) : 0
     setArticles(prev =>
@@ -399,6 +415,13 @@ export default function InnerColdTransferPage({ params }: InnerColdTransferPageP
         }
       })
     )
+    // Auto-select warehouse from record's storage_location if none chosen yet
+    if (!formData.fromWarehouse && record.storage_location) {
+      const derived = deriveWarehouseFromRecord(record.storage_location, record.unit)
+      if (derived) {
+        setFormData(prev => ({ ...prev, fromWarehouse: derived }))
+      }
+    }
     toast({
       title: "Stock Selected",
       description: `Filled from stock: ${record.item_description || "N/A"} - Lot ${record.lot_no || "N/A"}`,

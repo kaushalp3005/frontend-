@@ -117,9 +117,10 @@ export default function PendingTransfersModal({ open, onClose, company, apiBaseU
     }
     if (!justOpenedRef.current) {
       justOpenedRef.current = true
-      // First effect run after this open — sync (silent) then refresh.
-      // Non-admins fall through to a plain loadData via handleSyncExisting.
-      handleSyncExisting(true)
+      // Load data immediately so warehouses/records appear without waiting for backfill.
+      // Then fire backfill in background — it reloads data again when done.
+      void loadData()
+      void handleSyncExisting(true)
     } else {
       // Already open — a dependency changed (filters). Just refresh.
       loadData()
