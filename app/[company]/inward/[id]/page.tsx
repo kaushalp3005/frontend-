@@ -456,10 +456,10 @@ export default function InwardDetailPage({ params }: InwardDetailPageProps) {
                 </CardHeader>
                 <CardContent className="px-3 sm:px-6">
                   {/* Desktop table */}
-                  <div className="hidden sm:block overflow-x-auto">
+                  <div className="hidden sm:block overflow-x-auto max-h-96 overflow-y-auto">
                     <table className="w-full text-sm">
                       <thead>
-                        <tr className="border-b bg-muted/30">
+                        <tr className="border-b bg-muted/30 sticky top-0 z-10">
                           <th className="text-left font-medium px-3 py-2">Article</th>
                           <th className="text-left font-medium px-3 py-2">Box #</th>
                           <th className="text-right font-medium px-3 py-2">Net Wt</th>
@@ -504,7 +504,7 @@ export default function InwardDetailPage({ params }: InwardDetailPageProps) {
                     </table>
                   </div>
                   {/* Mobile cards */}
-                  <div className="sm:hidden space-y-2">
+                  <div className="sm:hidden space-y-2 max-h-96 overflow-y-auto pr-1">
                     {boxes.map((box) => (
                       <div key={box.id || `${box.article_description}-${box.box_number}`} className="p-2.5 border rounded-lg bg-muted/20 space-y-1.5">
                         <div className="flex items-start justify-between gap-2">

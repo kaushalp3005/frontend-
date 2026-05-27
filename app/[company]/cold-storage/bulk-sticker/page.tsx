@@ -64,6 +64,9 @@ interface BulkArticleForm {
   box_count: string
   box_net_weight: string
   box_gross_weight: string
+  item_mark: string
+  spl_remarks: string
+  vakkal: string
 }
 
 const emptyArticleForm = (): BulkArticleForm => ({
@@ -86,6 +89,9 @@ const emptyArticleForm = (): BulkArticleForm => ({
   box_count: "",
   box_net_weight: "",
   box_gross_weight: "",
+  item_mark: "",
+  spl_remarks: "",
+  vakkal: "",
 })
 
 export default function BulkStickerPage({ params }: BulkStickerPageProps) {
@@ -308,6 +314,9 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
           box_count: parseInt(a.box_count) || 1,
           box_net_weight: a.box_net_weight ? parseFloat(a.box_net_weight) : undefined,
           box_gross_weight: a.box_gross_weight ? parseFloat(a.box_gross_weight) : undefined,
+          item_mark: a.item_mark || undefined,
+          spl_remarks: a.spl_remarks || undefined,
+          vakkal: a.vakkal || undefined,
         })),
       }
 
@@ -1157,6 +1166,18 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
                   <div className="space-y-1.5">
                     <Label className="text-xs">Total Amount</Label>
                     <Input type="number" value={articleForms[idx]?.total_amount || ""} onChange={(e) => updateArticleForm(idx, "total_amount", e.target.value)} className="h-9" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Item Mark</Label>
+                    <Input value={articleForms[idx]?.item_mark || ""} onChange={(e) => updateArticleForm(idx, "item_mark", e.target.value)} className="h-9" placeholder="Item mark" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Vakkal</Label>
+                    <Input value={articleForms[idx]?.vakkal || ""} onChange={(e) => updateArticleForm(idx, "vakkal", e.target.value)} className="h-9" placeholder="Vakkal" />
+                  </div>
+                  <div className="space-y-1.5 col-span-2">
+                    <Label className="text-xs">Special Remarks</Label>
+                    <Input value={articleForms[idx]?.spl_remarks || ""} onChange={(e) => updateArticleForm(idx, "spl_remarks", e.target.value)} className="h-9" placeholder="Special remarks" />
                   </div>
                 </div>
 
