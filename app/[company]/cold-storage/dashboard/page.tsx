@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import Link from "next/link"
 import { useParams } from "next/navigation"
 import {
@@ -1475,16 +1476,16 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
             {ageingMode === "days" && (
               <Card><CardContent className="p-0">
                 {loading ? <TableSkeleton /> : (
-                  <div className="overflow-x-auto">
+                  <div>
                     <table className="w-full text-sm">
                       <thead className="sticky top-0 z-10">
                         <tr className="border-b">
-                          <th className="text-left font-medium text-xs uppercase tracking-wider px-3 py-2.5 min-w-[220px] bg-muted/60">Category</th>
-                          <th className="text-right font-medium text-xs uppercase tracking-wider px-3 py-2.5 w-[110px] bg-green-50 dark:bg-green-950/30">&lt; 30d</th>
-                          <th className="text-right font-medium text-xs uppercase tracking-wider px-3 py-2.5 w-[110px] bg-lime-50 dark:bg-lime-950/30">30-60d</th>
-                          <th className="text-right font-medium text-xs uppercase tracking-wider px-3 py-2.5 w-[110px] bg-yellow-50 dark:bg-yellow-950/30">60-90d</th>
-                          <th className="text-right font-medium text-xs uppercase tracking-wider px-3 py-2.5 w-[110px] bg-orange-50 dark:bg-orange-950/30">90-180d</th>
-                          <th className="text-right font-medium text-xs uppercase tracking-wider px-3 py-2.5 w-[110px] bg-red-50 dark:bg-red-950/30">&gt; 180d</th>
+                          <th className="text-left font-medium text-xs uppercase tracking-wider px-3 py-2.5 min-w-[180px] bg-muted/60">Category</th>
+                          <th className="text-right font-medium text-xs uppercase tracking-wider px-3 py-2.5 w-[90px] bg-green-50 dark:bg-green-950/30">&lt; 30d</th>
+                          <th className="text-right font-medium text-xs uppercase tracking-wider px-3 py-2.5 w-[90px] bg-lime-50 dark:bg-lime-950/30">30-60d</th>
+                          <th className="text-right font-medium text-xs uppercase tracking-wider px-3 py-2.5 w-[90px] bg-yellow-50 dark:bg-yellow-950/30">60-90d</th>
+                          <th className="text-right font-medium text-xs uppercase tracking-wider px-3 py-2.5 w-[90px] bg-orange-50 dark:bg-orange-950/30">90-180d</th>
+                          <th className="text-right font-medium text-xs uppercase tracking-wider px-3 py-2.5 w-[90px] bg-red-50 dark:bg-red-950/30">&gt; 180d</th>
                           <th className="text-right font-medium text-xs uppercase tracking-wider px-3 py-2.5 w-[120px] bg-muted/60">Total</th>
                         </tr>
                       </thead>
@@ -1508,7 +1509,11 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
                                 <AgeDayCells d={wh} view={ageingView} />
                               </tr>
                               {isWhExpanded && wh.categories.map(l1 => (
-                                <AgeDayL1 key={`${wh.warehouseCode}|||${l1.group_name}`} l1={l1} view={ageingView} ex={expanded} toggle={toggle} />
+                                <AgeDayL1
+                                  key={`${wh.warehouseCode}|||${l1.group_name}`}
+                                  l1={l1} view={ageingView} ex={expanded} toggle={toggle}
+                                  l3t={handleL3Toggle} lc={lotCache} ll={lotLoading}
+                                />
                               ))}
                             </React.Fragment>
                           )
@@ -1533,16 +1538,16 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
             {ageingMode === "months" && (
             <Card><CardContent className="p-0">
               {loading ? <TableSkeleton /> : (
-                <div ref={ageingRef} className="overflow-x-auto">
+                <div ref={ageingRef}>
                   <table className="w-full text-sm">
                     <thead className="sticky top-0 z-10">
                       <tr className="border-b">
-                        <th className="text-left font-medium text-xs uppercase tracking-wider px-3 py-2.5 min-w-[220px] bg-muted/60">Category</th>
-                        <th className="text-right font-medium text-xs uppercase tracking-wider px-3 py-2.5 w-[110px] bg-green-50 dark:bg-green-950/30">&lt; 6M</th>
-                        <th className="text-right font-medium text-xs uppercase tracking-wider px-3 py-2.5 w-[110px] bg-lime-50 dark:bg-lime-950/30">6-12M</th>
-                        <th className="text-right font-medium text-xs uppercase tracking-wider px-3 py-2.5 w-[110px] bg-yellow-50 dark:bg-yellow-950/30">12-18M</th>
-                        <th className="text-right font-medium text-xs uppercase tracking-wider px-3 py-2.5 w-[110px] bg-orange-50 dark:bg-orange-950/30">18-24M</th>
-                        <th className="text-right font-medium text-xs uppercase tracking-wider px-3 py-2.5 w-[110px] bg-red-50 dark:bg-red-950/30">&gt; 24M</th>
+                        <th className="text-left font-medium text-xs uppercase tracking-wider px-3 py-2.5 min-w-[180px] bg-muted/60">Category</th>
+                        <th className="text-right font-medium text-xs uppercase tracking-wider px-3 py-2.5 w-[90px] bg-green-50 dark:bg-green-950/30">&lt; 6M</th>
+                        <th className="text-right font-medium text-xs uppercase tracking-wider px-3 py-2.5 w-[90px] bg-lime-50 dark:bg-lime-950/30">6-12M</th>
+                        <th className="text-right font-medium text-xs uppercase tracking-wider px-3 py-2.5 w-[90px] bg-yellow-50 dark:bg-yellow-950/30">12-18M</th>
+                        <th className="text-right font-medium text-xs uppercase tracking-wider px-3 py-2.5 w-[90px] bg-orange-50 dark:bg-orange-950/30">18-24M</th>
+                        <th className="text-right font-medium text-xs uppercase tracking-wider px-3 py-2.5 w-[90px] bg-red-50 dark:bg-red-950/30">&gt; 24M</th>
                         <th className="text-right font-medium text-xs uppercase tracking-wider px-3 py-2.5 w-[120px] bg-muted/60">Total</th>
                       </tr>
                     </thead>
@@ -1675,7 +1680,30 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
                     <tr key={it.rank} className="border-b hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
                       <td className="px-3 py-2 text-muted-foreground">{it.rank}</td>
                       <td className="px-3 py-2">{it.group_name}</td>
-                      <td className="px-3 py-2 font-medium">{it.item_subgroup}</td>
+                      <td className="px-3 py-2 font-medium">
+                        <TooltipProvider delayDuration={150}>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="cursor-default underline-offset-2 hover:underline decoration-dotted">{it.item_subgroup}</span>
+                            </TooltipTrigger>
+                            <TooltipContent side="left" sideOffset={6}
+                              className="bg-white dark:bg-slate-900 border rounded-md shadow-lg p-2.5 text-xs max-w-[280px] space-y-0.5"
+                            >
+                              <p className="font-semibold text-sm">{it.item_subgroup}</p>
+                              <p className="text-muted-foreground">Group: <span className="font-medium text-foreground">{it.group_name}</span></p>
+                              <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 mt-1.5 pt-1.5 border-t">
+                                <p className="text-muted-foreground">Kgs:</p><p className="text-right tabular-nums">{fmtKgs(it.total_kgs)}</p>
+                                <p className="text-muted-foreground">Value:</p><p className="text-right tabular-nums">{fmtCr(it.total_value)}</p>
+                                <p className="text-muted-foreground">Portfolio:</p><p className="text-right tabular-nums">{it.portfolio_pct}%</p>
+                                <p className="text-muted-foreground">Avg Rate:</p><p className="text-right tabular-nums">{fmtRate(it.avg_rate)}/Kg</p>
+                                <p className="text-muted-foreground">Lots:</p><p className="text-right tabular-nums">{it.lot_count}</p>
+                                <p className="text-muted-foreground">Fragmentation:</p>
+                                <p className="text-right">{it.fragmentation === "high" ? "🔴 High" : it.fragmentation === "medium" ? "🟡 Medium" : "🟢 Normal"}</p>
+                              </div>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      </td>
                       <td className="text-right px-3 py-2 tabular-nums">{fmtKgs(it.total_kgs)}</td>
                       <td className="text-right px-3 py-2 tabular-nums">{fmtVal(it.total_value)}</td>
                       <td className="text-right px-3 py-2"><span className={cn("px-1.5 py-0.5 rounded text-xs font-medium", it.portfolio_pct > 10 ? "bg-red-100 text-red-800" : it.portfolio_pct > 5 ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-700")}>{it.portfolio_pct}%</span></td>
@@ -2445,9 +2473,14 @@ function AgeDayCells({ d, view }: { d: any; view: AView }) {
   </>)
 }
 
-interface ADayProps { l1: AgeingDayLayer1; view: AView; ex: Set<string>; toggle: (k: string) => void }
+interface ADayProps {
+  l1: AgeingDayLayer1; view: AView; ex: Set<string>; toggle: (k: string) => void
+  l3t: (loc: string, grp: string, sg: string, mark: string) => void
+  lc: Record<string, LotDetailsResponse>
+  ll: Set<string>
+}
 
-function AgeDayL1({ l1, view, ex, toggle }: ADayProps) {
+function AgeDayL1({ l1, view, ex, toggle, l3t, lc, ll }: ADayProps) {
   const k = makeKey(l1.storage_location, l1.group_name); const open = ex.has(k)
   return (<>
     <tr className={cn("border-b cursor-pointer hover:opacity-90 transition-colors", L_BG[0])} onClick={() => toggle(k)}>
@@ -2456,11 +2489,17 @@ function AgeDayL1({ l1, view, ex, toggle }: ADayProps) {
       </td>
       <AgeDayCells d={l1} view={view} />
     </tr>
-    {open && l1.children.map(l2 => <AgeDayL2 key={makeKey(l1.storage_location, l1.group_name, l2.item_subgroup)} l1={l1} l2={l2} view={view} ex={ex} toggle={toggle} />)}
+    {open && l1.children.map(l2 => (
+      <AgeDayL2
+        key={makeKey(l1.storage_location, l1.group_name, l2.item_subgroup)}
+        l1={l1} l2={l2} view={view} ex={ex} toggle={toggle}
+        l3t={l3t} lc={lc} ll={ll}
+      />
+    ))}
   </>)
 }
 
-function AgeDayL2({ l1, l2, view, ex, toggle }: ADayProps & { l2: AgeingDayLayer2 }) {
+function AgeDayL2({ l1, l2, view, ex, toggle, l3t, lc, ll }: ADayProps & { l2: AgeingDayLayer2 }) {
   const k = makeKey(l1.storage_location, l1.group_name, l2.item_subgroup); const open = ex.has(k)
   return (<>
     <tr className={cn("border-b cursor-pointer hover:bg-slate-200/50 dark:hover:bg-slate-700/50 transition-colors", L_BG[1])} onClick={() => toggle(k)}>
@@ -2469,19 +2508,50 @@ function AgeDayL2({ l1, l2, view, ex, toggle }: ADayProps & { l2: AgeingDayLayer
       </td>
       <AgeDayCells d={l2} view={view} />
     </tr>
-    {open && l2.children.map(l3 => <AgeDayL3 key={makeKey(l1.storage_location, l1.group_name, l2.item_subgroup, l3.item_mark)} l3={l3} view={view} />)}
+    {open && l2.children.map(l3 => (
+      <AgeDayL3
+        key={makeKey(l1.storage_location, l1.group_name, l2.item_subgroup, l3.item_mark)}
+        l1={l1} l2={l2} l3={l3} view={view} ex={ex}
+        l3t={l3t} lc={lc} ll={ll}
+      />
+    ))}
   </>)
 }
 
-function AgeDayL3({ l3, view }: { l3: AgeingDayLayer3; view: AView }) {
-  return (
-    <tr className={cn("border-b transition-colors", L_BG[2])}>
+function AgeDayL3({ l1, l2, l3, view, ex, l3t, lc, ll }: {
+  l1: AgeingDayLayer1; l2: AgeingDayLayer2; l3: AgeingDayLayer3
+  view: AView; ex: Set<string>
+  l3t: (a: string, b: string, c: string, d: string) => void
+  lc: Record<string, LotDetailsResponse>; ll: Set<string>
+}) {
+  const k = makeKey(l1.storage_location, l1.group_name, l2.item_subgroup, l3.item_mark)
+  const open = ex.has(k)
+  const lots = lc[k]?.lots; const isLd = ll.has(k)
+  return (<>
+    <tr
+      className={cn("border-b cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/60 transition-colors", L_BG[2])}
+      onClick={() => l3t(l1.storage_location, l1.group_name, l2.item_subgroup, l3.item_mark)}
+    >
       <td className={cn("px-3 py-2 whitespace-nowrap", L_PL[2])}>
-        <span className="inline-flex items-center gap-1.5">{l3.item_mark}</span>
+        <span className="inline-flex items-center gap-1.5">
+          {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+          {l3.item_mark}
+        </span>
       </td>
       <AgeDayCells d={l3} view={view} />
     </tr>
-  )
+    {open && (isLd ? (
+      <tr className={L_BG[3]}>
+        <td colSpan={7} className={cn("px-3 py-3", L_PL[3])}>
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />Loading lots...
+          </div>
+        </td>
+      </tr>
+    ) : lots?.map((lot, i) => (
+      <AgeLotRow key={`${lot.lot_no}-${i}`} lot={lot} view={view} />
+    )))}
+  </>)
 }
 
 // ═══════════════════════════════════════════════════════════════════
