@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, Fragment } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -20,6 +20,7 @@ import {
 } from "lucide-react"
 import QRCode from 'qrcode'
 import type { Company } from "@/types/auth"
+import { ChallanHoverCard, type HoverLine, type HoverMeta } from "@/components/transfer/ChallanHoverCard"
 import { useAuthStore } from "@/lib/stores/auth"
 import { useToast } from "@/hooks/use-toast"
 import { BoxScrollContainer } from "@/components/modules/inward/BoxScrollContainer"
@@ -42,6 +43,9 @@ interface GeneratedArticle {
   exporter: string
   rate: number
   spl_remarks: string
+  case_pack?: number          // units per box (UI label "Case Pack")
+  box_type?: 'FG' | 'REJECTION'
+  uom?: number                // per-unit weight snapshot from all_sku (kg/unit)
 }
 
 interface JobWorkPageProps {
@@ -147,6 +151,9 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
   const [aeQuantity, setAeQuantity] = useState<number>(0)
   const [aeNetWeight, setAeNetWeight] = useState<number>(0)
   const [aeGrossWeight, setAeGrossWeight] = useState<number>(0)
+  const [aeUom,      setAeUom]      = useState<number>(0)                     // per-unit weight from all_sku
+  const [aeCasePack, setAeCasePack] = useState<number>(0)                     // units per box
+  const [aeBoxType,  setAeBoxType]  = useState<'FG' | 'REJECTION'>('FG')      // Entry Type toggle
   // Cold storage fields
   const [aeColdCompany, setAeColdCompany] = useState<string>(company.toUpperCase() === 'CDPL' ? 'cdpl' : 'cfpl')
   const [aeInwardDate, setAeInwardDate] = useState(() => {
@@ -237,7 +244,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
     return () => clearTimeout(timer)
   }, [aeSearchText])
 
-  const handleAeSearchSelect = (item: { item_description: string; item_group: string; sub_group: string }) => {
+  const handleAeSearchSelect = (item: { item_description: string; item_group: string; sub_group: string; uom?: string }) => {
     // Ensure the selected values exist in the dropdown options so Select renders them
     setAeItemGroups(prev => prev.includes(item.item_group) ? prev : [...prev, item.item_group])
     setAeSubGroups(prev => prev.includes(item.sub_group) ? prev : [item.sub_group, ...prev])
@@ -245,14 +252,34 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
     setAeSelectedGroup(item.item_group)
     setAeSelectedSubGroup(item.sub_group)
     setAeSelectedDesc(item.item_description)
+    const parsedUom = parseFloat(String(item.uom || "").replace(/[^0-9.]/g, ""))
+    setAeUom(isNaN(parsedUom) ? 0 : parsedUom)
     setAeSearchText("")
     setAeSearchResults([])
     setAeSearchOpen(false)
   }
 
+  const round3 = (n: number) => Math.round(n * 1000) / 1000
+
+  const onAePickerNetChange = (v: number) => {
+    setAeNetWeight(v)
+    if (aeUom > 0) setAeCasePack(round3(v / aeUom))
+  }
+  const onAePickerCasePackChange = (v: number) => {
+    setAeCasePack(v)
+    if (aeUom > 0) setAeNetWeight(round3(v * aeUom))
+  }
+
   // Article entry: total net weight of all boxes vs FG received
   const aeTotalNetWeight = aeGeneratedArticles.reduce((s, a) => s + a.net_weight, 0)
-  const aeFgLimit = miItems.reduce((s, i) => s + i.fg_kgs, 0)
+  const aeFgLimit  = miItems.reduce((s, i) => s + (i.fg_kgs || 0), 0)
+  const aeRejLimit = miItems.reduce((s, i) => s + (i.rejection_kgs || 0), 0)
+  const aeUsedFg   = aeGeneratedArticles
+    .filter(a => (a.box_type ?? 'FG') === 'FG')
+    .reduce((s, a) => s + (a.net_weight || 0), 0)
+  const aeUsedRej  = aeGeneratedArticles
+    .filter(a => a.box_type === 'REJECTION')
+    .reduce((s, a) => s + (a.net_weight || 0), 0)
 
   // Generate transaction number + box IDs
   const generateArticleEntries = () => {
@@ -260,11 +287,18 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
       toast({ title: "Missing Fields", description: "Select item description and enter quantity (min 1).", variant: "destructive" })
       return
     }
-    // Validate total net weight won't exceed FG received
-    if (aeFgLimit > 0) {
-      const newTotal = aeTotalNetWeight + (aeNetWeight * aeQuantity)
-      if (newTotal > aeFgLimit + 0.01) {
-        toast({ title: "Weight Exceeds FG Received", description: `Total net wt (${newTotal.toFixed(2)} kg) would exceed FG Received (${aeFgLimit.toFixed(2)} kg).`, variant: "destructive" })
+    // Validate against the matching per-bucket cap (FG or Rejection)
+    const _limit = aeBoxType === 'REJECTION' ? aeRejLimit : aeFgLimit
+    const _used  = aeBoxType === 'REJECTION' ? aeUsedRej  : aeUsedFg
+    const _label = aeBoxType === 'REJECTION' ? 'Rejection' : 'FG Received'
+    if (_limit > 0) {
+      const newTotal = _used + (aeNetWeight * aeQuantity)
+      if (newTotal > _limit + 0.01) {
+        toast({
+          title: `Weight Exceeds ${_label}`,
+          description: `Total ${_label.toLowerCase()} box net wt (${newTotal.toFixed(2)} kg) would exceed ${_label} (${_limit.toFixed(2)} kg).`,
+          variant: "destructive",
+        })
         return
       }
     }
@@ -290,6 +324,9 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
         exporter: aeExporter,
         rate: aeRate,
         spl_remarks: aeSplRemarks,
+        case_pack: aeCasePack,
+        box_type:  aeBoxType,
+        uom:       aeUom,
       })
     }
     setAeGeneratedArticles(prev => [...prev, ...entries])
@@ -326,6 +363,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                 <div class="boxid">ID: ${art.box_id}</div>
               </div>
               <div class="item">${art.item_description}</div>
+              ${art.box_type === 'REJECTION' ? '<div style="background:#fde2e2;color:#9b1c1c;font-weight:700;text-align:center;padding:2px 4px;border:1px solid #f3b1b1;border-radius:3px;font-size:10px;margin:2px 0;">OFF-GRADE / REJECTION</div>' : ''}
               <div>
                 <div class="detail"><b>Box #${art.box_number}</b> &nbsp; Net: ${art.net_weight > 0 ? art.net_weight + 'kg' : '\u2014'} &nbsp; Gross: ${art.gross_weight > 0 ? art.gross_weight + 'kg' : '\u2014'}</div>
                 <div class="detail">Entry: ${entryDate}</div>
@@ -709,6 +747,8 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
         exporter: art.exporter,
         rate: art.rate,
         spl_remarks: art.spl_remarks,
+        box_type:       art.box_type ?? 'FG',
+        unit_pack_size: art.case_pack ?? null,
       })),
     }
 
@@ -832,7 +872,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
   const isFullyAccounted = totals.sent_kgs > 0 && Math.abs(totals.sent_kgs - totalAccountedKgs) < 0.01
   const overallLossPct = totals.sent_kgs > 0 ? ((totals.this_waste + totals.this_rejection) / totals.sent_kgs) * 100 : 0
   const overallUnaccountedLossPct = totals.sent_kgs > 0 ? (totals.unaccounted / totals.sent_kgs) * 100 : 0
-  const isWithinFinalTolerance = totals.sent_kgs > 0 && overallUnaccountedLossPct > 0.01 && overallUnaccountedLossPct <= 0.5
+  const isWithinFinalTolerance = totals.sent_kgs > 0 && Math.abs(overallUnaccountedLossPct) > 0.01 && Math.abs(overallUnaccountedLossPct) <= 0.2
   const canSubmitFinal = isFullyAccounted || isWithinFinalTolerance
   const toleranceStatus = getLossToleranceStatus()
 
@@ -1029,14 +1069,14 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                 ) : (
                   <>
                     {/* Desktop Table */}
-                    <div className="hidden sm:block overflow-x-auto">
+                    <div className="hidden sm:block">
                       <table className="w-full text-sm">
                         <thead className="bg-gray-50 border-b">
                           <tr>
                             <th className="px-3 py-2.5 text-left font-medium text-gray-600 text-xs">Challan No</th>
-                            <th className="px-3 py-2.5 text-left font-medium text-gray-600 text-xs">JWO Challan</th>
+                            <th className="px-3 py-2.5 text-left font-medium text-gray-600 text-xs hidden lg:table-cell">JWO Challan</th>
                             <th className="px-3 py-2.5 text-left font-medium text-gray-600 text-xs">Date</th>
-                            <th className="px-3 py-2.5 text-center font-medium text-gray-600 text-xs">Type</th>
+                            <th className="px-3 py-2.5 text-center font-medium text-gray-600 text-xs hidden lg:table-cell">Type</th>
                             <th className="px-3 py-2.5 text-left font-medium text-gray-600 text-xs">Party</th>
                             <th className="px-3 py-2.5 text-right font-medium text-gray-600 text-xs">FG (Kg)</th>
                             <th className="px-3 py-2.5 text-right font-medium text-gray-600 text-xs">Waste (Kg)</th>
@@ -1047,10 +1087,55 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                         <tbody>
                           {miRecords.map((rec, idx) => (
                             <tr key={rec.id} className={`border-b last:border-0 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'} hover:bg-gray-50`}>
-                              <td className="px-3 py-2.5 text-xs font-medium">{rec.challan_no || "-"}</td>
-                              <td className="px-3 py-2.5 text-xs font-mono">{rec.jwo_challan}</td>
+                              <td className="px-3 py-2.5 text-xs font-medium">
+                                <ChallanHoverCard
+                                  challanNo={rec.challan_no || rec.ir_number || "-"}
+                                  from={rec.jwo_challan}
+                                  to={rec.to_party}
+                                  fetchLines={async () => {
+                                    try {
+                                      const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/job-work/material-in/${rec.id}`
+                                      const res = await fetch(apiUrl, { headers: { Accept: "application/json" } })
+                                      if (!res.ok) return { lines: [] }
+                                      const data = await res.json()
+                                      const recv = data.receipt || {}
+                                      const cum = data.cumulative || {}
+                                      const lines: HoverLine[] = (data.lines || []).map((l: any) => {
+                                        const fg = Number(l.finished_goods_kgs || 0)
+                                        const w  = Number(l.waste_kgs || 0)
+                                        const rj = Number(l.rejection_kgs || 0)
+                                        const tail: string[] = []
+                                        if (w > 0)  tail.push(`W:${w}kg`)
+                                        if (rj > 0) tail.push(`R:${rj}kg`)
+                                        const desc = l.item_description || "-"
+                                        return {
+                                          name: tail.length ? `${desc} · ${tail.join(" ")}` : desc,
+                                          qty: l.finished_goods_boxes ?? l.sent_boxes ?? undefined,
+                                          netWeight: fg.toFixed(2),
+                                        }
+                                      })
+                                      const meta: HoverMeta[] = []
+                                      if (recv.ir_number)        meta.push({ label: "IR", value: recv.ir_number })
+                                      if (recv.receipt_type)     meta.push({ label: "Type", value: recv.receipt_type === "final" ? "Final" : "Partial", tone: recv.receipt_type === "final" ? "success" : "default" })
+                                      if (recv.inward_warehouse) meta.push({ label: "Inward WH", value: recv.inward_warehouse })
+                                      if (recv.vehicle_no)       meta.push({ label: "Vehicle", value: recv.vehicle_no })
+                                      if (recv.driver_name)      meta.push({ label: "Driver", value: recv.driver_name })
+                                      meta.push({ label: "FG", value: `${rec.total_fg_kgs.toFixed(2)} kg`, tone: "success" })
+                                      if (rec.total_waste_kgs > 0)     meta.push({ label: "Waste", value: `${rec.total_waste_kgs.toFixed(2)} kg`, tone: "warn" })
+                                      if (rec.total_rejection_kgs > 0) meta.push({ label: "Rejection", value: `${rec.total_rejection_kgs.toFixed(2)} kg`, tone: "warn" })
+                                      if (cum.dispatched_kgs)    meta.push({ label: "Dispatched", value: `${Number(cum.dispatched_kgs).toFixed(2)} kg` })
+                                      if (cum.remaining_kgs > 0) meta.push({ label: "Remaining", value: `${Number(cum.remaining_kgs).toFixed(2)} kg`, tone: "warn" })
+                                      if (typeof cum.cum_loss_pct === "number") meta.push({ label: "Loss %", value: `${cum.cum_loss_pct}%`, tone: cum.cum_loss_pct > (recv.max_loss_pct ?? 10) ? "warn" : "default" })
+                                      return { lines, meta }
+                                    } catch {
+                                      return { lines: [] }
+                                    }
+                                  }}
+                                />
+                              </td>
+                              <td className="px-3 py-2.5 text-xs font-mono hidden lg:table-cell">{rec.jwo_challan}</td>
                               <td className="px-3 py-2.5 text-xs whitespace-nowrap">{rec.receipt_date}</td>
-                              <td className="px-3 py-2.5 text-center">
+                              <td className="px-3 py-2.5 text-center hidden lg:table-cell">
                                 <Badge variant="outline" className={`text-[9px] font-semibold ${rec.receipt_type === 'final' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-teal-50 text-teal-700 border-teal-200'}`}>
                                   {rec.receipt_type === 'final' ? 'Final' : 'Partial'}
                                 </Badge>
@@ -1283,27 +1368,27 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                     <table className="w-full text-sm">
                       <thead className="bg-gray-50 border-b">
                         <tr>
-                          <th className="px-3 py-2.5 text-left font-medium text-gray-600 text-xs">#</th>
-                          <th className="px-3 py-2.5 text-left font-medium text-gray-600 text-xs">Item Description</th>
-                          <th className="px-3 py-2.5 text-right font-medium text-gray-600 text-xs">Dispatched (Kg)</th>
-                          <th className="px-3 py-2.5 text-right font-medium text-emerald-700 text-xs bg-emerald-50">FG Received (Kg)</th>
+                          <th className="px-2 py-2 text-left font-medium text-gray-600 text-xs">#</th>
+                          <th className="px-2 py-2 text-left font-medium text-gray-600 text-xs">Item Description</th>
+                          <th className="px-2 py-2 text-right font-medium text-gray-600 text-xs">Disp. (Kg)</th>
+                          <th className="px-2 py-2 text-right font-medium text-emerald-700 text-xs bg-emerald-50">FG Received (Kg)</th>
                           {showWasteColumn && (
-                            <th className="px-3 py-2.5 text-right font-medium text-orange-700 text-xs bg-orange-50">{wasteLabel} (Kg)</th>
+                            <th className="px-2 py-2 text-right font-medium text-orange-700 text-xs bg-orange-50">{wasteLabel} (Kg)</th>
                           )}
-                          <th className="px-3 py-2.5 text-right font-medium text-rose-700 text-xs bg-rose-50">Rejection (Kg)</th>
-                          <th className="px-3 py-2.5 text-right font-medium text-gray-600 text-xs">Accounted (Kg)</th>
-                          <th className="px-3 py-2.5 text-right font-medium text-red-600 text-xs">Unaccounted (Kg)</th>
-                          <th className="px-3 py-2.5 text-right font-medium text-red-600 text-xs">Loss %</th>
+                          <th className="px-2 py-2 text-right font-medium text-rose-700 text-xs bg-rose-50">Rejection (Kg)</th>
+                          <th className="px-2 py-2 text-right font-medium text-gray-600 text-xs">Accntd.</th>
+                          <th className="px-2 py-2 text-right font-medium text-red-600 text-xs">Unaccntd.</th>
+                          <th className="px-2 py-2 text-right font-medium text-red-600 text-xs">Loss %</th>
                         </tr>
                       </thead>
                       <tbody>
                         {miItems.map((item, idx) => (
                           <tr key={idx} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50/50"}>
-                            <td className="px-3 py-2 text-gray-500 text-xs">{item.sl_no}</td>
-                            <td className="px-3 py-2 font-medium text-xs max-w-[180px] truncate" title={item.description}>{item.description}</td>
-                            <td className="px-3 py-2 text-right text-xs font-medium">{item.sent_kgs.toFixed(2)}</td>
+                            <td className="px-2 py-2 text-gray-500 text-xs">{item.sl_no}</td>
+                            <td className="px-2 py-2 font-medium text-xs max-w-[180px] truncate" title={item.description}>{item.description}</td>
+                            <td className="px-2 py-2 text-right text-xs font-medium">{item.sent_kgs.toFixed(2)}</td>
                             {/* FG Received */}
-                            <td className="px-3 py-2 text-right bg-emerald-50/30">
+                            <td className="px-2 py-2 text-right bg-emerald-50/30">
                               <Input type="number" step="0.01" min="0" value={item.fg_kgs || ""}
                                 onChange={(e) => updateIRItem(idx, 'fg_kgs', Number(e.target.value) || 0)}
                                 onWheel={(e) => e.currentTarget.blur()}
@@ -1311,7 +1396,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                             </td>
                             {/* Waste */}
                             {showWasteColumn && (
-                              <td className="px-3 py-2 text-right bg-orange-50/30">
+                              <td className="px-2 py-2 text-right bg-orange-50/30">
                                 <Input type="number" step="0.01" min="0" value={item.waste_kgs || ""}
                                   onChange={(e) => updateIRItem(idx, 'waste_kgs', Number(e.target.value) || 0)}
                                   onWheel={(e) => e.currentTarget.blur()}
@@ -1323,21 +1408,21 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                               </td>
                             )}
                             {/* Rejection */}
-                            <td className="px-3 py-2 text-right bg-rose-50/30">
+                            <td className="px-2 py-2 text-right bg-rose-50/30">
                               <Input type="number" step="0.01" min="0" value={item.rejection_kgs || ""}
                                 onChange={(e) => updateIRItem(idx, 'rejection_kgs', Number(e.target.value) || 0)}
                                 onWheel={(e) => e.currentTarget.blur()}
                                 className="h-7 w-24 text-xs text-right inline-block border-rose-200 focus:border-rose-400" />
                             </td>
                             {/* Accounted */}
-                            <td className="px-3 py-2 text-right text-xs font-medium text-gray-700">{item.total_accounted_kgs.toFixed(2)}</td>
+                            <td className="px-2 py-2 text-right text-xs font-medium text-gray-700">{item.total_accounted_kgs.toFixed(2)}</td>
                             {/* Unaccounted */}
-                            <td className={`px-3 py-2 text-right text-xs font-semibold ${item.unaccounted_kgs > 0 ? 'text-red-600' : item.unaccounted_kgs < 0 ? 'text-red-800' : 'text-gray-400'}`}>
+                            <td className={`px-2 py-2 text-right text-xs font-semibold ${item.unaccounted_kgs > 0 ? 'text-red-600' : item.unaccounted_kgs < 0 ? 'text-red-800' : 'text-gray-400'}`}>
                               {item.unaccounted_kgs.toFixed(2)}
                               {item.unaccounted_kgs < 0 && <span className="text-[9px] ml-0.5">OVER</span>}
                             </td>
                             {/* Loss % */}
-                            <td className="px-3 py-2 text-right">
+                            <td className="px-2 py-2 text-right">
                               <div className="flex items-center justify-end gap-1">
                                 <Badge variant="outline" className={`text-[10px] font-semibold ${
                                   item.loss_pct > 10 ? 'bg-red-50 text-red-700 border-red-200' :
@@ -1371,14 +1456,14 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                       </tbody>
                       <tfoot className="bg-gray-100 border-t-2">
                         <tr className="font-semibold text-xs">
-                          <td colSpan={2} className="px-3 py-2.5 text-gray-700">Totals (Cumulative)</td>
-                          <td className="px-3 py-2.5 text-right">{totals.sent_kgs.toFixed(2)}</td>
-                          <td className="px-3 py-2.5 text-right text-emerald-700">{(totals.prev_fg + totals.this_fg).toFixed(2)}</td>
-                          {showWasteColumn && <td className="px-3 py-2.5 text-right text-orange-700">{(totals.prev_waste + totals.this_waste).toFixed(2)}</td>}
-                          <td className="px-3 py-2.5 text-right text-rose-700">{(totals.prev_rejection + totals.this_rejection).toFixed(2)}</td>
-                          <td className="px-3 py-2.5 text-right text-gray-700">{(totals.sent_kgs - totals.unaccounted).toFixed(2)}</td>
-                          <td className="px-3 py-2.5 text-right text-red-600">{totals.unaccounted.toFixed(2)}</td>
-                          <td className="px-3 py-2.5 text-right">
+                          <td colSpan={2} className="px-2 py-2 text-gray-700">Totals (Cumulative)</td>
+                          <td className="px-2 py-2 text-right">{totals.sent_kgs.toFixed(2)}</td>
+                          <td className="px-2 py-2 text-right text-emerald-700">{(totals.prev_fg + totals.this_fg).toFixed(2)}</td>
+                          {showWasteColumn && <td className="px-2 py-2 text-right text-orange-700">{(totals.prev_waste + totals.this_waste).toFixed(2)}</td>}
+                          <td className="px-2 py-2 text-right text-rose-700">{(totals.prev_rejection + totals.this_rejection).toFixed(2)}</td>
+                          <td className="px-2 py-2 text-right text-gray-700">{(totals.sent_kgs - totals.unaccounted).toFixed(2)}</td>
+                          <td className="px-2 py-2 text-right text-red-600">{totals.unaccounted.toFixed(2)}</td>
+                          <td className="px-2 py-2 text-right">
                             <div className="flex flex-col items-end gap-0.5">
                               <Badge variant="outline" className="text-[10px] font-bold bg-gray-200 text-gray-800 border-gray-400">{overallLossPct.toFixed(1)}%</Badge>
                               {overallUnaccountedLossPct !== 0 && (
@@ -1520,6 +1605,32 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                 </div>
               )}
 
+              {/* Entry Type toggle */}
+              <div className="flex items-center gap-3 mb-3">
+                <Label className="text-xs font-medium text-gray-600">Entry Type:</Label>
+                <div className="flex gap-2">
+                  <button type="button"
+                    onClick={() => setAeBoxType('FG')}
+                    className={`px-3 py-1 text-xs rounded border ${aeBoxType === 'FG'
+                      ? 'bg-emerald-50 border-emerald-300 text-emerald-700 font-semibold'
+                      : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                    Finished Goods
+                  </button>
+                  <button type="button"
+                    onClick={() => setAeBoxType('REJECTION')}
+                    className={`px-3 py-1 text-xs rounded border ${aeBoxType === 'REJECTION'
+                      ? 'bg-rose-50 border-rose-300 text-rose-700 font-semibold'
+                      : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                    Rejection
+                  </button>
+                </div>
+                <span className="ml-auto text-[10px] text-gray-500">
+                  {aeBoxType === 'FG'
+                    ? `FG remaining: ${(aeFgLimit - aeUsedFg).toFixed(2)} kg`
+                    : `Rejection remaining: ${(aeRejLimit - aeUsedRej).toFixed(2)} kg`}
+                </span>
+              </div>
+
               {/* Cascading Dropdowns (alternative to search) */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 {/* Item Group */}
@@ -1555,7 +1666,21 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                 {/* Item Description */}
                 <div className="space-y-1 lg:col-span-2">
                   <Label className="text-xs font-medium text-gray-600">Item Description *</Label>
-                  <Select value={aeSelectedDesc} onValueChange={setAeSelectedDesc} disabled={!aeSelectedSubGroup}>
+                  <Select value={aeSelectedDesc} onValueChange={(val) => {
+                    setAeSelectedDesc(val)
+                    if (val) {
+                      const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/job-work/sku-detail?description=${encodeURIComponent(val)}`
+                      fetch(apiUrl, { headers: { 'Accept': 'application/json' } })
+                        .then(r => r.json())
+                        .then(d => {
+                          const parsed = parseFloat(String(d?.uom || "").replace(/[^0-9.]/g, ""))
+                          setAeUom(isNaN(parsed) ? 0 : parsed)
+                        })
+                        .catch(() => setAeUom(0))
+                    } else {
+                      setAeUom(0)
+                    }
+                  }} disabled={!aeSelectedSubGroup}>
                     <SelectTrigger className="h-9 bg-white border-gray-200 text-xs">
                       <SelectValue placeholder={aeLoadingDescs ? "Loading..." : "Select Description"} />
                     </SelectTrigger>
@@ -1568,23 +1693,38 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                 </div>
               </div>
 
-              {/* Quantity + Net Weight + Gross Weight */}
-              <div className="flex flex-col sm:flex-row gap-3 items-end">
-                <div className="space-y-1 w-full sm:w-32">
+              {/* Quantity + Case Pack + Net Weight + Gross Weight */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="space-y-1">
                   <Label className="text-xs font-medium text-gray-600">Quantity (Boxes) *</Label>
                   <Input type="number" min={1} value={aeQuantity || ""}
                     onChange={(e) => setAeQuantity(Number(e.target.value) || 0)}
                     onWheel={(e) => e.currentTarget.blur()}
                     className="h-9 bg-white border-gray-200 text-xs" placeholder="No. of boxes" />
                 </div>
-                <div className="space-y-1 w-full sm:w-32">
+                <div className="space-y-1">
+                  <Label className="text-xs font-medium text-gray-600">Case Pack <span className="text-gray-400">(units/box)</span></Label>
+                  <Input
+                    type="number" step="0.001" min={0}
+                    value={aeCasePack || ""}
+                    onChange={(e) => onAePickerCasePackChange(Number(e.target.value) || 0)}
+                    onWheel={(e) => e.currentTarget.blur()}
+                    disabled={aeUom <= 0}
+                    placeholder={aeUom <= 0 ? "Pick SKU first" : ""}
+                    className="h-9 bg-white border-gray-200 text-xs"
+                  />
+                  {aeUom > 0 && (
+                    <p className="text-[10px] text-gray-500">uom = {aeUom} kg/unit (from master)</p>
+                  )}
+                </div>
+                <div className="space-y-1">
                   <Label className="text-xs font-medium text-gray-600">Net Wt / Box (Kg)</Label>
                   <Input type="number" step="0.01" min={0} value={aeNetWeight || ""}
-                    onChange={(e) => setAeNetWeight(Number(e.target.value) || 0)}
+                    onChange={(e) => onAePickerNetChange(Number(e.target.value) || 0)}
                     onWheel={(e) => e.currentTarget.blur()}
                     className="h-9 bg-white border-gray-200 text-xs" placeholder="Net wt" />
                 </div>
-                <div className="space-y-1 w-full sm:w-32">
+                <div className="space-y-1">
                   <Label className="text-xs font-medium text-gray-600">Gross Wt / Box (Kg)</Label>
                   <Input type="number" step="0.01" min={0} value={aeGrossWeight || ""}
                     onChange={(e) => setAeGrossWeight(Number(e.target.value) || 0)}
@@ -1719,6 +1859,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                           <th className="px-3 py-2 text-left font-medium text-gray-600 text-xs">Box ID</th>
                           <th className="px-3 py-2 text-left font-medium text-gray-600 text-xs">Item Description</th>
                           <th className="px-3 py-2 text-left font-medium text-gray-600 text-xs">Group</th>
+                          <th className="px-3 py-2 text-right font-medium text-gray-600 text-xs">Case Pack</th>
                           <th className="px-3 py-2 text-right font-medium text-gray-600 text-xs">Net Wt (Kg)</th>
                           <th className="px-3 py-2 text-right font-medium text-gray-600 text-xs">Gross Wt (Kg)</th>
                           <th className="px-3 py-2 text-center font-medium text-gray-600 text-xs">QR</th>
@@ -1731,12 +1872,40 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                             <td className="px-3 py-1.5 text-xs text-gray-500">{idx + 1}</td>
                             <td className="px-3 py-1.5 text-xs font-mono text-indigo-700">{art.transaction_no}</td>
                             <td className="px-3 py-1.5 text-xs font-mono font-semibold">{art.box_id}</td>
-                            <td className="px-3 py-1.5 text-xs truncate max-w-[200px]" title={art.item_description}>{art.item_description}</td>
+                            <td className="px-3 py-1.5 text-xs max-w-[220px]" title={art.item_description}>
+                              <span className="truncate inline-block max-w-[160px] align-middle">{art.item_description}</span>
+                              {art.box_type === 'REJECTION' && (
+                                <span className="ml-2 inline-block px-1.5 py-0.5 text-[9px] font-semibold rounded bg-rose-100 text-rose-700 border border-rose-300 align-middle">
+                                  REJECTION
+                                </span>
+                              )}
+                            </td>
                             <td className="px-3 py-1.5 text-xs text-gray-600">{art.item_group} / {art.sub_group}</td>
+                            <td className="px-2 py-1">
+                              <Input type="number" step="0.001" min={0}
+                                value={art.case_pack ?? ((art.uom ?? 0) > 0 ? round3(art.net_weight / (art.uom as number)) : 0) || ""}
+                                onChange={(e) => {
+                                  const cp = Number(e.target.value) || 0
+                                  setAeGeneratedArticles(prev => prev.map((a, i) => i === idx ? {
+                                    ...a,
+                                    case_pack: cp,
+                                    net_weight: (a.uom ?? 0) > 0 ? round3(cp * (a.uom as number)) : a.net_weight,
+                                  } : a))
+                                }}
+                                onWheel={(e) => e.currentTarget.blur()}
+                                className="h-7 w-20 text-xs text-right border-gray-200" />
+                            </td>
                             <td className="px-2 py-1">
                               <Input type="number" step="0.01" min={0}
                                 value={art.net_weight || ""}
-                                onChange={(e) => setAeGeneratedArticles(prev => prev.map((a, i) => i === idx ? { ...a, net_weight: Number(e.target.value) || 0 } : a))}
+                                onChange={(e) => {
+                                  const nw = Number(e.target.value) || 0
+                                  setAeGeneratedArticles(prev => prev.map((a, i) => i === idx ? {
+                                    ...a,
+                                    net_weight: nw,
+                                    case_pack: (a.uom ?? 0) > 0 ? round3(nw / (a.uom as number)) : (a.case_pack ?? 0),
+                                  } : a))
+                                }}
                                 onWheel={(e) => e.currentTarget.blur()}
                                 className="h-7 w-20 text-xs text-right border-gray-200" />
                             </td>
@@ -1769,17 +1938,33 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                     )}
                   </BoxScrollContainer>
 
-                  {/* Total Net Wt vs FG Received indicator */}
-                  {aeFgLimit > 0 && (
-                    <div className={`flex items-center justify-between px-3 py-2 rounded-lg border text-xs font-medium ${
-                      aeTotalNetWeight > aeFgLimit + 0.01
-                        ? 'bg-red-50 text-red-700 border-red-200'
-                        : Math.abs(aeTotalNetWeight - aeFgLimit) < 0.01
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                          : 'bg-amber-50 text-amber-700 border-amber-200'
-                    }`}>
-                      <span>Total Box Net Wt: <b>{aeTotalNetWeight.toFixed(2)} kg</b> / FG Received: <b>{aeFgLimit.toFixed(2)} kg</b></span>
-                      <span>{aeTotalNetWeight > aeFgLimit + 0.01 ? 'EXCEEDS LIMIT' : Math.abs(aeTotalNetWeight - aeFgLimit) < 0.01 ? 'Matched' : `Remaining: ${(aeFgLimit - aeTotalNetWeight).toFixed(2)} kg`}</span>
+                  {/* FG + Rejection status badges */}
+                  {(aeFgLimit > 0 || aeRejLimit > 0) && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {aeFgLimit > 0 && (
+                        <div className={`flex items-center justify-between px-3 py-2 rounded-lg border text-xs font-medium ${
+                          aeUsedFg > aeFgLimit + 0.01
+                            ? 'bg-red-50 text-red-700 border-red-200'
+                            : Math.abs(aeUsedFg - aeFgLimit) < 0.01
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : 'bg-amber-50 text-amber-700 border-amber-200'
+                        }`}>
+                          <span>FG: <b>{aeUsedFg.toFixed(2)} kg</b> / <b>{aeFgLimit.toFixed(2)} kg</b></span>
+                          <span>{aeUsedFg > aeFgLimit + 0.01 ? 'EXCEEDS' : Math.abs(aeUsedFg - aeFgLimit) < 0.01 ? 'Matched' : `Rem: ${(aeFgLimit - aeUsedFg).toFixed(2)} kg`}</span>
+                        </div>
+                      )}
+                      {aeRejLimit > 0 && (
+                        <div className={`flex items-center justify-between px-3 py-2 rounded-lg border text-xs font-medium ${
+                          aeUsedRej > aeRejLimit + 0.01
+                            ? 'bg-red-50 text-red-700 border-red-200'
+                            : Math.abs(aeUsedRej - aeRejLimit) < 0.01
+                              ? 'bg-rose-50 text-rose-700 border-rose-200'
+                              : 'bg-amber-50 text-amber-700 border-amber-200'
+                        }`}>
+                          <span>Rejection: <b>{aeUsedRej.toFixed(2)} kg</b> / <b>{aeRejLimit.toFixed(2)} kg</b></span>
+                          <span>{aeUsedRej > aeRejLimit + 0.01 ? 'EXCEEDS' : Math.abs(aeUsedRej - aeRejLimit) < 0.01 ? 'Matched' : `Rem: ${(aeRejLimit - aeUsedRej).toFixed(2)} kg`}</span>
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -1831,7 +2016,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                   <Button type="button" disabled={miSubmitting || !canSubmitFinal}
                     onClick={(e) => handleSubmitMaterialIn(e as any, "final")}
                     className="h-10 px-5 text-sm shadow-sm bg-amber-600 hover:bg-amber-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                    title={!canSubmitFinal ? `Unaccounted ${overallUnaccountedLossPct.toFixed(2)}% exceeds 0.5% tolerance` : isWithinFinalTolerance ? `Within tolerance — ${overallUnaccountedLossPct.toFixed(2)}% unaccounted` : ''}>
+                    title={!canSubmitFinal ? `Unaccounted ${overallUnaccountedLossPct.toFixed(2)}% exceeds ±0.2% tolerance` : isWithinFinalTolerance ? `Within tolerance — ${overallUnaccountedLossPct.toFixed(2)}% unaccounted` : ''}>
                     {miSubmitting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Submitting...</> :
                       <><AlertTriangle className="h-4 w-4 mr-2" />Submit Final</>}
                   </Button>
@@ -1842,7 +2027,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                   )}
                   {!canSubmitFinal && miItems.length > 0 && (
                     <span className="text-[10px] text-red-500 font-medium">
-                      {overallUnaccountedLossPct.toFixed(2)}% unaccounted &gt; 0.5% limit
+                      {overallUnaccountedLossPct.toFixed(2)}% unaccounted &gt; ±0.2% limit
                     </span>
                   )}
                 </div>
@@ -1934,7 +2119,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
             ) : (
               <>
                 {/* Desktop Table */}
-                <div className="hidden sm:block overflow-x-auto">
+                <div className="hidden sm:block">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 border-b">
                       <tr>
@@ -1942,8 +2127,8 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                         <th className="px-4 py-3 text-left font-medium text-gray-600 text-xs">Status</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600 text-xs">From → To</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600 text-xs">Item Description</th>
-                        <th className="px-4 py-3 text-left font-medium text-gray-600 text-xs">Date</th>
-                        <th className="px-4 py-3 text-right font-medium text-gray-600 text-xs">Total Qty</th>
+                        <th className="px-4 py-3 text-left font-medium text-gray-600 text-xs hidden lg:table-cell">Date</th>
+                        <th className="px-4 py-3 text-right font-medium text-gray-600 text-xs hidden lg:table-cell">Total Qty</th>
                         <th className="px-4 py-3 text-right font-medium text-gray-600 text-xs">Total Wt (Kg)</th>
                         <th className="px-4 py-3 text-center font-medium text-gray-600 text-xs">Actions</th>
                       </tr>
@@ -1963,7 +2148,13 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                                   className="!bg-gradient-to-br !from-sky-50 !via-indigo-50 !to-violet-100 !text-slate-800 border border-indigo-200/70 shadow-lg shadow-indigo-200/40 rounded-lg max-w-xs text-xs p-3 space-y-1.5"
                                 >
                                   <div className="font-semibold text-indigo-900 pb-1 border-b border-indigo-200/60">{rec.challan_no}</div>
+                                  <div><span className="font-semibold text-indigo-700">Status:</span> <span className="text-slate-700">{rec.status}</span></div>
                                   <div><span className="font-semibold text-indigo-700">From → To:</span> <span className="text-slate-700">{getDisplayWarehouseName(rec.from_warehouse)} → {rec.to_party}</span></div>
+                                  <div><span className="font-semibold text-indigo-700">Date:</span> <span className="text-slate-700">{rec.job_work_date}</span></div>
+                                  <div><span className="font-semibold text-indigo-700">Qty / Wt:</span> <span className="text-slate-700">{rec.total_qty} pcs · {rec.total_weight?.toFixed(2)} Kg</span></div>
+                                  {(rec as any).sub_category && (
+                                    <div><span className="font-semibold text-indigo-700">Process:</span> <span className="text-slate-700">{(rec as any).sub_category}</span></div>
+                                  )}
                                   {rec.item_descriptions && (
                                     <div><span className="font-semibold text-indigo-700">Items:</span> <span className="text-slate-700">{rec.item_descriptions}</span></div>
                                   )}
@@ -1977,8 +2168,8 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                           <td className="px-4 py-3">{getStatusBadge(rec.status)}</td>
                           <td className="px-4 py-3 text-xs">{getDisplayWarehouseName(rec.from_warehouse)} → {rec.to_party}</td>
                           <td className="px-4 py-3 text-xs max-w-[250px] truncate" title={rec.item_descriptions}>{rec.item_descriptions || "-"}</td>
-                          <td className="px-4 py-3 text-xs whitespace-nowrap">{rec.job_work_date}</td>
-                          <td className="px-4 py-3 text-right text-xs font-medium">{rec.total_qty}</td>
+                          <td className="px-4 py-3 text-xs whitespace-nowrap hidden lg:table-cell">{rec.job_work_date}</td>
+                          <td className="px-4 py-3 text-right text-xs font-medium hidden lg:table-cell">{rec.total_qty}</td>
                           <td className="px-4 py-3 text-right text-xs font-medium">{rec.total_weight.toFixed(2)}</td>
                           <td className="px-4 py-3 text-center">
                             <div className="flex items-center justify-center gap-1">
@@ -2457,7 +2648,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
 
       {/* ═══ View Inward Receipt Dialog ═══ */}
       <Dialog open={viewIROpen} onOpenChange={setViewIROpen}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base">
               <Inbox className="h-4 w-4 text-teal-600" />
@@ -2477,12 +2668,32 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                 <div><span className="text-gray-500">Challan No:</span> <span className="font-semibold">{viewIRData.receipt.challan_no || "-"}</span></div>
                 <div><span className="text-gray-500">JWO Challan:</span> <span className="font-mono font-semibold">{viewIRData.receipt.jwo_challan}</span></div>
                 <div><span className="text-gray-500">Date:</span> <span className="font-semibold">{viewIRData.receipt.receipt_date}</span></div>
-                <div><span className="text-gray-500">Type:</span>{' '}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-gray-500">Type:</span>
                   <Badge variant="outline" className={`text-[9px] font-semibold ${viewIRData.receipt.receipt_type === 'final' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-teal-50 text-teal-700 border-teal-200'}`}>
                     {viewIRData.receipt.receipt_type === 'final' ? 'Final' : 'Partial'}
                   </Badge>
                 </div>
                 <div><span className="text-gray-500">Party:</span> <span className="font-semibold">{viewIRData.receipt.to_party || "-"}</span></div>
+                {(viewIRData.receipt.from_warehouse || viewIRData.receipt.inward_warehouse) && (
+                  <div className="col-span-2 sm:col-span-3 flex items-center gap-2">
+                    {viewIRData.receipt.from_warehouse && (
+                      <span className="flex items-center gap-1">
+                        <span className="text-gray-500">Dispatched from:</span>
+                        <span className="font-semibold bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded">{viewIRData.receipt.from_warehouse}</span>
+                      </span>
+                    )}
+                    {viewIRData.receipt.from_warehouse && viewIRData.receipt.inward_warehouse && (
+                      <span className="text-gray-400">→</span>
+                    )}
+                    {viewIRData.receipt.inward_warehouse && (
+                      <span className="flex items-center gap-1">
+                        <span className="text-gray-500">Received at:</span>
+                        <span className="font-semibold bg-teal-50 text-teal-700 px-1.5 py-0.5 rounded">{viewIRData.receipt.inward_warehouse}</span>
+                      </span>
+                    )}
+                  </div>
+                )}
                 {viewIRData.receipt.process_type && (
                   <div><span className="text-gray-500">Process:</span> <span className="font-semibold">{viewIRData.receipt.process_type}</span></div>
                 )}
@@ -2498,41 +2709,128 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
               </div>
 
               {/* Line Items Table */}
-              <div className="overflow-x-auto border rounded-lg">
-                <table className="w-full text-xs">
+              <div className="border rounded-lg overflow-hidden">
+                <table className="w-full text-[11px] table-fixed">
+                  <colgroup>
+                    <col className="w-[4%]" />
+                    <col className="w-[26%]" />
+                    <col className="w-[10%]" />
+                    <col className="w-[10%]" />
+                    <col className="w-[12%]" />
+                    <col className="w-[11%]" />
+                    <col className="w-[13%]" />
+                    <col className="w-[10%]" />
+                  </colgroup>
                   <thead className="bg-gray-50 border-b">
                     <tr>
-                      <th className="px-3 py-2 text-left font-medium text-gray-600">#</th>
-                      <th className="px-3 py-2 text-left font-medium text-gray-600">Item Description</th>
-                      <th className="px-3 py-2 text-right font-medium text-gray-600">Sent (Kg)</th>
-                      <th className="px-3 py-2 text-right font-medium text-emerald-700 bg-emerald-50">FG (Kg)</th>
-                      <th className="px-3 py-2 text-right font-medium text-orange-700 bg-orange-50">Waste (Kg)</th>
-                      <th className="px-3 py-2 text-right font-medium text-rose-700 bg-rose-50">Rejection (Kg)</th>
+                      <th className="px-1.5 py-1.5 text-left font-medium text-gray-600">#</th>
+                      <th className="px-1.5 py-1.5 text-left font-medium text-gray-600">Item</th>
+                      <th className="px-1.5 py-1.5 text-right font-medium text-gray-600">Sent</th>
+                      <th className="px-1.5 py-1.5 text-right font-medium text-emerald-700 bg-emerald-50">FG (Kg)</th>
+                      <th className="px-1.5 py-1.5 text-right font-medium text-orange-700 bg-orange-50">Waste (Kg)</th>
+                      <th className="px-1.5 py-1.5 text-right font-medium text-rose-700 bg-rose-50">Reject (Kg)</th>
+                      <th className="px-1.5 py-1.5 text-right font-medium text-purple-700 bg-purple-50">Unacctd (Kg)</th>
+                      <th className="px-1.5 py-1.5 text-right font-medium text-gray-600">Loss %</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {viewIRData.lines.map((line: any, idx: number) => (
-                      <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
-                        <td className="px-3 py-2 text-gray-500">{line.sl_no}</td>
-                        <td className="px-3 py-2 font-medium max-w-[200px] truncate" title={line.item_description}>{line.item_description}</td>
-                        <td className="px-3 py-2 text-right font-medium">{line.sent_kgs.toFixed(2)}</td>
-                        <td className="px-3 py-2 text-right font-medium text-emerald-700">{line.finished_goods_kgs.toFixed(2)}</td>
-                        <td className="px-3 py-2 text-right font-medium text-orange-700">{line.waste_kgs.toFixed(2)}</td>
-                        <td className="px-3 py-2 text-right font-medium text-rose-700">{line.rejection_kgs.toFixed(2)}</td>
-                      </tr>
-                    ))}
+                    {viewIRData.lines.map((line: any, idx: number) => {
+                      const unaccounted = Math.max(0, line.sent_kgs - line.finished_goods_kgs - line.waste_kgs - line.rejection_kgs)
+                      const lossPct = line.sent_kgs > 0 ? ((line.waste_kgs + line.rejection_kgs) / line.sent_kgs * 100) : 0
+                      const overLimit = line.max_loss_pct > 0 && lossPct > line.max_loss_pct
+                      return (
+                        <Fragment key={idx}>
+                          <tr className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
+                            <td className="px-1.5 py-1.5 text-gray-500">{line.sl_no}</td>
+                            <td className="px-1.5 py-1.5 font-medium truncate" title={line.item_description}>{line.item_description}</td>
+                            <td className="px-1.5 py-1.5 text-right font-medium">{line.sent_kgs.toFixed(2)}</td>
+                            <td className="px-1.5 py-1.5 text-right font-medium text-emerald-700">{line.finished_goods_kgs.toFixed(2)}</td>
+                            <td className="px-1.5 py-1.5 text-right font-medium text-orange-700">
+                              {line.waste_kgs.toFixed(2)}
+                              {line.waste_type && <div className="text-[9px] text-orange-400 font-normal leading-tight">{line.waste_type}</div>}
+                            </td>
+                            <td className="px-1.5 py-1.5 text-right font-medium text-rose-700">{line.rejection_kgs.toFixed(2)}</td>
+                            <td className="px-1.5 py-1.5 text-right font-medium text-purple-700">{unaccounted.toFixed(2)}</td>
+                            <td className="px-1.5 py-1.5 text-right">
+                              <span className={`font-medium ${overLimit ? 'text-red-600' : 'text-gray-700'}`}>{lossPct.toFixed(1)}%</span>
+                              {(line.min_loss_pct > 0 || line.max_loss_pct > 0) && (
+                                <div className="text-[9px] text-gray-400 leading-tight">{line.min_loss_pct}–{line.max_loss_pct}%</div>
+                              )}
+                            </td>
+                          </tr>
+                          {line.line_remarks && (
+                            <tr className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
+                              <td colSpan={8} className="px-1.5 pb-1.5 pt-0 text-[10px] text-gray-500 italic">↳ {line.line_remarks}</td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      )
+                    })}
                   </tbody>
                   <tfoot className="bg-gray-100 border-t font-semibold">
                     <tr>
-                      <td colSpan={2} className="px-3 py-2 text-gray-700">Total</td>
-                      <td className="px-3 py-2 text-right">{viewIRData.lines.reduce((s: number, l: any) => s + l.sent_kgs, 0).toFixed(2)}</td>
-                      <td className="px-3 py-2 text-right text-emerald-700">{viewIRData.lines.reduce((s: number, l: any) => s + l.finished_goods_kgs, 0).toFixed(2)}</td>
-                      <td className="px-3 py-2 text-right text-orange-700">{viewIRData.lines.reduce((s: number, l: any) => s + l.waste_kgs, 0).toFixed(2)}</td>
-                      <td className="px-3 py-2 text-right text-rose-700">{viewIRData.lines.reduce((s: number, l: any) => s + l.rejection_kgs, 0).toFixed(2)}</td>
+                      <td colSpan={2} className="px-1.5 py-1.5 text-gray-700">Total</td>
+                      <td className="px-1.5 py-1.5 text-right">{viewIRData.lines.reduce((s: number, l: any) => s + l.sent_kgs, 0).toFixed(2)}</td>
+                      <td className="px-1.5 py-1.5 text-right text-emerald-700">{viewIRData.lines.reduce((s: number, l: any) => s + l.finished_goods_kgs, 0).toFixed(2)}</td>
+                      <td className="px-1.5 py-1.5 text-right text-orange-700">{viewIRData.lines.reduce((s: number, l: any) => s + l.waste_kgs, 0).toFixed(2)}</td>
+                      <td className="px-1.5 py-1.5 text-right text-rose-700">{viewIRData.lines.reduce((s: number, l: any) => s + l.rejection_kgs, 0).toFixed(2)}</td>
+                      <td className="px-1.5 py-1.5 text-right text-purple-700">
+                        {viewIRData.lines.reduce((s: number, l: any) => s + Math.max(0, l.sent_kgs - l.finished_goods_kgs - l.waste_kgs - l.rejection_kgs), 0).toFixed(2)}
+                      </td>
+                      <td className="px-1.5 py-1.5 text-right text-gray-600">
+                        {(() => {
+                          const totalSent = viewIRData.lines.reduce((s: number, l: any) => s + l.sent_kgs, 0)
+                          const totalLoss = viewIRData.lines.reduce((s: number, l: any) => s + l.waste_kgs + l.rejection_kgs, 0)
+                          return totalSent > 0 ? `${(totalLoss / totalSent * 100).toFixed(1)}%` : '—'
+                        })()}
+                      </td>
                     </tr>
                   </tfoot>
                 </table>
               </div>
+
+              {/* Cumulative Summary */}
+              {viewIRData.cumulative && (
+                <div className="rounded-lg border border-indigo-100 bg-indigo-50/40 p-3">
+                  <div className="text-[10px] font-semibold text-indigo-700 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                    <BarChart3 className="h-3 w-3" />
+                    Cumulative — {viewIRData.cumulative.receipt_count} Receipt{viewIRData.cumulative.receipt_count !== 1 ? 's' : ''} against this JWO
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                    <div className="bg-white rounded p-2 border border-gray-200">
+                      <div className="text-gray-500 text-[10px] mb-0.5">Total Dispatched</div>
+                      <div className="font-bold text-gray-800">{viewIRData.cumulative.dispatched_kgs.toFixed(2)} Kg</div>
+                    </div>
+                    <div className="bg-white rounded p-2 border border-emerald-100">
+                      <div className="text-emerald-600 text-[10px] mb-0.5">FG Received</div>
+                      <div className="font-bold text-emerald-700">{viewIRData.cumulative.cum_fg_kgs.toFixed(2)} Kg</div>
+                    </div>
+                    <div className="bg-white rounded p-2 border border-orange-100">
+                      <div className="text-orange-600 text-[10px] mb-0.5">Total Waste</div>
+                      <div className="font-bold text-orange-700">{viewIRData.cumulative.cum_waste_kgs.toFixed(2)} Kg</div>
+                    </div>
+                    <div className="bg-white rounded p-2 border border-rose-100">
+                      <div className="text-rose-600 text-[10px] mb-0.5">Total Rejection</div>
+                      <div className="font-bold text-rose-700">{viewIRData.cumulative.cum_rejection_kgs.toFixed(2)} Kg</div>
+                    </div>
+                    <div className="bg-white rounded p-2 border border-purple-100">
+                      <div className="text-purple-600 text-[10px] mb-0.5">Unaccounted</div>
+                      <div className="font-bold text-purple-700">{viewIRData.cumulative.cum_unaccounted_kgs.toFixed(2)} Kg</div>
+                    </div>
+                    <div className="bg-white rounded p-2 border border-amber-100">
+                      <div className="text-amber-600 text-[10px] mb-0.5">Remaining to Receive</div>
+                      <div className="font-bold text-amber-700">{viewIRData.cumulative.remaining_kgs.toFixed(2)} Kg</div>
+                    </div>
+                    <div className="bg-white rounded p-2 border border-gray-200 sm:col-span-2">
+                      <div className="text-gray-500 text-[10px] mb-0.5">Cumulative Loss %</div>
+                      <div className={`font-bold ${viewIRData.cumulative.cum_loss_pct > 5 ? 'text-red-600' : 'text-gray-700'}`}>
+                        {viewIRData.cumulative.cum_loss_pct.toFixed(2)}%
+                        <span className="text-[10px] font-normal text-gray-400 ml-2">(waste + rejection ÷ dispatched)</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="text-[10px] text-gray-400 text-right">
                 Created by {viewIRData.receipt.created_by || "—"} on {viewIRData.receipt.created_at}

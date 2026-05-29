@@ -2488,7 +2488,7 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
                             </Button>
                           </div>
 
-                          {/* Lot Range Dedicator — cold storage only */}
+                          {/* Lot Range Dedicator — available on all warehouses */}
                           <LotRangeDedicator
                             warehouse={warehouse}
                             totalBoxes={boxForms.filter((b) => b.article_description === approvalForm.item_description).length}

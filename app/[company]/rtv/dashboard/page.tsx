@@ -680,16 +680,16 @@ export default function RTVDashboard({ params }: Props) {
             {activeFilterCount > 0 && <Button variant="outline" size="sm" className="mt-3 text-xs" onClick={clearFilters}>Clear Filters</Button>}
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div>
             <table className="w-full text-sm">
               <thead className="sticky top-0 z-10">
                 <tr className="border-b bg-muted/60">
                   <th className="text-left text-xs uppercase tracking-wider font-medium px-3 py-2.5 min-w-[260px]">{GROUP_OPTIONS.find(g => g.value === groupBy)?.label}</th>
                   <th className="text-right text-xs uppercase tracking-wider font-medium px-3 py-2.5 w-[70px]">RTVs</th>
                   <th className="text-right text-xs uppercase tracking-wider font-medium px-3 py-2.5 w-[170px]">{viewMode === "value" ? "Value (₹)" : viewMode === "qty" ? "Qty / Kg" : "Qty / Kg / Value"}</th>
-                  <th className="text-right text-xs uppercase tracking-wider font-medium px-3 py-2.5 w-[100px]">Avg Rate</th>
-                  <th className="text-right text-xs uppercase tracking-wider font-medium px-3 py-2.5 w-[80px]">Customers</th>
-                  <th className="text-right text-xs uppercase tracking-wider font-medium px-3 py-2.5 w-[60px]">Items</th>
+                  <th className="text-right text-xs uppercase tracking-wider font-medium px-3 py-2.5 w-[100px] hidden lg:table-cell">Avg Rate</th>
+                  <th className="text-right text-xs uppercase tracking-wider font-medium px-3 py-2.5 w-[80px] hidden lg:table-cell">Customers</th>
+                  <th className="text-right text-xs uppercase tracking-wider font-medium px-3 py-2.5 w-[60px] hidden lg:table-cell">Items</th>
                 </tr>
               </thead>
               <tbody>
@@ -708,9 +708,9 @@ export default function RTVDashboard({ params }: Props) {
                       </td>
                       <td className="text-right px-3 py-2.5 tabular-nums">{l1.rtv_count}</td>
                       <td className="text-right px-3 py-2.5">{showValWithKg(l1.total_qty, l1.total_value, l1.total_kg)}</td>
-                      <td className="text-right px-3 py-2.5 tabular-nums">{fmtR(l1.avg_rate)}</td>
-                      <td className="text-right px-3 py-2.5 tabular-nums">{l1.customer_count}</td>
-                      <td className="text-right px-3 py-2.5 tabular-nums">{l1.children.reduce((s, c) => s + c.item_count, 0) || l1.children.length}</td>
+                      <td className="text-right px-3 py-2.5 tabular-nums hidden lg:table-cell">{fmtR(l1.avg_rate)}</td>
+                      <td className="text-right px-3 py-2.5 tabular-nums hidden lg:table-cell">{l1.customer_count}</td>
+                      <td className="text-right px-3 py-2.5 tabular-nums hidden lg:table-cell">{l1.children.reduce((s, c) => s + c.item_count, 0) || l1.children.length}</td>
                     </tr>
                     {open1 && l1.children.map(l2 => {
                       const k2 = k1 + "|||" + l2.sub_label; const open2 = expanded.has(k2)
@@ -721,9 +721,9 @@ export default function RTVDashboard({ params }: Props) {
                           </td>
                           <td className="text-right px-3 py-2 tabular-nums">{l2.rtv_count}</td>
                           <td className="text-right px-3 py-2">{showValWithKg(l2.total_qty, l2.total_value, l2.total_kg)}</td>
-                          <td className="text-right px-3 py-2 tabular-nums">{fmtR(l2.avg_rate)}</td>
-                          <td className="text-right px-3 py-2 tabular-nums">—</td>
-                          <td className="text-right px-3 py-2 tabular-nums">{l2.item_count}</td>
+                          <td className="text-right px-3 py-2 tabular-nums hidden lg:table-cell">{fmtR(l2.avg_rate)}</td>
+                          <td className="text-right px-3 py-2 tabular-nums hidden lg:table-cell">—</td>
+                          <td className="text-right px-3 py-2 tabular-nums hidden lg:table-cell">{l2.item_count}</td>
                         </tr>
                         {open2 && l2.children.map(l3 => {
                           const k3 = k2 + "|||" + l3.item_description
@@ -756,8 +756,8 @@ export default function RTVDashboard({ params }: Props) {
                               </td>
                               <td className="text-right px-3 py-2 tabular-nums">{l3.rtv_count}</td>
                               <td className="text-right px-3 py-2">{showValWithKg(l3.total_qty, l3.total_value, l3.total_kg)}</td>
-                              <td className="text-right px-3 py-2 tabular-nums">{fmtR(l3.avg_rate)}</td>
-                              <td /><td />
+                              <td className="text-right px-3 py-2 tabular-nums hidden lg:table-cell">{fmtR(l3.avg_rate)}</td>
+                              <td className="hidden lg:table-cell" /><td className="hidden lg:table-cell" />
                             </tr>
                             {open3 && l4Rows.map(tx => (
                               <tr key={`${k3}:::${tx.rtv_id}`} className="border-b bg-white dark:bg-slate-900/80 text-xs">
@@ -783,8 +783,8 @@ export default function RTVDashboard({ params }: Props) {
                                 </td>
                                 <td />
                                 <td className="text-right px-3 py-1.5">{showVal(tx.qty, tx.value)}</td>
-                                <td className="text-right px-3 py-1.5 tabular-nums">{fmtR(tx.qty > 0 ? tx.value / tx.qty : 0)}</td>
-                                <td /><td />
+                                <td className="text-right px-3 py-1.5 tabular-nums hidden lg:table-cell">{fmtR(tx.qty > 0 ? tx.value / tx.qty : 0)}</td>
+                                <td className="hidden lg:table-cell" /><td className="hidden lg:table-cell" />
                               </tr>
                             ))}
                           </React.Fragment>)
@@ -799,9 +799,9 @@ export default function RTVDashboard({ params }: Props) {
                   <td className="px-3 py-2.5">Grand Total</td>
                   <td className="text-right px-3 py-2.5 tabular-nums">{kpis.total_rtvs}</td>
                   <td className="text-right px-3 py-2.5">{showValWithKg(kpis.total_qty, kpis.total_value, kpis.total_kg)}</td>
-                  <td className="text-right px-3 py-2.5 tabular-nums">{kpis.total_qty > 0 ? fmtR(kpis.total_value / kpis.total_qty) : "—"}</td>
-                  <td className="text-right px-3 py-2.5 tabular-nums">{kpis.customers}</td>
-                  <td />
+                  <td className="text-right px-3 py-2.5 tabular-nums hidden lg:table-cell">{kpis.total_qty > 0 ? fmtR(kpis.total_value / kpis.total_qty) : "—"}</td>
+                  <td className="text-right px-3 py-2.5 tabular-nums hidden lg:table-cell">{kpis.customers}</td>
+                  <td className="hidden lg:table-cell" />
                 </tr>
               </tbody>
             </table>

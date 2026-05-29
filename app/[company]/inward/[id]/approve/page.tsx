@@ -1105,7 +1105,7 @@ export default function ApprovePage({ params }: ApprovePageProps) {
                   </div>
                 )}
 
-                {/* Lot Range Dedicator — cold storage only */}
+                {/* Lot Range Dedicator — available on all warehouses */}
                 <LotRangeDedicator
                   warehouse={warehouse}
                   totalBoxes={boxForms.filter((b) => b.article_description === article.item_description).length}

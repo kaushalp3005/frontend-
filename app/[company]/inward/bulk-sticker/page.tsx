@@ -1278,7 +1278,7 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
                   </div>
                 </div>
 
-                {/* Lot Range Dedicator — cold storage only */}
+                {/* Lot Range Dedicator — available on all warehouses */}
                 <LotRangeDedicator
                   warehouse={warehouse}
                   totalBoxes={parseInt(articleForms[idx]?.box_count) || 0}

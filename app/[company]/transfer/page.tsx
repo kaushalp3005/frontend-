@@ -234,7 +234,17 @@ export default function TransferPage({ params }: TransferPageProps) {
   )
   const warehouseMatches = (...whs: (string | null | undefined)[]): boolean => {
     if (warehouseFilter === "all") return true
-    const normalized = whs.filter(Boolean).map(w => normalizeWarehouseName(w as string))
+    // Split each incoming candidate on commas so a transfer with from_cold_unit
+    // like "Rishi, Savla D-39" surfaces under BOTH the Rishi and Savla D-39 chips.
+    const flat: string[] = []
+    for (const w of whs) {
+      if (!w) continue
+      for (const part of String(w).split(",")) {
+        const trimmed = part.trim()
+        if (trimmed) flat.push(trimmed)
+      }
+    }
+    const normalized = flat.map(w => normalizeWarehouseName(w))
     if (warehouseFilter === "my_warehouses") {
       if (userDefaultWarehouses.length === 0) return true
       return normalized.some(w => myWarehouseSet.has(w))
@@ -244,15 +254,19 @@ export default function TransferPage({ params }: TransferPageProps) {
   }
 
   const filteredTransfers = transfers.filter(t => {
-    if (!warehouseMatches(t.from_warehouse, t.to_warehouse)) return false
-    return searchMatch(t, transferOutSearch, ["challan_no", "from_warehouse", "to_warehouse", "stock_trf_date", "status", "vehicle_no"])
+    // Pass from_cold_unit too so the Cold-sub chips (Savla D-39 / D-514 / Rishi /
+    // Supreme Cold) match cold-source transfers whose from_warehouse is just
+    // "Cold Storage". The header carries the canonical sub-cold(s) and
+    // warehouseMatches handles comma-separated values.
+    if (!warehouseMatches(t.from_warehouse, t.to_warehouse, t.from_cold_unit)) return false
+    return searchMatch(t, transferOutSearch, ["challan_no", "from_warehouse", "to_warehouse", "from_cold_unit", "stock_trf_date", "status", "vehicle_no", "lot_numbers_text"])
   })
   const filteredRequests = requests.filter(r => {
     if (!warehouseMatches(r.from_warehouse, r.to_warehouse)) return false
     return searchMatch(r, requestSearch, ["request_no", "from_warehouse", "to_warehouse", "request_date", "status"])
   })
   const filteredTransferIns = transferIns.filter(t => {
-    if (!warehouseMatches(t.from_warehouse, t.receiving_warehouse)) return false
+    if (!warehouseMatches(t.from_warehouse, t.receiving_warehouse, t.from_cold_unit)) return false
     return searchMatch(t, transferInSearch, ["grn_number", "transfer_out_no", "receiving_warehouse", "from_warehouse", "received_by", "status", "grn_date"])
   })
 
@@ -337,6 +351,16 @@ export default function TransferPage({ params }: TransferPageProps) {
     const entry = map[s]
     return <Badge variant="outline" className={`text-[11px] font-medium px-2 py-0.5 ${entry?.cls || 'bg-gray-50 text-gray-600 border-gray-200'}`}>{entry?.label || status}</Badge>
   }
+
+  // Source / destination display helpers. Handle both record shapes used across
+  // this file (from_warehouse on Transfer Out list, from_site on the generic
+  // All Transfers tab). The Transfer Records column shows ONLY the warehouse
+  // name (e.g. "Cold Storage") — the sub-cold attribution belongs in the hover
+  // card's Cold Unit meta chip and the per-lot chips, not the table route.
+  const displayFromSite = (t: any) =>
+    getDisplayWarehouseName(t?.from_warehouse || t?.from_site || "")
+  const displayToSite = (t: any) =>
+    getDisplayWarehouseName(t?.to_warehouse || t?.to_site || "")
 
   const formatDate = (dateString: string) => {
     if (!dateString) return 'N/A'
@@ -631,7 +655,7 @@ export default function TransferPage({ params }: TransferPageProps) {
                 </div>
 
                 {/* Desktop table */}
-                <div className="hidden md:block overflow-x-auto">
+                <div className="hidden md:block">
                   <table className="w-full">
                     <thead>
                       <tr className="border-b bg-gray-50/80">
@@ -771,7 +795,7 @@ export default function TransferPage({ params }: TransferPageProps) {
                         <div>
                           <ChallanHoverCard
                             challanNo={t.challan_no}
-                            from={getDisplayWarehouseName(t.from_warehouse)}
+                            from={displayFromSite(t)}
                             to={getDisplayWarehouseName(t.to_warehouse)}
                             reason={t.remark || t.reason_code || undefined}
                             fetchLines={async () => {
@@ -780,10 +804,16 @@ export default function TransferPage({ params }: TransferPageProps) {
                               const res = await fetch(url, { headers: { Accept: 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) } })
                               if (!res.ok) return { lines: [] }
                               const data = await res.json()
-                              const lines = (data.lines || []).length > 0
-                                ? groupLinesByItem(data.lines)
-                                : groupBoxesByItem(data.boxes || [])
+                              const fromColdUnit: string | undefined = data.from_cold_unit || t.from_cold_unit || undefined
+                              // Per-line sourceStorage now comes from the canonical
+                              // source_unit on each box (groupBoxesByItem). Don't
+                              // override with the header aggregate — that would lie
+                              // about which sub-cold a specific lot was picked from.
+                              const lines = (data.boxes || []).length > 0
+                                ? groupBoxesByItem(data.boxes)
+                                : groupLinesByItem(data.lines || [])
                               const meta: HoverMeta[] = []
+                              if (fromColdUnit) meta.push({ label: "Cold Unit", value: fromColdUnit, tone: "success" })
                               if (data.vehicle_no || data.vehicle_number) meta.push({ label: "Vehicle", value: data.vehicle_no || data.vehicle_number })
                               if (data.driver_name) meta.push({ label: "Driver", value: data.driver_name })
                               if (data.has_variance) meta.push({ label: "Variance", value: "Yes", tone: "warn" })
@@ -795,7 +825,7 @@ export default function TransferPage({ params }: TransferPageProps) {
                         {getStatusBadge(t.status)}
                       </div>
                       <div className="flex items-center gap-2 text-xs">
-                        <span className="font-medium bg-gray-100 px-2 py-1 rounded">{getDisplayWarehouseName(t.from_warehouse)}</span>
+                        <span className="font-medium bg-gray-100 px-2 py-1 rounded">{displayFromSite(t)}</span>
                         <ArrowRight className="h-3 w-3 text-gray-400" />
                         <span className="font-medium bg-gray-100 px-2 py-1 rounded">{getDisplayWarehouseName(t.to_warehouse)}</span>
                       </div>
@@ -839,7 +869,7 @@ export default function TransferPage({ params }: TransferPageProps) {
                 </div>
 
                 {/* Desktop table */}
-                <div className="hidden md:block overflow-x-auto">
+                <div className="hidden md:block">
                   <table className="w-full">
                     <thead>
                       <tr className="border-b bg-gray-50/80">
@@ -847,7 +877,7 @@ export default function TransferPage({ params }: TransferPageProps) {
                         <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
                         <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Route</th>
                         <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Date</th>
-                        <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Vehicle</th>
+                        <th className="hidden lg:table-cell text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Vehicle</th>
                         <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Items/Boxes</th>
                         <th className="text-right py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
                       </tr>
@@ -858,7 +888,7 @@ export default function TransferPage({ params }: TransferPageProps) {
                           <td className="py-3 px-4">
                             <ChallanHoverCard
                               challanNo={t.challan_no}
-                              from={getDisplayWarehouseName(t.from_warehouse)}
+                              from={displayFromSite(t)}
                               to={getDisplayWarehouseName(t.to_warehouse)}
                               reason={t.remark || t.reason_code || undefined}
                               fetchLines={async () => {
@@ -867,10 +897,16 @@ export default function TransferPage({ params }: TransferPageProps) {
                                 const res = await fetch(url, { headers: { Accept: 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) } })
                                 if (!res.ok) return { lines: [] }
                                 const data = await res.json()
-                                const lines = (data.lines || []).length > 0
-                                  ? groupLinesByItem(data.lines)
-                                  : groupBoxesByItem(data.boxes || [])
+                                const fromColdUnit: string | undefined = data.from_cold_unit || t.from_cold_unit || undefined
+                                // Per-line sourceStorage now comes from the canonical
+                                // source_unit on each box (groupBoxesByItem). Don't
+                                // override with the header aggregate — that would lie
+                                // about which sub-cold a specific lot was picked from.
+                                const lines = (data.boxes || []).length > 0
+                                  ? groupBoxesByItem(data.boxes)
+                                  : groupLinesByItem(data.lines || [])
                                 const meta: HoverMeta[] = []
+                                if (fromColdUnit) meta.push({ label: "Cold Unit", value: fromColdUnit, tone: "success" })
                                 if (data.vehicle_no || data.vehicle_number) meta.push({ label: "Vehicle", value: data.vehicle_no || data.vehicle_number })
                                 if (data.driver_name) meta.push({ label: "Driver", value: data.driver_name })
                                 return { lines, meta }
@@ -880,13 +916,13 @@ export default function TransferPage({ params }: TransferPageProps) {
                           <td className="py-3 px-4">{getStatusBadge(t.status)}</td>
                           <td className="py-3 px-4">
                             <div className="flex items-center gap-1.5 text-sm">
-                              <span className="font-medium">{getDisplayWarehouseName(t.from_warehouse)}</span>
+                              <span className="font-medium">{displayFromSite(t)}</span>
                               <ArrowRight className="h-3 w-3 text-gray-400" />
                               <span className="font-medium">{getDisplayWarehouseName(t.to_warehouse)}</span>
                             </div>
                           </td>
                           <td className="py-3 px-4 text-sm text-gray-600">{formatDate(t.stock_trf_date)}</td>
-                          <td className="py-3 px-4">
+                          <td className="hidden lg:table-cell py-3 px-4">
                             <div className="flex items-center gap-1.5 text-sm">
                               <Truck className="h-3.5 w-3.5 text-gray-400" />{t.vehicle_no}
                             </div>
@@ -1039,6 +1075,16 @@ export default function TransferPage({ params }: TransferPageProps) {
                                 netWeight: g.netWeight > 0 ? g.netWeight.toFixed(2) : undefined,
                                 lotNumber: g.lotNumber,
                               }))
+                              const discrepancies = Array.from(discrepanciesMap.values()).map(d => ({
+                                article: d.article,
+                                lotNumber: d.lotNumber,
+                                count: d.issueCount + d.unmatchedCount,
+                                remarks: d.remarks ? String(d.remarks) : undefined,
+                                netWeight: d.netWeights.length > 0 ? d.netWeights.reduce((a, b) => a + b, 0).toFixed(2) : undefined,
+                                totalWeight: d.totalWeights.length > 0 ? d.totalWeights.reduce((a, b) => a + b, 0).toFixed(2) : undefined,
+                                casePack: d.casePacks.length > 0 ? String(d.casePacks.find(cp => cp) || '') : undefined,
+                                unmatched: d.unmatchedCount > 0 ? d.unmatchedCount : undefined,
+                              }))
                               const meta: HoverMeta[] = []
                               if (data.received_by) meta.push({ label: "Received by", value: data.received_by })
                               if (data.box_condition) meta.push({ label: "Condition", value: data.box_condition, tone: data.box_condition === 'Good' ? 'success' : 'warn' })
@@ -1050,6 +1096,7 @@ export default function TransferPage({ params }: TransferPageProps) {
                               return {
                                 lines: lines.length > 0 ? lines : [{ name: `Transfer: ${ti.transfer_out_no}`, qty: ti.total_boxes_scanned }],
                                 meta,
+                                discrepancies,
                               }
                             }}
                           />
@@ -1106,26 +1153,38 @@ export default function TransferPage({ params }: TransferPageProps) {
                 </div>
 
                 {/* Desktop table */}
-                <div className="hidden md:block overflow-x-auto">
-                  <table className="w-full">
+                <div className="hidden md:block">
+                  <table className="w-full table-fixed">
+                    <colgroup>
+                      <col className="w-[14%]" />
+                      <col className="w-[13%]" />
+                      <col className="w-[8%]" />
+                      <col className="w-[9%]" />
+                      <col className="w-[9%]" />
+                      <col className="hidden xl:table-column w-[10%]" />
+                      <col className="hidden xl:table-column w-[8%]" />
+                      <col className="w-[8%]" />
+                      <col className="w-[10%]" />
+                      <col className="w-[10%]" />
+                    </colgroup>
                     <thead>
                       <tr className="border-b bg-gray-50/80">
-                        <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">GRN No</th>
-                        <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Transfer Out</th>
-                        <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
-                        <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">From WH</th>
-                        <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">To WH</th>
-                        <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Received By</th>
-                        <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Condition</th>
-                        <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Boxes</th>
-                        <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Date</th>
-                        <th className="text-right py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Action</th>
+                        <th className="text-left py-2.5 px-2 text-[11px] font-semibold text-gray-600 uppercase tracking-wider">GRN No</th>
+                        <th className="text-left py-2.5 px-2 text-[11px] font-semibold text-gray-600 uppercase tracking-wider">Transfer Out</th>
+                        <th className="text-left py-2.5 px-2 text-[11px] font-semibold text-gray-600 uppercase tracking-wider">Status</th>
+                        <th className="text-left py-2.5 px-2 text-[11px] font-semibold text-gray-600 uppercase tracking-wider">From</th>
+                        <th className="text-left py-2.5 px-2 text-[11px] font-semibold text-gray-600 uppercase tracking-wider">To</th>
+                        <th className="hidden xl:table-cell text-left py-2.5 px-2 text-[11px] font-semibold text-gray-600 uppercase tracking-wider">Received By</th>
+                        <th className="hidden xl:table-cell text-left py-2.5 px-2 text-[11px] font-semibold text-gray-600 uppercase tracking-wider">Condition</th>
+                        <th className="text-left py-2.5 px-2 text-[11px] font-semibold text-gray-600 uppercase tracking-wider">Boxes</th>
+                        <th className="text-left py-2.5 px-2 text-[11px] font-semibold text-gray-600 uppercase tracking-wider">Date</th>
+                        <th className="text-right py-2.5 px-2 text-[11px] font-semibold text-gray-600 uppercase tracking-wider">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y">
                       {filteredTransferIns.map((ti) => (
                         <tr key={ti.id} className="hover:bg-gray-50/50 transition-colors">
-                          <td className="py-3 px-4">
+                          <td className="py-2.5 px-2 break-words">
                             <ChallanHoverCard
                               challanNo={ti.grn_number}
                               from={ti.from_warehouse || ti.transfer_out_no}
@@ -1140,6 +1199,7 @@ export default function TransferPage({ params }: TransferPageProps) {
                               const boxes: any[] = data.boxes || []
                               // Group boxes by article+lot
                               const grouped = new Map<string, { name: string; qty: number; netWeight: number; lotNumber?: string; issues: number; unmatched: number }>()
+                              const discrepanciesMap = new Map<string, { article: string; lotNumber?: string; issueCount: number; unmatchedCount: number; remarks?: string; netWeights: number[]; totalWeights: number[]; casePacks: string[] }>()
                               for (const b of boxes) {
                                 const key = `${b.article || 'Unknown'}||${b.lot_number || ''}`
                                 const existing = grouped.get(key) || { name: b.article || 'Unknown', qty: 0, netWeight: 0, lotNumber: b.lot_number || undefined, issues: 0, unmatched: 0 }
@@ -1148,12 +1208,43 @@ export default function TransferPage({ params }: TransferPageProps) {
                                 if (b.issue) existing.issues += 1
                                 if (b.is_matched === false) existing.unmatched += 1
                                 grouped.set(key, existing)
+
+                                if (b.issue || b.is_matched === false) {
+                                  const discExisting = discrepanciesMap.get(key) || {
+                                    article: b.article || 'Unknown',
+                                    lotNumber: b.lot_number || undefined,
+                                    issueCount: 0,
+                                    unmatchedCount: 0,
+                                    netWeights: [],
+                                    totalWeights: [],
+                                    casePacks: [],
+                                  }
+                                  if (b.issue) {
+                                    discExisting.issueCount += 1
+                                    discExisting.remarks = b.issue
+                                  }
+                                  if (b.is_matched === false) discExisting.unmatchedCount += 1
+                                  if (b.net_weight) discExisting.netWeights.push(Number(b.net_weight))
+                                  if (b.total_weight) discExisting.totalWeights.push(Number(b.total_weight))
+                                  if (b.case_pack) discExisting.casePacks.push(b.case_pack)
+                                  discrepanciesMap.set(key, discExisting)
+                                }
                               }
                               const lines: HoverLine[] = Array.from(grouped.values()).map(g => ({
                                 name: g.name,
                                 qty: g.qty,
                                 netWeight: g.netWeight > 0 ? g.netWeight.toFixed(2) : undefined,
                                 lotNumber: g.lotNumber,
+                              }))
+                              const discrepancies = Array.from(discrepanciesMap.values()).map(d => ({
+                                article: d.article,
+                                lotNumber: d.lotNumber,
+                                count: d.issueCount + d.unmatchedCount,
+                                remarks: d.remarks ? String(d.remarks) : undefined,
+                                netWeight: d.netWeights.length > 0 ? d.netWeights.reduce((a, b) => a + b, 0).toFixed(2) : undefined,
+                                totalWeight: d.totalWeights.length > 0 ? d.totalWeights.reduce((a, b) => a + b, 0).toFixed(2) : undefined,
+                                casePack: d.casePacks.length > 0 ? String(d.casePacks.find(cp => cp) || '') : undefined,
+                                unmatched: d.unmatchedCount > 0 ? d.unmatchedCount : undefined,
                               }))
                               const meta: HoverMeta[] = []
                               if (data.received_by) meta.push({ label: "Received by", value: data.received_by })
@@ -1166,46 +1257,47 @@ export default function TransferPage({ params }: TransferPageProps) {
                               return {
                                 lines: lines.length > 0 ? lines : [{ name: `Transfer: ${ti.transfer_out_no}`, qty: ti.total_boxes_scanned }],
                                 meta,
+                                discrepancies,
                               }
                             }}
                             />
                           </td>
-                          <td className="py-3 px-4 text-sm text-gray-600">{ti.transfer_out_no}</td>
-                          <td className="py-3 px-4">{getStatusBadge(ti.status)}</td>
-                          <td className="py-3 px-4 text-sm text-gray-600">{ti.from_warehouse || "N/A"}</td>
-                          <td className="py-3 px-4 text-sm text-gray-600">{getDisplayWarehouseName(ti.receiving_warehouse)}</td>
-                          <td className="py-3 px-4 text-sm text-gray-600">{ti.received_by}</td>
-                          <td className="py-3 px-4">
+                          <td className="py-2.5 px-2 text-sm text-gray-600 break-words">{ti.transfer_out_no}</td>
+                          <td className="py-2.5 px-2 whitespace-nowrap">{getStatusBadge(ti.status)}</td>
+                          <td className="py-2.5 px-2 text-sm text-gray-600 break-words">{ti.from_warehouse || "N/A"}</td>
+                          <td className="py-2.5 px-2 text-sm text-gray-600 break-words">{getDisplayWarehouseName(ti.receiving_warehouse)}</td>
+                          <td className="hidden xl:table-cell py-2.5 px-2 text-sm text-gray-600 break-words">{ti.received_by}</td>
+                          <td className="hidden xl:table-cell py-2.5 px-2 whitespace-nowrap">
                             <Badge variant="outline" className={`text-[11px] px-2 py-0.5 ${
                               ti.box_condition === 'Good' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
                               ti.box_condition === 'Damaged' ? 'bg-red-50 text-red-700 border-red-200' :
                               'bg-orange-50 text-orange-700 border-orange-200'
                             }`}>{ti.box_condition || 'N/A'}</Badge>
                           </td>
-                          <td className="py-3 px-4">
+                          <td className="py-2.5 px-2 whitespace-nowrap">
                             <Badge variant="outline" className="text-[11px] bg-violet-50 text-violet-700 border-violet-200">
                               {ti.total_boxes_scanned} Boxes
                             </Badge>
                           </td>
-                          <td className="py-3 px-4 text-sm text-gray-600">
+                          <td className="py-2.5 px-2 text-sm text-gray-600 whitespace-nowrap">
                             {ti.grn_date ? new Date(ti.grn_date).toLocaleDateString('en-GB', {
                               day: '2-digit', month: '2-digit', year: 'numeric'
                             }).replace(/\//g, '-') : 'N/A'}
                           </td>
-                          <td className="py-3 px-4 text-right">
-                            <div className="flex items-center justify-end gap-1.5">
+                          <td className="py-2.5 px-1 text-right">
+                            <div className="flex items-center justify-end gap-1 flex-wrap">
                               {ti.status?.toLowerCase() === "pending" ? (
-                                <Button variant="outline" size="sm" onClick={() => router.push(`/${company}/transfer/transferIn?resume=${encodeURIComponent(ti.transfer_out_no)}`)} className="h-7 px-2.5 text-xs text-amber-700 border-amber-200 hover:bg-amber-50">
-                                  <ArrowRight className="h-3 w-3 mr-1" /> Resume
+                                <Button variant="outline" size="sm" onClick={() => router.push(`/${company}/transfer/transferIn?resume=${encodeURIComponent(ti.transfer_out_no)}`)} className="h-7 w-7 p-0 text-amber-700 border-amber-200 hover:bg-amber-50" title="Resume">
+                                  <ArrowRight className="h-3.5 w-3.5" />
                                 </Button>
                               ) : (
-                                <Button variant="outline" size="sm" onClick={() => router.push(`/${company}/transfer/transferIn/${ti.id}`)} className="h-7 px-2.5 text-xs">
-                                  <Eye className="h-3 w-3 mr-1" /> View
+                                <Button variant="outline" size="sm" onClick={() => router.push(`/${company}/transfer/transferIn/${ti.id}`)} className="h-7 w-7 p-0" title="View">
+                                  <Eye className="h-3.5 w-3.5" />
                                 </Button>
                               )}
                               {canDelete && (
-                                <Button variant="outline" size="sm" onClick={() => handleDeleteTransferIn(ti.id, ti.grn_number)} className="h-7 px-2.5 text-xs text-red-600 border-red-200 hover:bg-red-50">
-                                  <Trash2 className="h-3 w-3 mr-1" /> Delete
+                                <Button variant="outline" size="sm" onClick={() => handleDeleteTransferIn(ti.id, ti.grn_number)} className="h-7 w-7 p-0 text-red-600 border-red-200 hover:bg-red-50" title="Delete">
+                                  <Trash2 className="h-3.5 w-3.5" />
                                 </Button>
                               )}
                             </div>
@@ -1316,7 +1408,7 @@ export default function TransferPage({ params }: TransferPageProps) {
                 </div>
 
                 {/* Desktop table */}
-                <div className="hidden md:block overflow-x-auto">
+                <div className="hidden md:block">
                   <table className="w-full">
                     <thead>
                       <tr className="border-b bg-gray-50/80">
@@ -1325,7 +1417,7 @@ export default function TransferPage({ params }: TransferPageProps) {
                         <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Cold Storage</th>
                         <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Reason</th>
                         <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Items</th>
-                        <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Lot Changes</th>
+                        <th className="hidden lg:table-cell text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Lot Changes</th>
                         <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
                         <th className="text-right py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
                       </tr>
@@ -1365,7 +1457,7 @@ export default function TransferPage({ params }: TransferPageProps) {
                               )}
                             </div>
                           </td>
-                          <td className="py-3 px-4">
+                          <td className="hidden lg:table-cell py-3 px-4">
                             {t.lines?.[0] ? (
                               <div className="space-y-0.5">
                                 <div className="flex items-center gap-1 text-xs">
@@ -1429,8 +1521,8 @@ export default function TransferPage({ params }: TransferPageProps) {
                         <div>
                           <ChallanHoverCard
                             challanNo={t.challan_no || t.transfer_no}
-                            from={getDisplayWarehouseName(t.from_warehouse || t.from_site)}
-                            to={getDisplayWarehouseName(t.to_warehouse || t.to_site)}
+                            from={displayFromSite(t)}
+                            to={displayToSite(t)}
                             reason={t.remark || t.reason_code || undefined}
                             fetchLines={async () => {
                               const { accessToken } = useAuthStore.getState()
@@ -1438,10 +1530,16 @@ export default function TransferPage({ params }: TransferPageProps) {
                               const res = await fetch(url, { headers: { Accept: 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) } })
                               if (!res.ok) return { lines: [] }
                               const data = await res.json()
-                              const lines = (data.lines || []).length > 0
-                                ? groupLinesByItem(data.lines)
-                                : groupBoxesByItem(data.boxes || [])
+                              const fromColdUnit: string | undefined = data.from_cold_unit || t.from_cold_unit || undefined
+                              // Per-line sourceStorage now comes from the canonical
+                              // source_unit on each box (groupBoxesByItem). Don't
+                              // override with the header aggregate — that would lie
+                              // about which sub-cold a specific lot was picked from.
+                              const lines = (data.boxes || []).length > 0
+                                ? groupBoxesByItem(data.boxes)
+                                : groupLinesByItem(data.lines || [])
                               const meta: HoverMeta[] = []
+                              if (fromColdUnit) meta.push({ label: "Cold Unit", value: fromColdUnit, tone: "success" })
                               if (data.vehicle_no || data.vehicle_number) meta.push({ label: "Vehicle", value: data.vehicle_no || data.vehicle_number })
                               if (data.driver_name) meta.push({ label: "Driver", value: data.driver_name })
                               if (data.has_variance) meta.push({ label: "Variance", value: "Yes", tone: "warn" })
@@ -1453,9 +1551,9 @@ export default function TransferPage({ params }: TransferPageProps) {
                         {getStatusBadge(t.status)}
                       </div>
                       <div className="flex items-center gap-2 text-xs">
-                        <span className="font-medium bg-gray-100 px-2 py-1 rounded">{t.from_warehouse || t.from_site}</span>
+                        <span className="font-medium bg-gray-100 px-2 py-1 rounded">{displayFromSite(t)}</span>
                         <ArrowRight className="h-3 w-3 text-gray-400" />
-                        <span className="font-medium bg-gray-100 px-2 py-1 rounded">{t.to_warehouse || t.to_site}</span>
+                        <span className="font-medium bg-gray-100 px-2 py-1 rounded">{displayToSite(t)}</span>
                       </div>
                       <div className="flex items-center gap-2 flex-wrap">
                         <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -1482,7 +1580,7 @@ export default function TransferPage({ params }: TransferPageProps) {
                 </div>
 
                 {/* Desktop table */}
-                <div className="hidden md:block overflow-x-auto">
+                <div className="hidden md:block">
                   <table className="w-full">
                     <thead>
                       <tr className="border-b bg-gray-50/80">
@@ -1490,7 +1588,7 @@ export default function TransferPage({ params }: TransferPageProps) {
                         <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
                         <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Route</th>
                         <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Date</th>
-                        <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Vehicle</th>
+                        <th className="hidden lg:table-cell text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Vehicle</th>
                         <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Items/Boxes</th>
                         <th className="text-right py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
                       </tr>
@@ -1501,8 +1599,8 @@ export default function TransferPage({ params }: TransferPageProps) {
                           <td className="py-3 px-4">
                             <ChallanHoverCard
                               challanNo={t.challan_no || t.transfer_no}
-                              from={getDisplayWarehouseName(t.from_warehouse || t.from_site)}
-                              to={getDisplayWarehouseName(t.to_warehouse || t.to_site)}
+                              from={displayFromSite(t)}
+                              to={displayToSite(t)}
                               reason={t.status}
                               fetchLines={async () => {
                               const { accessToken } = useAuthStore.getState()
@@ -1510,10 +1608,16 @@ export default function TransferPage({ params }: TransferPageProps) {
                               const res = await fetch(url, { headers: { Accept: 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) } })
                               if (!res.ok) return { lines: [] }
                               const data = await res.json()
-                              const lines = (data.lines || []).length > 0
-                                ? groupLinesByItem(data.lines)
-                                : groupBoxesByItem(data.boxes || [])
+                              const fromColdUnit: string | undefined = data.from_cold_unit || t.from_cold_unit || undefined
+                              // Per-line sourceStorage now comes from the canonical
+                              // source_unit on each box (groupBoxesByItem). Don't
+                              // override with the header aggregate — that would lie
+                              // about which sub-cold a specific lot was picked from.
+                              const lines = (data.boxes || []).length > 0
+                                ? groupBoxesByItem(data.boxes)
+                                : groupLinesByItem(data.lines || [])
                               const meta: HoverMeta[] = []
+                              if (fromColdUnit) meta.push({ label: "Cold Unit", value: fromColdUnit, tone: "success" })
                               if (data.vehicle_no || data.vehicle_number) meta.push({ label: "Vehicle", value: data.vehicle_no || data.vehicle_number })
                               if (data.driver_name) meta.push({ label: "Driver", value: data.driver_name })
                               if (data.has_variance) meta.push({ label: "Variance", value: "Yes", tone: "warn" })
@@ -1524,13 +1628,13 @@ export default function TransferPage({ params }: TransferPageProps) {
                           <td className="py-3 px-4">{getStatusBadge(t.status)}</td>
                           <td className="py-3 px-4">
                             <div className="flex items-center gap-1.5 text-sm">
-                              <span className="font-medium">{t.from_warehouse || t.from_site}</span>
+                              <span className="font-medium">{displayFromSite(t)}</span>
                               <ArrowRight className="h-3 w-3 text-gray-400" />
-                              <span className="font-medium">{t.to_warehouse || t.to_site}</span>
+                              <span className="font-medium">{displayToSite(t)}</span>
                             </div>
                           </td>
                           <td className="py-3 px-4 text-sm text-gray-600">{formatDate(t.stock_trf_date || t.transfer_date || t.created_ts)}</td>
-                          <td className="py-3 px-4">
+                          <td className="hidden lg:table-cell py-3 px-4">
                             <div className="flex items-center gap-1.5 text-sm">
                               <Truck className="h-3.5 w-3.5 text-gray-400" />{t.vehicle_no || t.vehicle_number || 'N/A'}
                             </div>

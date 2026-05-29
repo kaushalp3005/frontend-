@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { ChallanHoverCard, groupLinesByItem, groupBoxesByItem, type HoverMeta } from "@/components/transfer/ChallanHoverCard"
+import { normalizeWarehouseName } from "@/lib/constants/warehouses"
 
 export type PendingTransferRecord = {
   transfer_out_id: number
@@ -23,6 +24,7 @@ export type PendingTransferRecord = {
   total_kg: number
   dispatched_by: string
   status: string
+  header_status: string
 }
 
 type Props = {
@@ -94,10 +96,23 @@ export default function PendingTransfersModal({ open, onClose, company, apiBaseU
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
       setRecords(data.records || [])
-      setFromSites(data.filter_options?.from_sites || [])
-      setToSites(data.filter_options?.to_sites || [])
+      const newFromSites: string[] = data.filter_options?.from_sites || []
+      const newToSites: string[] = data.filter_options?.to_sites || []
+      setFromSites(newFromSites)
+      setToSites(newToSites)
       setFromSiteCounts(data.filter_options?.from_site_counts || {})
       setToSiteCounts(data.filter_options?.to_site_counts || {})
+      // Purge any selected chips that are no longer in the new chip list to prevent filter lock
+      const fromSet = new Set(newFromSites)
+      const toSet = new Set(newToSites)
+      setSelectedFromSites((prev) => {
+        const pruned = new Set([...prev].filter((s) => fromSet.has(s)))
+        return pruned.size === prev.size ? prev : pruned
+      })
+      setSelectedToSites((prev) => {
+        const pruned = new Set([...prev].filter((s) => toSet.has(s)))
+        return pruned.size === prev.size ? prev : pruned
+      })
     } catch (err) {
       console.error("Failed to load pending transfers:", err)
       setRecords([])
@@ -367,7 +382,7 @@ export default function PendingTransfersModal({ open, onClose, company, apiBaseU
                           : "bg-gray-50 text-gray-400 border-gray-200 hover:border-gray-300"
                       }`}
                     >
-                      {s}
+                      {normalizeWarehouseName(s) || s}
                       {count > 0 && (
                         <span className={`text-[10px] rounded-full px-1 ${active ? "bg-violet-700" : "bg-violet-100 text-violet-700"}`}>
                           {count}
@@ -400,7 +415,7 @@ export default function PendingTransfersModal({ open, onClose, company, apiBaseU
                           : "bg-gray-50 text-gray-400 border-gray-200 hover:border-gray-300"
                       }`}
                     >
-                      {s}
+                      {normalizeWarehouseName(s) || s}
                       {count > 0 && (
                         <span className={`text-[10px] rounded-full px-1 ${active ? "bg-teal-700" : "bg-teal-100 text-teal-700"}`}>
                           {count}
@@ -476,9 +491,13 @@ export default function PendingTransfersModal({ open, onClose, company, apiBaseU
                             })
                             if (!res.ok) return { lines: [] }
                             const data = await res.json()
-                            const lines = (data.lines || []).length > 0
-                              ? groupLinesByItem(data.lines)
-                              : groupBoxesByItem(data.boxes || [])
+                            const fromColdUnit: string | undefined = data.from_cold_unit || undefined
+                            const rawLines = (data.boxes || []).length > 0
+                              ? groupBoxesByItem(data.boxes)
+                              : groupLinesByItem(data.lines || [])
+                            const lines = fromColdUnit
+                              ? rawLines.map(l => ({ ...l, sourceStorage: l.sourceStorage || fromColdUnit }))
+                              : rawLines
                             const meta: HoverMeta[] = []
                             if (data.vehicle_no) meta.push({ label: "Vehicle", value: data.vehicle_no })
                             if (data.driver_name) meta.push({ label: "Driver", value: data.driver_name })
@@ -505,6 +524,32 @@ export default function PendingTransfersModal({ open, onClose, company, apiBaseU
                               })
                             }
                             if (data.has_variance) meta.push({ label: "Variance", value: "Yes", tone: "warn" })
+
+                            // Show GRN info if any Transfer-In receipt has been started/completed
+                            const grnRecords: Array<{
+                              id: number; grn_number: string; status: string;
+                              received_by: string; received_at: string | null; received_boxes: number
+                            }> = data.grn_records || []
+                            for (const grn of grnRecords) {
+                              if (grn.grn_number) {
+                                meta.push({
+                                  label: "GRN",
+                                  value: grn.grn_number,
+                                  tone: grn.status === "Received" ? "success" : "warn",
+                                })
+                              }
+                              if (grn.received_boxes > 0) {
+                                meta.push({
+                                  label: "Rcvd boxes",
+                                  value: String(grn.received_boxes),
+                                  tone: grn.status === "Received" ? "success" : "warn",
+                                })
+                              }
+                              if (grn.received_by) {
+                                meta.push({ label: "Rcvd by", value: grn.received_by, tone: "default" })
+                              }
+                            }
+
                             return { lines, meta }
                           } catch {
                             return { lines: [] }
@@ -514,9 +559,9 @@ export default function PendingTransfersModal({ open, onClose, company, apiBaseU
                     </td>
                     <td className="px-3 py-2.5">
                       <div className="flex items-center gap-1.5 text-gray-700">
-                        <span>{r.from_site}</span>
+                        <span>{normalizeWarehouseName(r.from_site) || r.from_site}</span>
                         <ArrowRight className="h-3 w-3 text-gray-400 shrink-0" />
-                        <span>{r.to_site}</span>
+                        <span>{normalizeWarehouseName(r.to_site) || r.to_site}</span>
                       </div>
                       <div className="flex items-center gap-1 mt-0.5">
                         <span className="text-[10px] text-gray-400 uppercase">
@@ -529,8 +574,15 @@ export default function PendingTransfersModal({ open, onClose, company, apiBaseU
                     <td className="px-3 py-2.5 text-right tabular-nums font-medium text-gray-900">{formatNumber(r.total_kg, 2)}</td>
                     <td className="px-3 py-2.5 text-gray-600">{r.dispatched_by || "—"}</td>
                     <td className="px-3 py-2.5">
-                      <Badge variant="outline" className="text-[10px] font-medium bg-sky-50 text-sky-700 border-sky-200">
-                        {r.status}
+                      <Badge
+                        variant="outline"
+                        className={`text-[10px] font-medium ${
+                          r.header_status === "Partial"
+                            ? "bg-amber-50 text-amber-700 border-amber-300"
+                            : "bg-sky-50 text-sky-700 border-sky-200"
+                        }`}
+                      >
+                        {r.header_status === "Partial" ? "Partial (GRN raised)" : r.status}
                       </Badge>
                     </td>
                     {showCancelColumn && (
@@ -590,7 +642,7 @@ export default function PendingTransfersModal({ open, onClose, company, apiBaseU
                     This will <b>delete</b> the transfer <span className="font-mono">{confirmCancel.transfer_out_challan_no}</span> and
                     restore all <b>{confirmCancel.total_boxes}</b> in-transit boxes
                     ({formatNumber(confirmCancel.total_kg, 2)} kg) back to the source warehouse
-                    <b> {confirmCancel.from_site}</b>.
+                    <b> {normalizeWarehouseName(confirmCancel.from_site) || confirmCancel.from_site}</b>.
                   </p>
                   <p className="text-[11px] text-gray-500 mt-1.5">This action cannot be undone.</p>
                 </div>

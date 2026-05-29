@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea"
 import {
   Loader2, Package, Search, Camera, ArrowLeft, ArrowRight, Inbox,
   CheckCircle, ClipboardCheck, CheckCheck, Hash, FileText,
-  AlertTriangle, X, Building2, Snowflake, Printer
+  AlertTriangle, X, Building2, Snowflake, Printer, ChevronDown
 } from "lucide-react"
 import { toast } from "sonner"
 import { InterunitApiService } from "@/lib/interunitApiService"
@@ -43,6 +43,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
   const [linesIssueMap, setLinesIssueMap] = useState<Record<number, { remarks: string; net_weight?: string; total_weight?: string; case_pack?: string }>>({})
   const [issueOpenIndex, setIssueOpenIndex] = useState<number | null>(null)
   const [issueForm, setIssueForm] = useState({ remarks: "", net_weight: "", total_weight: "", case_pack: "" })
+  const [applyToAllIssue, setApplyToAllIssue] = useState(false)
   const [boxCondition, setBoxCondition] = useState("Good")
   const [conditionRemarks, setConditionRemarks] = useState("")
   const [showAckScanner, setShowAckScanner] = useState(false)
@@ -57,6 +58,14 @@ export default function TransferInPage({ params }: TransferInPageProps) {
   // ── Pending transfer-in state (real-time acknowledge) ──
   const [pendingHeaderId, setPendingHeaderId] = useState<number | null>(null)
   const [pendingGrnNumber, setPendingGrnNumber] = useState<string>("")
+  const [inwardTransactionNo, setInwardTransactionNo] = useState<string | null>(null)
+  const [generatingQRs, setGeneratingQRs] = useState(false)
+  // keyed by line_index — populated after QR generation
+  const [generatedBoxIds, setGeneratedBoxIds] = useState<Record<number, string>>({})
+  // per-article box range reprint state
+  const [articleRangeOpen, setArticleRangeOpen] = useState<Record<string, boolean>>({})
+  const [articleRangeFrom, setArticleRangeFrom] = useState<Record<string, number>>({})
+  const [articleRangeTo, setArticleRangeTo] = useState<Record<string, number>>({})
 
   // ── Editable line weights (keyed by line index) ──
   const [lineWeights, setLineWeights] = useState<Record<number, { net_weight: string; total_weight: string }>>({})
@@ -64,6 +73,21 @@ export default function TransferInPage({ params }: TransferInPageProps) {
   // ── Scanned QR data per line index — used to save & display the actual scanned trans/box IDs
   //    when the line<->box mapping in lineBoxDataMap is incomplete (e.g. mismatched line/box counts).
   const [scannedLineData, setScannedLineData] = useState<Record<number, { box_id: string; transaction_no: string }>>({})
+
+  // ── STBR reconciliation log ───────────────────────────────────────────────
+  // Captures what the backend returned after each acknowledge call so the UI
+  // can show "Originally: X → Scanned: Y" tooltips and a finalize summary.
+  //   boxReconciliationMap — keyed by transfer_out_box id (boxes flow)
+  //   lineReconciliationMap — keyed by line index (cold-storage / line flow)
+  type BoxReconciliation = {
+    status: string
+    original_box_id?: string | null
+    actual_box_id?: string
+    propagated_count?: number
+    siblings?: Array<{ old: string; new: string }>
+  }
+  const [boxReconciliationMap, setBoxReconciliationMap] = useState<Record<number, BoxReconciliation>>({})
+  const [lineReconciliationMap, setLineReconciliationMap] = useState<Record<number, BoxReconciliation>>({})
 
   const updateLineWeight = (index: number, field: "net_weight" | "total_weight", value: string) => {
     setLineWeights(prev => ({
@@ -133,6 +157,17 @@ export default function TransferInPage({ params }: TransferInPageProps) {
   const totalBoxes = boxes.length
   const totalLines = lines.length
   const hasBatchData = lines.some((l: any) => l.batch_number)
+
+  // Group line indices by article name (for per-article box range reprint)
+  const articleLineGroups = useMemo(() => {
+    const groups: Record<string, number[]> = {}
+    lines.forEach((line: any, i: number) => {
+      const name = line.item_desc_raw || line.item_description || `Article ${i + 1}`
+      if (!groups[name]) groups[name] = []
+      groups[name].push(i)
+    })
+    return groups
+  }, [lines])
   // When lines come from boxes (cold storage) OR boxes cover all lines, only Article Entries
   // is shown — total count should only include lines, not boxes-section duplicates.
   const linesAreBoxes = linesFromBoxes !== null
@@ -246,28 +281,76 @@ export default function TransferInPage({ params }: TransferInPageProps) {
     try {
       const response = await InterunitApiService.getTransferByNumber(company, transferNo)
 
-      console.log('📥 [DEBUG-IN] Transfer data loaded:', {
-        transfer_no: response.challan_no || response.transfer_no,
+      // ── Comprehensive search result logging ──
+      console.group(`🔍 [TRANSFER-IN] Loaded: ${response.challan_no || response.transfer_no || transferNo}`)
+
+      console.log('📋 HEADER', {
+        id: response.id,
+        transfer_no: response.transfer_no,
+        challan_no: response.challan_no,
+        status: response.status,
         from_warehouse: response.from_warehouse || response.from_site,
         to_warehouse: response.to_warehouse || response.to_site,
-        lines_count: response.lines?.length || 0,
-        boxes_count: response.boxes?.length || 0,
-        boxes_sample: response.boxes?.slice(0, 3).map((b: any) => ({
-          box_id: b.box_id,
-          transaction_no: b.transaction_no,
-          transfer_line_id: b.transfer_line_id
-        })) || []
+        from_site_code: response.from_site_code,
+        to_site_code: response.to_site_code,
+        transfer_date: response.transfer_date,
+        created_at: response.created_at,
+        created_by: response.created_by,
+        remarks: response.remarks,
+        vehicle_no: response.vehicle_no,
+        driver_name: response.driver_name,
       })
 
-      console.log('🏢 [DEBUG-IN] Warehouse check:', {
+      console.log(`📦 BOXES (${response.boxes?.length || 0} total)`, response.boxes || [])
+      if (response.boxes?.length) {
+        console.table(response.boxes.map((b: any) => ({
+          id: b.id,
+          box_id: b.box_id,
+          box_number: b.box_number,
+          transaction_no: b.transaction_no,
+          article: b.article,
+          lot_number: b.lot_number,
+          batch_number: b.batch_number,
+          net_weight: b.net_weight,
+          gross_weight: b.gross_weight,
+          transfer_line_id: b.transfer_line_id,
+        })))
+      }
+
+      console.log(`📄 LINES (${response.lines?.length || 0} total)`, response.lines || [])
+      if (response.lines?.length) {
+        console.table(response.lines.map((l: any) => ({
+          id: l.id,
+          item_description: l.item_desc_raw || l.item_description,
+          qty: l.qty ?? l.quantity,
+          uom: l.uom,
+          net_weight: l.net_weight,
+          total_weight: l.total_weight,
+          lot_number: l.lot_number,
+          batch_number: l.batch_number,
+          pack_size: l.pack_size,
+          item_category: l.item_category,
+          sub_category: l.sub_category,
+        })))
+      }
+
+      const _isColdFrom = COLD_STORAGE_WAREHOUSES.some(w =>
+        w.toLowerCase() === (response.from_warehouse || response.from_site || "").toLowerCase()
+      )
+      console.log('🏢 WAREHOUSE FLAGS', {
         from_warehouse: response.from_warehouse || response.from_site,
-        isColdStorageFrom: COLD_STORAGE_WAREHOUSES.some(w =>
-          w.toLowerCase() === (response.from_warehouse || response.from_site || "").toLowerCase()
+        to_warehouse: response.to_warehouse || response.to_site,
+        isColdStorageFrom: _isColdFrom,
+        isColdStorageTo: COLD_STORAGE_WAREHOUSES.some(w =>
+          w.toLowerCase() === (response.to_warehouse || response.to_site || "").toLowerCase()
         ),
-        expected_cold_warehouses: COLD_STORAGE_WAREHOUSES
       })
+
+      console.groupEnd()
 
       setTransferData(response)
+      setInwardTransactionNo(null)
+      setGeneratedBoxIds({})
 
       // Init box match map
       const boxMap: Record<number, boolean> = {}
@@ -375,6 +458,9 @@ export default function TransferInPage({ params }: TransferInPageProps) {
         if (pendingResult.exists && pendingResult.header) {
           setPendingHeaderId(pendingResult.header.id)
           setPendingGrnNumber(pendingResult.header.grn_number)
+          if (pendingResult.header.inward_transaction_no) {
+            setInwardTransactionNo(pendingResult.header.inward_transaction_no)
+          }
 
           // Restore acknowledged/issue state from saved boxes
           const savedBoxes = pendingResult.header.boxes || []
@@ -486,16 +572,21 @@ export default function TransferInPage({ params }: TransferInPageProps) {
   }
 
   // ── Box handlers ──
-  const handleAcknowledgeBox = async (boxId: number) => {
+  // scannedActualId — the actual QR-scanned box_id (used for STBR). When the
+  // user clicks "Acknowledge" without scanning, the placeholder IMS box_id is
+  // sent and STBR finds nothing to reconcile (status: 'noop' / 'matched').
+  const handleAcknowledgeBox = async (boxId: number, scannedActualId?: string) => {
     const headerId = await ensurePendingHeader()
     if (!headerId) return
 
     const box = boxes.find((b: any) => b.id === boxId)
     if (!box) return
 
+    const sentBoxId = scannedActualId
+      ?? String(box.box_id || box.box_number || box.id || "")
     try {
-      await InterunitApiService.acknowledgeBox(headerId, {
-        box_id: String(box.box_id || box.box_number || box.id || ""),
+      const resp = await InterunitApiService.acknowledgeBox(headerId, {
+        box_id: sentBoxId,
         transfer_out_box_id: box.id,
         article: box.article ? String(box.article) : null,
         batch_number: box.batch_number ? String(box.batch_number) : null,
@@ -504,11 +595,57 @@ export default function TransferInPage({ params }: TransferInPageProps) {
         net_weight: box.net_weight ? Number(box.net_weight) : null,
         gross_weight: box.gross_weight ? Number(box.gross_weight) : null,
         is_matched: true,
+        scan_source: scannedActualId ? "qr_scan" : "manual",
+        scanned_by: user?.email || null,
       })
       setBoxesMatchMap((prev) => ({ ...prev, [boxId]: true }))
-      toast.success(`Box #${boxId} acknowledged`)
+
+      const rec = resp?.reconciliation
+      if (rec && rec.status && rec.status !== "noop") {
+        setBoxReconciliationMap((prev) => ({
+          ...prev,
+          [boxId]: {
+            status: String(rec.status),
+            original_box_id: rec.original_box_id,
+            actual_box_id: sentBoxId,
+            propagated_count: rec.propagated_count || 0,
+            siblings: rec.siblings || [],
+          },
+        }))
+        // Toast variant reflects reconciliation outcome
+        if (rec.status === "overridden" || rec.status === "overridden_no_source") {
+          const orig = rec.original_box_id || "—"
+          const extra = rec.propagated_count
+            ? ` (+${rec.propagated_count} siblings auto-mapped)`
+            : ""
+          toast.success(
+            `Reconciled: ${orig} → ${sentBoxId}${extra}`,
+            { duration: 4500 } as any,
+          )
+        } else if (rec.status === "propagated") {
+          toast.success(
+            `Series remap: ${rec.original_box_id} → ${sentBoxId} (+${rec.propagated_count} siblings)`,
+            { duration: 5500 } as any,
+          )
+        } else if (rec.status === "matched") {
+          toast.success(`Box #${boxId} acknowledged`)
+        } else {
+          toast.success(`Box #${boxId} acknowledged (${rec.status})`)
+        }
+      } else {
+        toast.success(`Box #${boxId} acknowledged`)
+      }
     } catch (err: any) {
-      toast.error(err.message || "Failed to acknowledge box")
+      // Map STBR-specific HTTP errors to clearer toasts
+      const status = err?.response?.status
+      if (status === 409) {
+        toast.error(`Duplicate scan — this box was already received in another transfer.`)
+      } else if (status === 422) {
+        const detail = err?.response?.data?.detail || err?.message || "no matching slot"
+        toast.error(`Reconciliation conflict: ${detail}`)
+      } else {
+        toast.error(err.message || "Failed to acknowledge box")
+      }
     }
   }
 
@@ -581,8 +718,10 @@ export default function TransferInPage({ params }: TransferInPageProps) {
       const boxRef = lineBoxDataMap[line.id] || {}
       const scanned = scannedRef || scannedLineData[lineIndex] || {}
       const articleName = line.item_desc_raw || line.item_description || ""
-      await InterunitApiService.acknowledgeBox(headerId, {
-        box_id: scanned.box_id || line.box_id || boxRef.box_id || `ART-${lineIndex + 1}`,
+      const sentBoxId = scanned.box_id || line.box_id || boxRef.box_id || `ART-${lineIndex + 1}`
+      const isQrScan = !!scanned.box_id
+      const resp = await InterunitApiService.acknowledgeBox(headerId, {
+        box_id: sentBoxId,
         article: articleName,
         batch_number: line.batch_number || null,
         lot_number: getColdLotNo(articleName) || line.lot_number || null,
@@ -591,11 +730,50 @@ export default function TransferInPage({ params }: TransferInPageProps) {
         gross_weight: w.total_weight ? Number(w.total_weight) : (line.total_weight ? Number(line.total_weight) : null),
         is_matched: true,
         line_index: lineIndex,
+        scan_source: isQrScan ? "qr_scan" : "manual",
+        scanned_by: user?.email || null,
       })
       setLinesMatchMap((prev) => ({ ...prev, [lineIndex]: true }))
-      toast.success(`${articleName || "Line " + (lineIndex + 1)} acknowledged`)
+
+      const rec = resp?.reconciliation
+      if (rec && rec.status && rec.status !== "noop") {
+        setLineReconciliationMap((prev) => ({
+          ...prev,
+          [lineIndex]: {
+            status: String(rec.status),
+            original_box_id: rec.original_box_id,
+            actual_box_id: sentBoxId,
+            propagated_count: rec.propagated_count || 0,
+            siblings: rec.siblings || [],
+          },
+        }))
+        if (rec.status === "overridden" || rec.status === "overridden_no_source") {
+          const orig = rec.original_box_id || "—"
+          const extra = rec.propagated_count
+            ? ` (+${rec.propagated_count} siblings auto-mapped)`
+            : ""
+          toast.success(`Reconciled: ${orig} → ${sentBoxId}${extra}`, { duration: 4500 } as any)
+        } else if (rec.status === "propagated") {
+          toast.success(
+            `Series remap: ${rec.original_box_id} → ${sentBoxId} (+${rec.propagated_count} siblings)`,
+            { duration: 5500 } as any,
+          )
+        } else {
+          toast.success(`${articleName || "Line " + (lineIndex + 1)} acknowledged`)
+        }
+      } else {
+        toast.success(`${articleName || "Line " + (lineIndex + 1)} acknowledged`)
+      }
     } catch (err: any) {
-      toast.error(err.message || "Failed to save acknowledgment")
+      const status = err?.response?.status
+      if (status === 409) {
+        toast.error(`Duplicate scan — this box was already received in another transfer.`)
+      } else if (status === 422) {
+        const detail = err?.response?.data?.detail || err?.message || "no matching slot"
+        toast.error(`Reconciliation conflict: ${detail}`)
+      } else {
+        toast.error(err.message || "Failed to save acknowledgment")
+      }
     }
   }
 
@@ -609,7 +787,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
     }
     const line = lines[lineIndex]
     const boxRef = lineBoxDataMap[line.id] || {}
-    const boxId = line.box_id || boxRef.box_id || `ART-${lineIndex + 1}`
+    const boxId = generatedBoxIds[lineIndex] || line.box_id || boxRef.box_id || `ART-${lineIndex + 1}`
 
     try {
       await InterunitApiService.unacknowledgeBox(pendingHeaderId, boxId)
@@ -642,53 +820,81 @@ export default function TransferInPage({ params }: TransferInPageProps) {
     if (!headerId) return
 
     const line = lines[lineIndex]
-    const boxRef = lineBoxDataMap[line.id] || {}
     const issueNetWt = issueForm.net_weight.trim()
     const issueTotalWt = issueForm.total_weight.trim()
     const issueCasePack = issueForm.case_pack.trim()
+    const issueRemarks = issueForm.remarks.trim()
 
     const issueData = {
-      remarks: issueForm.remarks.trim(),
+      remarks: issueRemarks,
       net_weight: issueNetWt || undefined,
       total_weight: issueTotalWt || undefined,
       case_pack: issueCasePack || undefined,
     }
 
-    // Update lineWeights from issue form values
-    if (issueNetWt || issueTotalWt) {
-      setLineWeights(prev => ({
-        ...prev,
-        [lineIndex]: {
-          net_weight: issueNetWt || prev[lineIndex]?.net_weight || "",
-          total_weight: issueTotalWt || prev[lineIndex]?.total_weight || "",
-        },
-      }))
+    // Determine which line indices to apply to (this one + all matching pending if checkbox on)
+    const itemName = line.item_desc_raw || line.item_description || ""
+    const targetIndices: number[] = [lineIndex]
+    if (applyToAllIssue) {
+      lines.forEach((l: any, i: number) => {
+        if (i === lineIndex) return
+        const lName = l.item_desc_raw || l.item_description || ""
+        if (lName === itemName && !linesMatchMap[i] && !linesIssueMap[i]) {
+          targetIndices.push(i)
+        }
+      })
     }
 
     try {
-      const articleName = line.item_desc_raw || line.item_description || ""
-      await InterunitApiService.acknowledgeBox(headerId, {
-        box_id: line.box_id || boxRef.box_id || `ART-${lineIndex + 1}`,
-        article: articleName,
-        batch_number: line.batch_number || null,
-        lot_number: getColdLotNo(articleName) || line.lot_number || null,
-        transaction_no: line.transaction_no || boxRef.transaction_no || null,
-        net_weight: issueNetWt ? Number(issueNetWt) : (line.net_weight ? Number(line.net_weight) : null),
-        gross_weight: issueTotalWt ? Number(issueTotalWt) : (line.total_weight ? Number(line.total_weight) : null),
-        is_matched: false,
-        issue: issueData,
-        line_index: lineIndex,
-      })
+      const newIssueMap: Record<number, typeof issueData> = {}
+      const newWeightsMap: Record<number, { net_weight: string; total_weight: string }> = {}
 
-      setLinesIssueMap((prev) => ({ ...prev, [lineIndex]: issueData }))
-      setLinesMatchMap((prev) => {
+      for (const idx of targetIndices) {
+        const targetLine = lines[idx]
+        const targetBoxRef = lineBoxDataMap[targetLine.id] || {}
+        const targetArticle = targetLine.item_desc_raw || targetLine.item_description || ""
+        await InterunitApiService.acknowledgeBox(headerId, {
+          box_id: targetLine.box_id || targetBoxRef.box_id || `ART-${idx + 1}`,
+          article: targetArticle,
+          batch_number: targetLine.batch_number || null,
+          lot_number: getColdLotNo(targetArticle) || targetLine.lot_number || null,
+          transaction_no: targetLine.transaction_no || targetBoxRef.transaction_no || null,
+          net_weight: issueNetWt ? Number(issueNetWt) : (targetLine.net_weight ? Number(targetLine.net_weight) : null),
+          gross_weight: issueTotalWt ? Number(issueTotalWt) : (targetLine.total_weight ? Number(targetLine.total_weight) : null),
+          is_matched: false,
+          issue: issueData,
+          line_index: idx,
+        })
+        newIssueMap[idx] = issueData
+        if (issueNetWt || issueTotalWt) {
+          newWeightsMap[idx] = {
+            net_weight: issueNetWt || "",
+            total_weight: issueTotalWt || "",
+          }
+        }
+      }
+
+      setLinesIssueMap(prev => ({ ...prev, ...newIssueMap }))
+      setLinesMatchMap(prev => {
         const next = { ...prev }
-        delete next[lineIndex]
+        targetIndices.forEach(i => delete next[i])
         return next
       })
+      if (Object.keys(newWeightsMap).length > 0) {
+        setLineWeights(prev => ({ ...prev, ...newWeightsMap }))
+      }
       setIssueOpenIndex(null)
       setIssueForm({ remarks: "", net_weight: "", total_weight: "", case_pack: "" })
-      toast.success(`Discrepancy noted for ${line?.item_desc_raw || "Line " + (lineIndex + 1)}`)
+      setApplyToAllIssue(false)
+      const count = targetIndices.length
+      toast.success(count > 1 ? `Discrepancy noted for ${count} boxes of ${itemName}` : `Discrepancy noted for ${itemName}`)
+
+      // Auto-print issue QR for cold storage transfers
+      if (isColdStorageFrom) {
+        for (const idx of targetIndices) {
+          await handlePrintQR(idx, { skipAcknowledge: true, issueOverride: issueData })
+        }
+      }
     } catch (err: any) {
       toast.error(err.message || "Failed to save issue")
     }
@@ -697,6 +903,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
   const handleCancelIssue = () => {
     setIssueOpenIndex(null)
     setIssueForm({ remarks: "", net_weight: "", total_weight: "", case_pack: "" })
+    setApplyToAllIssue(false)
   }
 
   // ── Acknowledge all ──
@@ -928,8 +1135,16 @@ export default function TransferInPage({ params }: TransferInPageProps) {
         setScanResult({ type: "already", message: `Already Acknowledged — ${article} | Box ID: ${scannedBoxId || "N/A"} | Transaction: ${scannedTransactionNo || "N/A"}` })
         return
       }
-      await handleAcknowledgeBox(matchedBox.id)
-      setScanResult({ type: "match", message: `Matched — ${article} | Box ID: ${scannedBoxId || "N/A"} | Transaction: ${scannedTransactionNo || "N/A"}` })
+      // Pass the SCANNED box_id (not the placeholder) so STBR sees ground truth
+      const actualScannedId = scannedBoxId || String(matchedBox.box_id || "")
+      await handleAcknowledgeBox(matchedBox.id, actualScannedId)
+      // If STBR reconciled this row, reflect the actual id in the scan result
+      const rec = boxReconciliationMap[matchedBox.id]
+      const displayId = rec?.actual_box_id || scannedBoxId || "N/A"
+      const recSuffix = rec && rec.status && rec.status !== "noop" && rec.status !== "matched"
+        ? ` · Reconciled${rec.propagated_count ? ` (+${rec.propagated_count})` : ""}`
+        : ""
+      setScanResult({ type: "match", message: `Matched — ${article} | Box ID: ${displayId} | Transaction: ${scannedTransactionNo || "N/A"}${recSuffix}` })
       return
     }
 
@@ -959,51 +1174,56 @@ export default function TransferInPage({ params }: TransferInPageProps) {
   }
 
   // ── Print QR & auto-acknowledge (for cold storage FROM transfers) ──
-  const handlePrintQR = useCallback(async (lineIndex: number) => {
+  const handlePrintQR = useCallback(async (
+    lineIndex: number,
+    opts?: { skipAcknowledge?: boolean; issueOverride?: { remarks: string; net_weight?: string; total_weight?: string; case_pack?: string } }
+  ) => {
     const line = lines[lineIndex]
     if (!line) return
 
-    // Auto-acknowledge via API — only update local state if API succeeds
-    const headerId = await ensurePendingHeader()
-    if (headerId) {
-      try {
-        const w = lineWeights[lineIndex] || {}
-        const boxRef = lineBoxDataMap[line.id] || {}
-        const articleName = line.item_desc_raw || line.item_description || ""
-        await InterunitApiService.acknowledgeBox(headerId, {
-          box_id: line.box_id || boxRef.box_id || `ART-${lineIndex + 1}`,
-          article: articleName,
-          batch_number: line.batch_number || null,
-          lot_number: getColdLotNo(articleName) || line.lot_number || null,
-          transaction_no: line.transaction_no || boxRef.transaction_no || null,
-          net_weight: w.net_weight ? Number(w.net_weight) : (line.net_weight ? Number(line.net_weight) : null),
-          gross_weight: w.total_weight ? Number(w.total_weight) : (line.total_weight ? Number(line.total_weight) : null),
-          is_matched: true,
-          line_index: lineIndex,
-        })
-        setLinesMatchMap(prev => ({ ...prev, [lineIndex]: true }))
-      } catch (err: any) {
-        console.warn("Failed to persist QR acknowledge:", err)
-        toast.error("QR printed but failed to save acknowledgment to server")
-        return // Don't print QR if acknowledge failed
+    // Auto-acknowledge via API — skip only when caller explicitly requests it (e.g. re-print after issue)
+    if (!opts?.skipAcknowledge) {
+      const headerId = await ensurePendingHeader()
+      if (headerId) {
+        try {
+          const w = lineWeights[lineIndex] || {}
+          const boxRef = lineBoxDataMap[line.id] || {}
+          const articleName = line.item_desc_raw || line.item_description || ""
+          await InterunitApiService.acknowledgeBox(headerId, {
+            box_id: generatedBoxIds[lineIndex] || line.box_id || boxRef.box_id || `ART-${lineIndex + 1}`,
+            article: articleName,
+            batch_number: line.batch_number || null,
+            lot_number: getColdLotNo(articleName) || line.lot_number || null,
+            transaction_no: inwardTransactionNo || line.transaction_no || boxRef.transaction_no || null,
+            net_weight: w.net_weight ? Number(w.net_weight) : (line.net_weight ? Number(line.net_weight) : null),
+            gross_weight: w.total_weight ? Number(w.total_weight) : (line.total_weight ? Number(line.total_weight) : null),
+            is_matched: true,
+            line_index: lineIndex,
+          })
+          setLinesMatchMap(prev => ({ ...prev, [lineIndex]: true }))
+        } catch (err: any) {
+          console.warn("Failed to persist QR acknowledge:", err)
+          toast.error("QR printed but failed to save acknowledgment to server")
+          return
+        }
+      } else {
+        toast.error("Could not create pending transfer. QR not printed.")
+        return
       }
-    } else {
-      toast.error("Could not create pending transfer. QR not printed.")
-      return // Don't print QR if no pending header
     }
 
     const boxData = lineBoxDataMap[line.id] || {}
     const weights = lineWeights[lineIndex] || {}
-    const issueData = linesIssueMap[lineIndex]
+    const issueData = opts?.issueOverride ?? linesIssueMap[lineIndex]
     const netWt = issueData?.net_weight ? parseFloat(issueData.net_weight) : parseFloat(weights.net_weight || line.net_weight || "0")
     const grossWt = issueData?.total_weight ? parseFloat(issueData.total_weight) : parseFloat(weights.total_weight || line.total_weight || "0")
     const issueCasePack = issueData?.case_pack || ""
     const hasIssue = !!issueData
     const itemName = line.item_desc_raw || line.item_description || `Article ${lineIndex + 1}`
-    const txNo = line.transaction_no || boxData.transaction_no || ""
-    const bId = line.box_id || boxData.box_id || ""
+    // Prefer session-generated values over raw line data
+    const txNo = inwardTransactionNo || line.transaction_no || boxData.transaction_no || ""
+    const bId = generatedBoxIds[lineIndex] || line.box_id || boxData.box_id || ""
     const lotNo = line.lot_number || ""
-    const transferNo = transferData?.challan_no || transferData?.transfer_no || ""
     const boxNum = lineIndex + 1
 
     const formatDate = (d: string) => {
@@ -1062,8 +1282,8 @@ export default function TransferInPage({ params }: TransferInPageProps) {
           <div class="info">
             <div>
               <div class="company">${company}${hasIssue ? '<span class="issue-tag">ISSUE</span>' : ''}</div>
-              <div class="txn">${transferNo}</div>
-              <div class="boxid">ID: ${bId}</div>
+              <div class="txn">${txNo || "—"}</div>
+              <div class="boxid">ID: ${bId || "—"}</div>
             </div>
             <div class="item">${itemName}</div>
             <div>
@@ -1105,7 +1325,91 @@ export default function TransferInPage({ params }: TransferInPageProps) {
       console.error("QR generation failed:", err)
       toast.error("Failed to generate QR code")
     }
-  }, [lines, lineBoxDataMap, lineWeights, transferData, company, toast])
+  }, [lines, lineBoxDataMap, lineWeights, transferData, company, toast, inwardTransactionNo, generatedBoxIds, linesIssueMap])
+
+  // ── Generate & print QR codes for all acknowledged boxes (bulk inward QR generation) ──
+  const handleGenerateQRs = useCallback(async () => {
+    if (!transferData || !lines.length) return
+    setGeneratingQRs(true)
+    try {
+      // ── Generate transaction_no + box_ids client-side (same logic as backend) ──
+      const now = new Date()
+      const pad = (n: number) => String(n).padStart(2, "0")
+      const txNo = `TR-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+      // box_id = last 8 digits of epoch ms + "-" + 1-based box number (mirrors backend generate_box_ids)
+      const base = String(Date.now()).slice(-8)
+      const boxIdMap: Record<number, string> = {}
+      lines.forEach((_: any, i: number) => { boxIdMap[i] = `${base}-${i + 1}` })
+
+      // Update UI immediately so columns fill in
+      setInwardTransactionNo(txNo)
+      setGeneratedBoxIds(boxIdMap)
+
+      console.log(`✅ [GENERATE-QR] tx=${txNo} | boxes=${lines.length} | base=${base}`, boxIdMap)
+      toast.success(`${lines.length} QR${lines.length !== 1 ? "s" : ""} assigned — TX: ${txNo} · use Print QR per row to print`)
+    } catch (err: any) {
+      toast.error(err.message || "Failed to generate QRs")
+    } finally {
+      setGeneratingQRs(false)
+    }
+  }, [transferData, lines, company])
+
+  // ── Per-article box range reprint ──
+  const handlePrintRange = useCallback(async (articleName: string) => {
+    const indices = articleLineGroups[articleName] || []
+    const from = (articleRangeFrom[articleName] ?? 1) - 1   // convert to 0-based
+    const to = articleRangeTo[articleName] ?? indices.length // exclusive upper, defaults to all
+    const rangeIndices = indices.slice(from, to)
+    if (rangeIndices.length === 0) { toast.error("No boxes in selected range"); return }
+
+    try {
+      const labelHtmlParts: string[] = []
+      for (let ri = 0; ri < rangeIndices.length; ri++) {
+        const idx = rangeIndices[ri]
+        const line = lines[idx]
+        if (!line) continue
+        const txNo = inwardTransactionNo || line.transaction_no || generatedBoxIds[idx] || ""
+        const bId = generatedBoxIds[idx] || line.box_id || ""
+        if (!txNo || !bId) continue
+        const qrPayload = JSON.stringify({ tx: txNo, bi: bId })
+        const qrDataUrl = await QRCode.toDataURL(qrPayload, { width: 200, margin: 1, errorCorrectionLevel: "M" })
+        const isLast = ri === rangeIndices.length - 1
+        const issueData = linesIssueMap[idx]
+        const netWt = issueData?.net_weight ? parseFloat(issueData.net_weight) : parseFloat(line.net_weight || "0")
+        labelHtmlParts.push(`
+          <div style="width:4in;height:2in;display:flex;align-items:stretch;border:1px solid #000;padding:0.1in;box-sizing:border-box;${isLast ? "" : "page-break-after:always"}">
+            <div style="width:1.7in;flex-shrink:0;display:flex;align-items:center;justify-content:center;">
+              <img src="${qrDataUrl}" style="width:1.7in;height:1.7in;object-fit:contain;" />
+            </div>
+            <div style="flex:1;padding-left:0.1in;display:flex;flex-direction:column;justify-content:center;gap:2px;font-family:monospace;overflow:hidden;">
+              <div style="font-size:9pt;font-weight:bold;">${company.toUpperCase()}</div>
+              <div style="font-size:8pt;color:#555;">TX: ${txNo}</div>
+              <div style="font-size:8pt;color:#555;">Box: ${bId}</div>
+              <div style="font-size:8pt;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${articleName}</div>
+              ${line.lot_number ? `<div style="font-size:7pt;color:#666;">Lot: ${line.lot_number}</div>` : ""}
+              <div style="font-size:7pt;color:#666;">Net: ${netWt.toFixed(3)} kg  |  Box ${idx + 1}${issueData ? "  ⚠ Issue" : ""}</div>
+            </div>
+          </div>
+        `)
+      }
+      if (labelHtmlParts.length === 0) { toast.error("No QR data for selected range"); return }
+      const iframe = document.createElement("iframe")
+      iframe.style.cssText = "position:fixed;top:-9999px;left:-9999px;width:0;height:0;border:none;"
+      document.body.appendChild(iframe)
+      const doc = iframe.contentDocument || iframe.contentWindow?.document
+      if (doc) {
+        doc.open()
+        doc.write(`<!DOCTYPE html><html><head><style>@page{size:4in 2in;margin:0}body{margin:0;padding:0}</style></head><body>${labelHtmlParts.join("")}</body></html>`)
+        doc.close()
+        iframe.contentWindow?.focus()
+        iframe.contentWindow?.print()
+      }
+      setTimeout(() => { if (document.body.contains(iframe)) document.body.removeChild(iframe) }, 30000)
+      toast.success(`${labelHtmlParts.length} QR label${labelHtmlParts.length !== 1 ? "s" : ""} reprinted`)
+    } catch (err: any) {
+      toast.error(err.message || "Failed to print range")
+    }
+  }, [articleLineGroups, articleRangeFrom, articleRangeTo, lines, inwardTransactionNo, generatedBoxIds, linesIssueMap, company])
 
   // ── Bulk QR Print state ──
   const [bulkFromBox, setBulkFromBox] = useState<number>(1)
@@ -1991,7 +2295,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                       <FileText className="h-4 w-4 text-violet-600" />
                       <span className="text-xs sm:text-sm font-semibold text-violet-800">Article Entries ({totalLines})</span>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <Badge variant="outline" className={`text-xs ${resolvedLines === totalLines ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-700 border-amber-200"}`}>
                         {resolvedLines}/{totalLines}
                       </Badge>
@@ -2005,18 +2309,54 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                           <CheckCheck className="h-3 w-3 mr-1" /> All
                         </Button>
                       )}
+                      {/* ── Generate QR's button — enabled only when boxes have no box_id/transaction_no yet ── */}
+                      {(() => {
+                        // Boxes already tagged means the outward side already assigned box_id + transaction_no
+                        const boxesAlreadyTagged = boxes.length > 0 && boxes.every((b: any) => b.box_id && b.transaction_no)
+                        const qrsGeneratedNow = !!inwardTransactionNo
+                        const qrsExist = qrsGeneratedNow || boxesAlreadyTagged
+                        const canGenerate = !qrsExist && !generatingQRs && !!transferData
+                        const existingTx = inwardTransactionNo || boxes.find((b: any) => b.transaction_no)?.transaction_no
+                        const disabledReason = qrsGeneratedNow
+                          ? `QRs already generated this session — TX: ${inwardTransactionNo}`
+                          : boxesAlreadyTagged
+                          ? `Boxes already have QR data — TX: ${existingTx || boxes[0]?.transaction_no || "pre-tagged"}`
+                          : !transferData
+                          ? "Load a transfer first"
+                          : "Generate QR stickers for all boxes"
+                        return (
+                        <button
+                          onClick={canGenerate ? handleGenerateQRs : undefined}
+                          disabled={!canGenerate}
+                          title={disabledReason}
+                          className={`flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-lg border transition-colors ${
+                            canGenerate
+                              ? "bg-violet-50 hover:bg-violet-100 border-violet-300 text-violet-700 cursor-pointer"
+                              : "opacity-40 cursor-not-allowed bg-gray-50 border-gray-200 text-gray-500"
+                          }`}
+                        >
+                          {generatingQRs
+                            ? <><Loader2 className="h-3 w-3 animate-spin" />Generating…</>
+                            : <><Printer className="h-3 w-3" />Generate QR ID's</>
+                          }
+                        </button>
+                        )
+                      })()}
+                      {inwardTransactionNo && (
+                        <span className="text-[10px] text-gray-400 font-mono hidden sm:inline">{inwardTransactionNo}</span>
+                      )}
                     </div>
                   </div>
 
                   {/* Desktop table with horizontal scroll */}
                   <div className="hidden md:block overflow-x-auto">
-                    <table className="w-full min-w-[900px] text-sm">
+                    <table className="w-full min-w-[1050px] text-sm">
                       <thead>
                         <tr className="bg-violet-50/40 border-b text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
                           <th className="text-center py-2.5 px-2 w-[50px]">Sr. No.</th>
                           <th className="text-left py-2.5 px-3 min-w-[220px]">Item Name</th>
-                          {isColdStorageFrom && <th className="text-left py-2.5 px-3 w-[130px]">Transaction No</th>}
-                          {isColdStorageFrom && <th className="text-left py-2.5 px-3 w-[120px]">Box ID</th>}
+                          <th className="text-left py-2.5 px-3 w-[130px]">Transaction No</th>
+                          <th className="text-left py-2.5 px-3 w-[120px]">Box ID</th>
                           <th className="text-right py-2.5 px-3 w-[90px]">Case Pack</th>
                           <th className="text-right py-2.5 px-3 w-[80px]">Qty</th>
                           <th className="text-right py-2.5 px-3 w-[100px]">Net Wt</th>
@@ -2050,7 +2390,13 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                             })
                           }
 
-                          const totalCols = 7 + (isColdStorageFrom ? 2 : 0) + (hasBatchData ? 1 : 0)
+                          const totalCols = 9 + (hasBatchData ? 1 : 0)
+                          // Boxes with pre-existing transaction_no + box_id use Acknowledge (they already have QR stickers)
+                          // Boxes without both fields need Print QR (generates new sticker + acknowledges)
+                          const hasExistingQRData = !!(
+                            (line.transaction_no || boxData.transaction_no) &&
+                            (line.box_id || boxData.box_id)
+                          )
 
                           return (
                             <Fragment key={index}>
@@ -2061,8 +2407,37 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                                     {line.item_desc_raw || line.item_description || `Article ${index + 1}`}
                                   </span>
                                 </td>
-                                {isColdStorageFrom && <td className="py-2.5 px-3 text-gray-600 font-mono text-xs truncate">{scannedLineData[index]?.transaction_no || line.transaction_no || boxData.transaction_no || "-"}</td>}
-                                {isColdStorageFrom && <td className="py-2.5 px-3 text-gray-600 font-mono text-xs truncate">{scannedLineData[index]?.box_id || line.box_id || boxData.box_id || "-"}</td>}
+                                {/* Transaction No — generated value takes priority, then source */}
+                                <td className="py-2.5 px-3 font-mono text-xs truncate max-w-[130px]">
+                                  {inwardTransactionNo
+                                    ? <span className="text-violet-700 font-semibold">{inwardTransactionNo}</span>
+                                    : <span className="text-gray-500">{scannedLineData[index]?.transaction_no || line.transaction_no || boxData.transaction_no || <span className="text-gray-300">—</span>}</span>
+                                  }
+                                </td>
+                                {/* Box ID — generated value takes priority, then source */}
+                                {(() => {
+                                  const rec = lineReconciliationMap[index]
+                                  const generatedId = generatedBoxIds[index]
+                                  const sourceId = scannedLineData[index]?.box_id || line.box_id || boxData.box_id
+                                  const displayId = generatedId || sourceId
+                                  const showBadge = !generatedId && rec && (rec.status === "overridden" || rec.status === "overridden_no_source" || rec.status === "propagated")
+                                  return (
+                                    <td className="py-2.5 px-3 font-mono text-xs truncate max-w-[120px]">
+                                      <span className="inline-flex items-center gap-1">
+                                        {displayId
+                                          ? <span className={generatedId ? "text-violet-700 font-semibold" : "text-gray-500"}>{displayId}</span>
+                                          : <span className="text-gray-300">—</span>
+                                        }
+                                        {showBadge && (
+                                          <span
+                                            className="inline-flex items-center text-[9px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1 py-0.5"
+                                            title={`Originally: ${rec.original_box_id || "—"} → Scanned: ${rec.actual_box_id || displayId}${rec.propagated_count ? ` · +${rec.propagated_count} siblings auto-mapped` : ""}`}
+                                          >↻ Reconciled</span>
+                                        )}
+                                      </span>
+                                    </td>
+                                  )
+                                })()}
                                 <td className={`py-2.5 px-3 text-right tabular-nums ${issued && linesIssueMap[index]?.case_pack ? "text-red-600 font-bold" : "text-gray-600"}`}>{(issued && linesIssueMap[index]?.case_pack) || line.pack_size || "-"}</td>
                                 <td className="py-2.5 px-3 text-right font-bold text-blue-600 tabular-nums whitespace-nowrap">{line.qty || line.quantity || 0} <span className="text-gray-400 font-normal text-xs">{line.uom || ""}</span></td>
                                 <td className={`py-2.5 px-3 text-right tabular-nums ${issued && linesIssueMap[index]?.net_weight ? "text-red-600 font-bold" : "text-gray-600"}`}>{(issued && linesIssueMap[index]?.net_weight) || lineWeights[index]?.net_weight || line.net_weight || "-"}</td>
@@ -2071,28 +2446,49 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                                 <td className="py-2.5 px-3 text-gray-600 font-mono text-xs truncate">{coldStorageItems[line.item_desc_raw || line.item_description || ""]?.lot_no?.trim() || line.lot_number || "-"}</td>
                                 <td className="py-2.5 px-3 sticky right-0 bg-inherit">
                                   <div className="flex items-center justify-end gap-1.5">
-                                    {matched ? (
-                                      <Badge variant="outline" className="text-xs bg-emerald-50 text-emerald-700 border-emerald-200 cursor-pointer hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors" onClick={() => handleUnacknowledgeLine(index)}>
-                                        <CheckCircle className="h-3.5 w-3.5 mr-1" /> Acknowledged
-                                      </Badge>
-                                    ) : issued ? (
-                                      <Badge variant="outline" className="text-xs bg-red-50 text-red-600 border-red-200">
-                                        <AlertTriangle className="h-3.5 w-3.5 mr-1" /> Issue
-                                      </Badge>
-                                    ) : (
+                                    {!hasExistingQRData ? (
+                                      /* No pre-existing QR data → Print QR (acknowledges + prints new sticker) */
                                       <>
-                                        {isColdStorageFrom ? (
-                                          <Button variant="outline" size="sm" onClick={() => handlePrintQR(index)} className="text-xs text-blue-700 border-blue-200 hover:bg-blue-50 h-7 px-3">
-                                            <Printer className="h-3 w-3 mr-1" /> Print QR
-                                          </Button>
-                                        ) : (
-                                          <Button variant="outline" size="sm" onClick={() => handleAcknowledgeLine(index)} className="text-xs text-teal-700 border-teal-200 hover:bg-teal-50 h-7 px-3">
-                                            Acknowledge
+                                        {matched && (
+                                          <Badge variant="outline" className="text-xs bg-emerald-50 text-emerald-700 border-emerald-200 cursor-pointer hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors" onClick={() => handleUnacknowledgeLine(index)}>
+                                            <CheckCircle className="h-3.5 w-3.5 mr-1" /> Acknowledged
+                                          </Badge>
+                                        )}
+                                        {issued && !matched && (
+                                          <Badge variant="outline" className="text-xs bg-red-50 text-red-600 border-red-200">
+                                            <AlertTriangle className="h-3.5 w-3.5 mr-1" /> Issue
+                                          </Badge>
+                                        )}
+                                        <Button variant="outline" size="sm" onClick={() => handlePrintQR(index)} className="text-xs text-blue-700 border-blue-200 hover:bg-blue-50 h-7 px-3">
+                                          <Printer className="h-3 w-3 mr-1" /> Print QR
+                                        </Button>
+                                        {!matched && !issued && (
+                                          <Button variant="outline" size="sm" onClick={() => handleOpenIssue(index)} className="text-xs text-red-600 border-red-200 hover:bg-red-50 h-7 px-3">
+                                            <AlertTriangle className="h-3 w-3 mr-1" /> Issue
                                           </Button>
                                         )}
-                                        <Button variant="outline" size="sm" onClick={() => handleOpenIssue(index)} className="text-xs text-red-600 border-red-200 hover:bg-red-50 h-7 px-3">
-                                          <AlertTriangle className="h-3 w-3 mr-1" /> Issue
-                                        </Button>
+                                      </>
+                                    ) : (
+                                      /* Pre-existing QR data (from cold storage scan) → Acknowledge only */
+                                      <>
+                                        {matched ? (
+                                          <Badge variant="outline" className="text-xs bg-emerald-50 text-emerald-700 border-emerald-200 cursor-pointer hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors" onClick={() => handleUnacknowledgeLine(index)}>
+                                            <CheckCircle className="h-3.5 w-3.5 mr-1" /> Acknowledged
+                                          </Badge>
+                                        ) : issued ? (
+                                          <Badge variant="outline" className="text-xs bg-red-50 text-red-600 border-red-200">
+                                            <AlertTriangle className="h-3.5 w-3.5 mr-1" /> Issue
+                                          </Badge>
+                                        ) : (
+                                          <>
+                                            <Button variant="outline" size="sm" onClick={() => handleAcknowledgeLine(index)} className="text-xs text-teal-700 border-teal-200 hover:bg-teal-50 h-7 px-3">
+                                              Acknowledge
+                                            </Button>
+                                            <Button variant="outline" size="sm" onClick={() => handleOpenIssue(index)} className="text-xs text-red-600 border-red-200 hover:bg-red-50 h-7 px-3">
+                                              <AlertTriangle className="h-3 w-3 mr-1" /> Issue
+                                            </Button>
+                                          </>
+                                        )}
                                       </>
                                     )}
                                   </div>
@@ -2133,10 +2529,37 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                                             <Input type="text" value={issueForm.remarks} onChange={(e) => setIssueForm(prev => ({ ...prev, remarks: e.target.value }))} placeholder="Damage, shortage, etc." className="h-9 bg-white border-red-200 focus-visible:ring-red-300 text-sm" />
                                           </div>
                                         </div>
+                                        {(() => {
+                                          const itemNameForBulk = line.item_desc_raw || line.item_description || ""
+                                          const pendingMatchCount = lines.filter((l: any, i: number) =>
+                                            i !== index &&
+                                            (l.item_desc_raw || l.item_description || "") === itemNameForBulk &&
+                                            !linesMatchMap[i] && !linesIssueMap[i]
+                                          ).length
+                                          return pendingMatchCount > 0 ? (
+                                            <label className="flex items-center gap-2 text-xs text-red-700 cursor-pointer select-none">
+                                              <input
+                                                type="checkbox"
+                                                checked={applyToAllIssue}
+                                                onChange={e => setApplyToAllIssue(e.target.checked)}
+                                                className="rounded border-red-300 text-red-600 focus:ring-red-400"
+                                              />
+                                              Apply same correction to all {pendingMatchCount} other pending box{pendingMatchCount !== 1 ? 'es' : ''} of this item
+                                            </label>
+                                          ) : null
+                                        })()}
                                         <div className="flex gap-2 justify-end">
                                           <Button variant="outline" size="sm" onClick={handleCancelIssue} className="h-8 px-3 text-xs text-gray-600 border-gray-300">Cancel</Button>
                                           <Button size="sm" onClick={() => handleSubmitIssue(index)} className="h-8 px-4 text-xs bg-red-600 hover:bg-red-700 text-white">
-                                            <AlertTriangle className="h-3 w-3 mr-1" /> Submit Issue
+                                            <AlertTriangle className="h-3 w-3 mr-1" /> Submit Issue{applyToAllIssue && (() => {
+                                              const itemNameForBulk = line.item_desc_raw || line.item_description || ""
+                                              const pendingMatchCount = lines.filter((l: any, i: number) =>
+                                                i !== index &&
+                                                (l.item_desc_raw || l.item_description || "") === itemNameForBulk &&
+                                                !linesMatchMap[i] && !linesIssueMap[i]
+                                              ).length
+                                              return pendingMatchCount > 0 ? ` (${pendingMatchCount + 1})` : ""
+                                            })()}
                                           </Button>
                                         </div>
                                       </div>
@@ -2158,6 +2581,10 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                       const issued = !!linesIssueMap[index]
                       const isIssueOpen = issueOpenIndex === index
                       const mobileBoxData = lineBoxDataMap[line.id] || {}
+                      const hasExistingQRData = !!(
+                        (line.transaction_no || mobileBoxData.transaction_no) &&
+                        (line.box_id || mobileBoxData.box_id)
+                      )
 
                       return (
                         <div key={index} className={`px-3 py-3 ${matched ? "bg-emerald-50/40" : issued ? "bg-red-50/30" : ""}`}>
@@ -2166,7 +2593,30 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                               <div className="flex-1 min-w-0">
                                 <span className="text-sm font-semibold text-gray-900 truncate"><span className="text-gray-500 font-medium mr-1.5">{index + 1}.</span>{line.item_desc_raw || line.item_description || `Article ${index + 1}`}</span>
                               </div>
-                              {matched ? (
+                              {!hasExistingQRData ? (
+                                /* No pre-existing data → Print QR */
+                                <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+                                  {matched && (
+                                    <Badge variant="outline" className="text-[11px] bg-emerald-50 text-emerald-700 border-emerald-200 cursor-pointer hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors" onClick={() => handleUnacknowledgeLine(index)}>
+                                      <CheckCircle className="h-3 w-3 mr-0.5" /> Done
+                                    </Badge>
+                                  )}
+                                  {issued && !matched && (
+                                    <Badge variant="outline" className="text-[11px] bg-red-50 text-red-600 border-red-200 shrink-0">
+                                      <AlertTriangle className="h-3 w-3 mr-0.5" /> Issue
+                                    </Badge>
+                                  )}
+                                  <Button variant="outline" size="sm" onClick={() => handlePrintQR(index)} className="text-xs text-blue-700 border-blue-200 hover:bg-blue-50 h-7 px-2">
+                                    <Printer className="h-3 w-3 mr-1" /> QR
+                                  </Button>
+                                  {!matched && !issued && (
+                                    <Button variant="outline" size="sm" onClick={() => handleOpenIssue(index)} className="text-xs text-red-600 border-red-200 hover:bg-red-50 h-7 px-2">
+                                      Issue
+                                    </Button>
+                                  )}
+                                </div>
+                              ) : matched ? (
+                                /* Pre-existing data, acknowledged */
                                 <Badge variant="outline" className="text-[11px] bg-emerald-50 text-emerald-700 border-emerald-200 shrink-0 cursor-pointer hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors" onClick={() => handleUnacknowledgeLine(index)}>
                                   <CheckCircle className="h-3 w-3 mr-0.5" /> Done
                                 </Badge>
@@ -2175,16 +2625,11 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                                   <AlertTriangle className="h-3 w-3 mr-0.5" /> Issue
                                 </Badge>
                               ) : (
+                                /* Pre-existing data, not yet processed → Acknowledge */
                                 <div className="flex items-center gap-1.5 shrink-0">
-                                  {isColdStorageFrom ? (
-                                    <Button variant="outline" size="sm" onClick={() => handlePrintQR(index)} className="text-xs text-blue-700 border-blue-200 hover:bg-blue-50 h-7 px-2">
-                                      <Printer className="h-3 w-3 mr-1" /> QR
-                                    </Button>
-                                  ) : (
-                                    <Button variant="outline" size="sm" onClick={() => handleAcknowledgeLine(index)} className="text-xs text-teal-700 border-teal-200 hover:bg-teal-50 h-7 px-2">
-                                      Acknowledge
-                                    </Button>
-                                  )}
+                                  <Button variant="outline" size="sm" onClick={() => handleAcknowledgeLine(index)} className="text-xs text-teal-700 border-teal-200 hover:bg-teal-50 h-7 px-2">
+                                    Acknowledge
+                                  </Button>
                                   <Button variant="outline" size="sm" onClick={() => handleOpenIssue(index)} className="text-xs text-red-600 border-red-200 hover:bg-red-50 h-7 px-2">
                                     Issue
                                   </Button>
@@ -2263,6 +2708,61 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                     })}
                   </div>
 
+                  {/* ── Per-article Box Range Reprint (shows once all boxes of that article are resolved) ── */}
+                  {Object.entries(articleLineGroups).some(([artName, indices]) => {
+                    const allArtResolved = indices.every(i => linesMatchMap[i] || linesIssueMap[i])
+                    const hasQR = !!inwardTransactionNo || indices.some(i => (lines[i]?.transaction_no && lines[i]?.box_id) || generatedBoxIds[i])
+                    return allArtResolved && hasQR
+                  }) && (
+                    <div className="border-t border-violet-100 mt-2 pt-3 px-4 pb-3 space-y-2">
+                      <p className="text-[11px] font-semibold text-violet-600 uppercase tracking-wider">Box Range Reprint — per article</p>
+                      {Object.entries(articleLineGroups).map(([artName, indices]) => {
+                        const allArtResolved = indices.every(i => linesMatchMap[i] || linesIssueMap[i])
+                        const hasQR = !!inwardTransactionNo || indices.some(i => (lines[i]?.transaction_no && lines[i]?.box_id) || generatedBoxIds[i])
+                        if (!allArtResolved || !hasQR) return null
+                        const isOpen = !!articleRangeOpen[artName]
+                        const boxCount = indices.length
+                        return (
+                          <div key={artName} className="border border-violet-100 rounded-lg overflow-hidden">
+                            <button
+                              onClick={() => setArticleRangeOpen(prev => ({ ...prev, [artName]: !prev[artName] }))}
+                              className="w-full flex items-center justify-between px-3 py-2 bg-violet-50/60 hover:bg-violet-50 text-xs font-medium text-violet-800 transition-colors"
+                            >
+                              <span className="truncate max-w-[300px]">{artName}</span>
+                              <span className="flex items-center gap-1.5 shrink-0 ml-2">
+                                <span className="text-violet-500">{boxCount} box{boxCount !== 1 ? "es" : ""}</span>
+                                <ChevronDown className={`h-3.5 w-3.5 text-violet-400 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+                              </span>
+                            </button>
+                            {isOpen && (
+                              <div className="px-3 py-2.5 bg-white flex items-center gap-2 flex-wrap">
+                                <span className="text-xs text-gray-500">Box range:</span>
+                                <input
+                                  type="number" min={1} max={boxCount}
+                                  value={articleRangeFrom[artName] ?? 1}
+                                  onChange={e => setArticleRangeFrom(prev => ({ ...prev, [artName]: Math.max(1, Math.min(boxCount, Number(e.target.value))) }))}
+                                  className="w-16 h-7 text-xs text-center border rounded px-1"
+                                />
+                                <span className="text-xs text-gray-400">to</span>
+                                <input
+                                  type="number" min={1} max={boxCount}
+                                  value={articleRangeTo[artName] ?? boxCount}
+                                  onChange={e => setArticleRangeTo(prev => ({ ...prev, [artName]: Math.max(1, Math.min(boxCount, Number(e.target.value))) }))}
+                                  className="w-16 h-7 text-xs text-center border rounded px-1"
+                                />
+                                <Button size="sm" variant="outline"
+                                  onClick={() => handlePrintRange(artName)}
+                                  className="h-7 px-3 text-xs text-violet-700 border-violet-200 hover:bg-violet-50"
+                                >
+                                  <Printer className="h-3 w-3 mr-1" />Print Range
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -2367,6 +2867,40 @@ export default function TransferInPage({ params }: TransferInPageProps) {
               </div>
             </CardContent>
           </Card>
+
+          {/* ══════ STBR Reconciliation Summary (only shown if any swaps happened) ══════ */}
+          {(() => {
+            const boxRecs = Object.values(boxReconciliationMap)
+            const lineRecs = Object.values(lineReconciliationMap)
+            const all = [...boxRecs, ...lineRecs]
+            const overrideCount = all.filter(r => r.status === "overridden" || r.status === "overridden_no_source").length
+            const propagatedCount = all.filter(r => r.status === "propagated").length
+            const totalPropagated = all.reduce((sum, r) => sum + (r.propagated_count || 0), 0)
+            const totalSwaps = overrideCount + propagatedCount + totalPropagated
+            if (totalSwaps === 0) return null
+            return (
+              <Card className="border-0 shadow-sm overflow-hidden mb-3 border-l-4 border-l-amber-400">
+                <CardContent className="p-3 sm:p-4 bg-amber-50/30">
+                  <div className="flex items-start gap-2">
+                    <span className="text-amber-700 text-base mt-0.5">↻</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-semibold text-amber-900">
+                        STBR Reconciliation Summary — {totalSwaps} box-id swap{totalSwaps !== 1 ? "s" : ""} applied
+                      </div>
+                      <div className="text-[11px] text-amber-800 mt-1 leading-snug">
+                        {overrideCount > 0 && <>Scan-time overrides: <span className="font-semibold">{overrideCount}</span> · </>}
+                        {propagatedCount > 0 && <>Series propagations: <span className="font-semibold">{propagatedCount}</span> · </>}
+                        {totalPropagated > 0 && <>Siblings auto-mapped: <span className="font-semibold">{totalPropagated}</span></>}
+                      </div>
+                      <div className="text-[10px] text-amber-700 mt-1">
+                        Hover any <span className="inline-flex items-center text-[9px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1 py-0.5 mx-0.5">↻ Reconciled</span> badge above to see Originally → Scanned. Full audit on finalize via /transfer-in/{pendingHeaderId}/reconciliation.
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )
+          })()}
 
           {/* ══════ Confirm Receipt ══════ */}
           <Card className="border-0 shadow-sm overflow-hidden">

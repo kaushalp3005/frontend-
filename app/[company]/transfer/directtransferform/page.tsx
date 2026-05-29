@@ -305,7 +305,16 @@ type PendingInfo = {
 const buildPendingKey = (lotNo?: string | null, itemDesc?: string | null) =>
   `${(lotNo || "").trim().toLowerCase()}|${(itemDesc || "").trim().toLowerCase()}`
 
-// Cell renderer: shows (available − pending) qty with a hover/click tooltip listing pending transfers.
+// Cell renderer: shows physically-available cartons, with a hover/click tooltip listing
+// any in-transit (pending) transfers of the same lot for context.
+//
+// IMPORTANT — do NOT subtract `pending_cartons` from `net_qty_on_cartons` here.
+// `net_qty_on_cartons` comes from cfpl/cdpl_cold_stocks (see cold_storage_server search),
+// and park_in_pending() already DELETEs every dispatched box from cold_stocks the moment it
+// goes 'In Transit'. So in-transit cartons are already excluded from net_qty_on_cartons.
+// Subtracting pending again double-counts them — it understated availability and clamped to 0
+// whenever pending ≥ net (e.g. lot 125860: net 9, pending 26 → showed 0). The "in transit"
+// figure below is informational only.
 // Tooltip renders via portal to document.body so it escapes the table's overflow:auto and
 // any z-index parents.
 function CartonCellWithPending({ record, pending }: { record: ColdStorageStockRecord; pending?: PendingInfo }) {
@@ -318,7 +327,9 @@ function CartonCellWithPending({ record, pending }: { record: ColdStorageStockRe
 
   const total = Number(record.net_qty_on_cartons ?? 0)
   const reserved = Number(pending?.pending_cartons ?? 0)
-  const available = Math.max(0, total - reserved)
+  // Available == net stock. In-transit boxes are already removed from cold_stocks (see note above),
+  // so they are NOT subtracted. `reserved` is shown only as an "in transit" context badge.
+  const available = total
 
   // Prefer the backend-aggregated `transfers` list (one row per challan with full
   // totals). Fall back to client-side consolidation only if older API returns boxes.
@@ -407,7 +418,7 @@ function CartonCellWithPending({ record, pending }: { record: ColdStorageStockRe
       >
         <div className="font-semibold tabular-nums">{available}</div>
         <div className="text-[10px] text-amber-700 mt-0.5 font-medium">
-          {reserved} ordered
+          +{reserved} in transit
         </div>
       </div>
       {open && typeof document !== "undefined" && createPortal(

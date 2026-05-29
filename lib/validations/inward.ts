@@ -247,8 +247,9 @@ class InwardApiService {
     return this.handleResponse<InwardDetailResponse>(response)
   }
 
-  async deleteInward(company: Company, transaction_no: string) {
-    const response = await fetch(`${API_BASE}/inward/${company}/${encodeURIComponent(transaction_no)}`, {
+  async deleteInward(company: Company, transaction_no: string, user_email?: string) {
+    const params = user_email ? `?user_email=${encodeURIComponent(user_email)}` : ""
+    const response = await fetch(`${API_BASE}/inward/${company}/${encodeURIComponent(transaction_no)}${params}`, {
       method: "DELETE",
       headers: {
         "Content-Type": "application/json",

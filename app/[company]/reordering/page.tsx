@@ -268,7 +268,7 @@ export default function RTVListPage({ params }: RTVListPageProps) {
             ) : (
               <>
                 {/* Desktop */}
-                <div className="hidden md:block overflow-x-auto">
+                <div className="hidden md:block">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b bg-muted/30">

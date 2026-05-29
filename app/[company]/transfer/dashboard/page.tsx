@@ -346,6 +346,8 @@ export default function TransferDashboard({ params }: Props) {
       return { group_label: label, tx_count: tids.size, total_weight: weight, total_net_weight: net, total_gross_weight: gross, total_boxes: boxes, pending_count: pend.size, children, skipL2 }
     })
 
+    type SummaryL1 = (typeof data)[number]
+
     // Search
     const sq = searchQuery.toLowerCase().trim()
     const searched = sq ? data.filter(l1 =>
@@ -355,7 +357,7 @@ export default function TransferDashboard({ params }: Props) {
     ) : data
 
     // Sort
-    const sortFn = (a: typeof data[0], b: typeof data[0]) => {
+    const sortFn = (a: SummaryL1, b: SummaryL1) => {
       switch (sortBy) {
         case "weight": return b.total_weight - a.total_weight
         case "boxes": return b.total_boxes - a.total_boxes
@@ -736,11 +738,11 @@ export default function TransferDashboard({ params }: Props) {
               {activeFilterCount > 0 && <Button variant="outline" size="sm" className="mt-3 text-xs" onClick={clearFilters}>Clear Filters</Button>}
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <div>
               <table className="w-full text-sm">
                 <thead className="sticky top-0 z-10">
                   <tr className="border-b bg-muted/60">
-                    <th className="text-left text-xs uppercase tracking-wider font-medium px-3 py-2.5 min-w-[250px]">Category</th>
+                    <th className="text-left text-xs uppercase tracking-wider font-medium px-3 py-2.5 min-w-0">Category</th>
                     <th className="text-right text-xs uppercase tracking-wider font-medium px-3 py-2.5 w-[60px]">TRs</th>
                     <th className="text-right text-xs uppercase tracking-wider font-medium px-3 py-2.5 w-[160px]">{viewMode === "boxes" ? "Boxes" : viewMode === "kgs" ? "Weight (Kgs)" : "Weight / Boxes"}</th>
                     <th className="text-right text-xs uppercase tracking-wider font-medium px-3 py-2.5 w-[80px]">Pending</th>

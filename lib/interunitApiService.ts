@@ -3,6 +3,80 @@ import { useAuthStore } from '@/lib/stores/auth'
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
 
+// ── STBR (Scan-Time Box ID Reconciliation) response shapes ──────────────────
+// See docs/conventions.md#pending-transfer-stock-middleware for the flow.
+export type ReconciliationStatus =
+  | 'noop'        // no reconciliation needed (not a scan path)
+  | 'matched'     // scanned box already matched IMS placeholder — no swap
+  | 'overridden'  // STBR rewrote placeholder to actual scanned box_id
+  | 'overridden_no_source'  // swap done but new box not found in source (audit only)
+  | 'propagated'  // first scan triggered series-offset swap of N siblings
+  | 'conflict'    // no matching slot OR cross-lot scan
+  | 'duplicate'   // box already received elsewhere
+
+export interface ReconciliationInfo {
+  status?: ReconciliationStatus | string
+  original_box_id?: string | null
+  propagated_count?: number
+  siblings?: Array<{ old: string; new: string }>
+  reconciliation_id?: number | null
+}
+
+export interface AcknowledgeBoxResponse {
+  id?: number
+  header_id?: number
+  box_id?: string
+  article?: string | null
+  batch_number?: string | null
+  lot_number?: string | null
+  transaction_no?: string | null
+  net_weight?: number | null
+  gross_weight?: number | null
+  is_matched?: boolean
+  // NEW (May 2026): STBR outcome surfaced from backend
+  reconciliation?: ReconciliationInfo
+  [key: string]: any
+}
+
+export interface AcknowledgeBatchResponse {
+  success: boolean
+  count: number
+  boxes: AcknowledgeBoxResponse[]
+  conflicts?: Array<{
+    box_id?: string | null
+    transaction_no?: string | null
+    status_code?: number
+    detail?: string
+  }>
+}
+
+export interface ReconciliationReportRow {
+  id: number
+  transfer_in_id: number | null
+  transfer_out_id: number | null
+  lot_no: string | null
+  transaction_no: string
+  original_box_id: string | null
+  actual_box_id: string
+  reconciliation_status: string
+  conflict_reason: string | null
+  scan_source: string | null
+  scanned_by: string | null
+  scanned_at: string | null
+  from_company: string | null
+  to_company: string | null
+  from_site: string | null
+  to_site: string | null
+  propagated_from_id: number | null
+}
+
+export interface ReconciliationReportResponse {
+  transfer_in_id: number
+  total: number
+  by_status: Record<string, number>
+  rows: ReconciliationReportRow[]
+}
+
 function getAuthHeaders(): Record<string, string> {
   const { accessToken } = useAuthStore.getState()
   const headers: Record<string, string> = {
@@ -459,7 +533,9 @@ export class InterunitApiService {
     is_matched: boolean
     issue?: any
     line_index?: number | null
-  }): Promise<any> {
+    scan_source?: 'qr_scan' | 'manual' | 'auto_match'
+    scanned_by?: string | null
+  }): Promise<AcknowledgeBoxResponse> {
     return await fetchJSON(`${API_BASE_URL}/interunit/transfer-in/${headerId}/acknowledge`, {
       method: 'POST',
       body: JSON.stringify(payload)
@@ -472,11 +548,20 @@ export class InterunitApiService {
     })
   }
 
-  static async acknowledgeBatch(headerId: number, boxes: any[]): Promise<any> {
+  static async acknowledgeBatch(headerId: number, boxes: any[]): Promise<AcknowledgeBatchResponse> {
     return await fetchJSON(`${API_BASE_URL}/interunit/transfer-in/${headerId}/acknowledge-batch`, {
       method: 'POST',
       body: JSON.stringify(boxes)
     })
+  }
+
+  /**
+   * GET /interunit/transfer-in/{id}/reconciliation — STBR audit report.
+   * Returns every box-id reconciliation that happened on this Transfer In,
+   * with original vs actual box IDs, scan source, who/when.
+   */
+  static async getTransferInReconciliation(transferInId: number): Promise<ReconciliationReportResponse> {
+    return await fetchJSON(`${API_BASE_URL}/interunit/transfer-in/${transferInId}/reconciliation`)
   }
 
   static async finalizeTransferIn(headerId: number, payload: {

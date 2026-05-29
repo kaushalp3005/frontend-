@@ -375,6 +375,7 @@ export interface InwardListItem {
   total_amount?: number
   item_descriptions: string[]
   quantities_and_uoms: string[]
+  article_items_with_qty?: string[]
   has_edits?: boolean
   // New optional fields for client-side filtering + hover popup
   warehouse?: string
@@ -393,6 +394,7 @@ export interface InwardListItem {
   source_location?: string
   destination_location?: string
   remark?: string
+  created_by?: string
 }
 
 export interface InwardListResponse {
@@ -769,10 +771,12 @@ class InwardApiService {
   // ── 11. DELETE /inward/{company}/{txn} ────────────────
   async deleteInward(
     company: Company,
-    transactionNo: string
+    transactionNo: string,
+    user_email?: string
   ): Promise<{ message: string }> {
+    const params = user_email ? `?user_email=${encodeURIComponent(user_email)}` : ""
     const response = await fetch(
-      `${API_BASE}/inward/${company}/${encodeURIComponent(transactionNo)}`,
+      `${API_BASE}/inward/${company}/${encodeURIComponent(transactionNo)}${params}`,
       { method: "DELETE", headers: getAuthHeaders() }
     )
     return handleResponse<{ message: string }>(response)

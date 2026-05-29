@@ -321,6 +321,26 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
 
   useEffect(() => { fetchData() }, [fetchData])
 
+  // IntersectionObserver: update activeSection as the user scrolls within the Concentration tab
+  useEffect(() => {
+    if (activeTab !== "concentration" || loading) return
+    const ids = ["s1", "s2", "s3", "s4"]
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries.filter(e => e.isIntersecting)
+        if (visible.length > 0) {
+          const topmost = visible.sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0]
+          setActiveSection(topmost.target.id)
+        }
+      },
+      { rootMargin: "-160px 0px -50% 0px", threshold: 0 },
+    )
+    const timer = setTimeout(() => {
+      ids.forEach(id => { const el = document.getElementById(id); if (el) observer.observe(el) })
+    }, 150)
+    return () => { clearTimeout(timer); observer.disconnect() }
+  }, [activeTab, loading])
+
   // Expand/collapse
   const toggle = (key: ExpandKey) => {
     setExpanded(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n })
@@ -1320,6 +1340,7 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
 
         {/* ── TABS ── */}
         <Tabs value={activeTab} onValueChange={v => { setActiveTab(v as any); setExpanded(new Set()); setAllExpanded(false) }}>
+          <div className="sticky top-14 z-30 bg-background/95 backdrop-blur -mx-3 sm:-mx-4 md:-mx-6 px-3 sm:px-4 md:px-6 pt-2 pb-2 border-b border-border/40">
           <div className="flex items-center justify-between gap-2">
             <TabsList>
               <TabsTrigger value="stock" className="text-xs sm:text-sm">Stock Summary</TabsTrigger>
@@ -1367,6 +1388,7 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
               </button>
             </div>
           )}
+          </div>{/* end sticky tabs wrapper */}
 
           {/* ══════ TAB 1: STOCK SUMMARY ══════ */}
           <TabsContent value="stock" className="mt-3 space-y-3">
@@ -1602,8 +1624,8 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
 
           {/* ══════ TAB 3: CONCENTRATION, RISK & OPERATIONS ══════ */}
           <TabsContent value="concentration" className="mt-3 space-y-4">
-            {/* Anchor menu */}
-            <div className="flex gap-1 rounded-lg border p-1 bg-muted/30 overflow-x-auto">
+            {/* Anchor menu — sticky so it stays visible while scrolling */}
+            <div className="flex gap-1 rounded-lg border p-1 bg-background/95 backdrop-blur overflow-x-auto sticky top-28 z-20 shadow-sm">
               {[{id:"s1",label:"Portfolio"},{id:"s2",label:"Attention & Risk"},{id:"s3",label:"Slow & Non-Moving"},{id:"s4",label:"Activity Rundown"}].map(s => (
                 <button key={s.id} onClick={() => { setActiveSection(s.id); document.getElementById(s.id)?.scrollIntoView({ behavior: "smooth", block: "start" }) }}
                   className={cn("text-xs px-3 py-1.5 rounded-md transition-colors whitespace-nowrap", activeSection === s.id ? "bg-[#0f172a] text-white" : "hover:bg-slate-100")}>{s.label}</button>
@@ -1613,7 +1635,7 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
             {loading ? <TableSkeleton /> : (<>
 
             {/* ── §1 PORTFOLIO CONCENTRATION ── */}
-            <div id="s1" className="space-y-4">
+            <div id="s1" className="space-y-4 scroll-mt-40">
               {concentrationData && (<>
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                   <KPICard label="Total Portfolio Value" value={fmtCr(concentrationData.portfolio.total_value)} />
@@ -1636,13 +1658,12 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
                         <XAxis type="number" tickFormatter={v => fmtCr(v)} tick={{ fontSize: 11 }} />
                         <YAxis type="category" dataKey="item_subgroup" width={120} tick={{ fontSize: 11 }} />
                         <ReTooltip
-                          contentStyle={{ fontSize: 12, borderRadius: 8 }}
                           content={({ active, payload }) => {
                             if (!active || !payload || !payload.length) return null
                             const it = payload[0].payload
                             const fragLabel = it.fragmentation === "high" ? "🔴 High" : it.fragmentation === "medium" ? "🟡 Medium" : "🟢 Normal"
                             return (
-                              <div className="bg-white dark:bg-slate-900 border rounded-md shadow-lg p-2.5 text-xs space-y-0.5 max-w-[280px]">
+                              <div className="bg-white dark:bg-slate-900 border rounded-md shadow-lg p-2.5 text-xs space-y-0.5 max-w-[280px]" style={{ fontSize: 12, borderRadius: 8 }}>
                                 <p className="font-semibold text-sm">{it.item_subgroup}</p>
                                 <p className="text-muted-foreground">Group: <span className="text-foreground font-medium">{it.group_name}</span></p>
                                 <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 mt-1.5 pt-1.5 border-t">
@@ -1709,7 +1730,7 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
                       <td className="text-right px-3 py-2"><span className={cn("px-1.5 py-0.5 rounded text-xs font-medium", it.portfolio_pct > 10 ? "bg-red-100 text-red-800" : it.portfolio_pct > 5 ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-700")}>{it.portfolio_pct}%</span></td>
                       <td className="text-right px-3 py-2 tabular-nums">{fmtRate(it.avg_rate)}</td>
                       <td className="text-right px-3 py-2 tabular-nums">{it.lot_count}</td>
-                      <td className="text-center px-3 py-2"><span className={cn("text-xs", it.fragmentation === "high" ? "text-red-600" : it.fragmentation === "medium" ? "text-amber-600" : "text-emerald-600")}>{it.fragmentation === "high" ? `🔴 ${it.lot_count}` : it.fragmentation === "medium" ? "🟡" : "🟢"}</span></td>
+                      <td className="text-center px-3 py-2"><span className={cn("text-xs font-medium", it.fragmentation === "high" ? "text-red-600" : it.fragmentation === "medium" ? "text-amber-600" : "text-emerald-600")}>{it.fragmentation === "high" ? "🔴" : it.fragmentation === "medium" ? "🟡" : "🟢"} {it.lot_count}</span></td>
                     </tr>
                   ))}</tbody>
                 </table></div></CardContent></Card>
@@ -1717,7 +1738,7 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
             </div>
 
             {/* ── §2 ATTENTION & RISK ── */}
-            <div id="s2" className="space-y-3">
+            <div id="s2" className="space-y-3 scroll-mt-40">
               <h3 className="text-sm font-semibold flex items-center gap-2"><AlertTriangle className="h-4 w-4 text-red-500" />Attention & Risk Flags</h3>
               {attentionData && (<>
                 {/* Summary chips */}
@@ -1771,7 +1792,7 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
             </div>
 
             {/* ── §3 SLOW & NON-MOVING TRACKER ── */}
-            <div id="s3" className="space-y-3">
+            <div id="s3" className="space-y-3 scroll-mt-40">
               <h3 className="text-sm font-semibold">Slow & Non-Moving Tracker</h3>
               {slowMovingData && (<>
                 <div className="flex flex-wrap gap-2">
@@ -1823,7 +1844,7 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
             </div>
 
             {/* ── §4 ACTIVITY RUNDOWN ── */}
-            <div id="s4" className="space-y-4">
+            <div id="s4" className="space-y-4 scroll-mt-40">
               <h3 className="text-sm font-semibold">Activity Rundown</h3>
               {rundownData && (<>
                 {/* §4A Location wise */}

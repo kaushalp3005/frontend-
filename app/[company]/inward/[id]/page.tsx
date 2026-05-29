@@ -26,6 +26,7 @@ import {
   type InwardDetailResponse,
 } from "@/types/inward"
 import { PermissionGuard } from "@/components/auth/permission-gate"
+import { useAuthStore } from "@/lib/stores/auth"
 import { cn } from "@/lib/utils"
 import QRCode from "qrcode"
 
@@ -62,6 +63,7 @@ function Field({ label, value }: { label: string; value?: string | number | null
 export default function InwardDetailPage({ params }: InwardDetailPageProps) {
   const { company, id: transactionNo } = params
   const router = useRouter()
+  const { user } = useAuthStore()
 
   const [data, setData] = useState<InwardDetailResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -94,7 +96,7 @@ export default function InwardDetailPage({ params }: InwardDetailPageProps) {
   const handleDelete = async () => {
     try {
       setDeleting(true)
-      await inwardApiService.deleteInward(company, transactionNo)
+      await inwardApiService.deleteInward(company, transactionNo, user?.email)
       router.push(`/${company}/inward`)
     } catch (err) {
       console.error("Delete failed:", err)

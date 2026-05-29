@@ -1,6 +1,7 @@
 "use client"
 
-import React, { useState, useEffect, useCallback } from "react"
+import React, { useState, useEffect, useCallback, useRef } from "react"
+import { createPortal } from "react-dom"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
@@ -16,11 +17,10 @@ import { useRouter } from "next/navigation"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import {
   Plus, Eye, Edit, Trash2, Search, X, ChevronLeft, ChevronRight,
   FileCheck, Clock, CheckCircle2, Loader2, ArrowDownToLine, ClipboardCheck, ClipboardList, Download, Snowflake, BarChart3, CalendarClock,
-  Package, MapPin, Truck, FileText, AlertCircle, CheckCheck, Snowflake as SnowflakeIcon,
+  Package, MapPin, Truck, FileText, AlertCircle, CheckCheck, Snowflake as SnowflakeIcon, ArrowRight,
 } from "lucide-react"
 import { format } from "date-fns"
 import {
@@ -45,7 +45,6 @@ function TransactionStatusCard({ item }: { item: InwardListItem }) {
   const completed: string[] = []
   const pending: string[] = []
 
-  // Check required sections
   if (item.warehouse) completed.push("Warehouse")
   else pending.push("Warehouse")
 
@@ -55,147 +54,293 @@ function TransactionStatusCard({ item }: { item: InwardListItem }) {
   if (item.vehicle_number && item.transporter_name) completed.push("Transport")
   else pending.push("Transport")
 
-  if (item.grn_number && item.grn_quantity != null && item.system_grn_date) completed.push("GRN")
+  if (item.grn_number) completed.push("GRN")
   else pending.push("GRN")
 
   if (item.status === "approved") completed.push("Approval")
   else pending.push("Approval")
 
-  const rate = item.total_amount && item.box_count ? (item.total_amount / item.box_count).toFixed(2) : null
+  const toneChip = (tone: "blue" | "sky" | "emerald" | "amber" | "gray") => {
+    const map = {
+      blue:    "bg-blue-50 text-blue-700 border-blue-200",
+      sky:     "bg-sky-50 text-sky-700 border-sky-200",
+      emerald: "bg-emerald-50 text-emerald-700 border-emerald-200",
+      amber:   "bg-amber-50 text-amber-700 border-amber-200",
+      gray:    "bg-gray-50 text-gray-700 border-gray-200",
+    }
+    return `text-[10px] font-medium px-1.5 py-0.5 rounded border ${map[tone]}`
+  }
 
   return (
-    <div className="divide-y">
-      <div className="px-4 py-3 bg-muted/30">
-        <div className="flex items-center justify-between">
-          <p className="text-sm font-semibold">{item.transaction_no}</p>
+    <div
+      className="w-full rounded-2xl overflow-hidden text-xs max-h-[480px] flex flex-col"
+      style={{
+        background: "linear-gradient(135deg, #eff6ff 0%, #ffffff 45%, #faf5ff 100%)",
+        boxShadow: "0 20px 40px -10px rgba(79,70,229,0.22), 0 8px 16px -4px rgba(236,72,153,0.14), 0 0 0 1px rgba(147,197,253,0.45)",
+      }}
+    >
+      {/* Header */}
+      <div className="px-3 py-2.5 border-b border-blue-100/60">
+        <div className="flex items-center justify-between gap-2">
+          <p className="font-semibold text-[13px] text-gray-800">{item.transaction_no}</p>
           <Badge variant="outline" className={cn(
-            "text-xs",
+            "text-[10px] shrink-0",
             item.status === "approved" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-700 border-amber-200"
           )}>
             {item.status === "approved" ? "Approved" : "Pending"}
           </Badge>
         </div>
-        <p className="text-xs text-muted-foreground mt-0.5">
+        <p className="text-[10px] text-gray-500 mt-0.5">
           {item.entry_date ? format(new Date(item.entry_date), "dd MMM yyyy") : "—"}
           {item.vendor_supplier_name && ` · ${item.vendor_supplier_name}`}
+          {item.customer_party_name && item.customer_party_name !== item.vendor_supplier_name && ` / ${item.customer_party_name}`}
         </p>
       </div>
 
-      <div className="px-4 py-3 space-y-2 text-xs">
-        <div className="grid grid-cols-2 gap-2">
-          {item.warehouse && (
-            <div className="flex items-start gap-1.5">
-              <Package className="h-3 w-3 mt-0.5 text-muted-foreground flex-shrink-0" />
-              <div>
-                <p className="text-[10px] text-muted-foreground uppercase">Warehouse</p>
-                <p className="font-medium">{getDisplayWarehouseName(item.warehouse)}</p>
+      <div className="px-3 py-2.5 space-y-2 overflow-y-auto flex-1">
+
+        {/* Warehouse / destination row */}
+        {(item.warehouse || item.source_location || item.destination_location) && (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {item.source_location && (
+              <span className={toneChip("gray")}><span className="opacity-60">From:</span> {item.source_location}</span>
+            )}
+            {item.warehouse && (
+              <span className={toneChip("blue")}><span className="opacity-60">WH:</span> {getDisplayWarehouseName(item.warehouse)}</span>
+            )}
+            {item.destination_location && (
+              <>
+                <ArrowRight className="h-3 w-3 text-gray-400 shrink-0" />
+                <span className={toneChip("blue")}>{item.destination_location}</span>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Reference numbers row */}
+        {(item.po_number || item.invoice_number || item.challan_number || item.lr_number) && (
+          <div className="flex flex-wrap gap-1">
+            {item.po_number && (
+              <span className={toneChip("gray")}><span className="opacity-60">PO:</span> {item.po_number}</span>
+            )}
+            {item.invoice_number && (
+              <span className={toneChip("gray")}><span className="opacity-60">Inv:</span> {item.invoice_number}</span>
+            )}
+            {item.challan_number && (
+              <span className={toneChip("gray")}><span className="opacity-60">Challan:</span> {item.challan_number}</span>
+            )}
+            {item.lr_number && (
+              <span className={toneChip("sky")}><span className="opacity-60">LR#:</span> {item.lr_number}</span>
+            )}
+          </div>
+        )}
+
+        {/* Inward Manager */}
+        {item.approval_authority && (
+          <div className="flex flex-wrap gap-1">
+            <span className={toneChip("blue")}><span className="opacity-60">Manager:</span> {item.approval_authority}</span>
+          </div>
+        )}
+
+        {/* Transport row */}
+        {(item.vehicle_number || item.transporter_name) && (
+          <div className="flex flex-wrap gap-1">
+            {item.vehicle_number && (
+              <span className={toneChip("sky")}><span className="opacity-60">Vehicle:</span> {item.vehicle_number}</span>
+            )}
+            {item.transporter_name && (
+              <span className={toneChip("sky")}><span className="opacity-60">Transporter:</span> {item.transporter_name}</span>
+            )}
+          </div>
+        )}
+
+        {/* GRN row */}
+        {(item.grn_number || item.grn_quantity != null || item.system_grn_date) && (
+          <div className="flex flex-wrap gap-1">
+            {item.grn_number && (
+              <span className={toneChip("emerald")}><span className="opacity-60">GRN:</span> {item.grn_number}</span>
+            )}
+            {item.grn_quantity != null && (
+              <span className={toneChip("emerald")}><span className="opacity-60">Qty:</span> {item.grn_quantity}</span>
+            )}
+            {item.system_grn_date && (
+              <span className={toneChip("emerald")}><span className="opacity-60">GRN Date:</span> {format(new Date(item.system_grn_date), "dd MMM yy")}</span>
+            )}
+          </div>
+        )}
+
+        {/* Metrics */}
+        {(item.total_amount != null || item.net_weight != null || item.total_weight != null || item.box_count != null) && (
+          <div className="flex flex-wrap items-center gap-2 pt-1.5 border-t border-blue-100/50 text-[11px]">
+            {item.total_amount != null && (
+              <span className="text-gray-500">Value: <span className="font-semibold text-gray-700">₹{item.total_amount.toLocaleString()}</span></span>
+            )}
+            {item.net_weight != null && (
+              <span className="text-gray-500">Net: <span className="font-semibold text-gray-700">{item.net_weight} kg</span></span>
+            )}
+            {item.total_weight != null && item.total_weight !== item.net_weight && (
+              <span className="text-gray-500">Gross: <span className="font-semibold text-gray-700">{item.total_weight} kg</span></span>
+            )}
+            {item.box_count != null && (
+              <span className="text-gray-500">Boxes: <span className="font-semibold text-gray-700">{item.box_count}</span></span>
+            )}
+          </div>
+        )}
+
+        {/* Items with per-item kg — use combined field when available, fall back to names only */}
+        {(() => {
+          const displayItems = (item.article_items_with_qty && item.article_items_with_qty.length > 0)
+            ? item.article_items_with_qty
+            : (item.item_descriptions || [])
+          if (displayItems.length === 0) return null
+          return (
+            <div className="pt-1.5 border-t border-blue-100/50">
+              <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1">
+                Items ({displayItems.length})
+              </p>
+              <div className="space-y-0.5">
+                {displayItems.slice(0, 6).map((entry, i) => {
+                  // Split "ItemName (X.XX kg)" into name + qty suffix for coloured display
+                  const match = entry.match(/^(.+?)\s+(\([^)]+\))$/)
+                  return (
+                    <div key={i} className="flex items-center justify-between gap-2 bg-white/70 border border-blue-100 rounded-lg px-2 py-1 shadow-sm">
+                      <span className="font-medium text-gray-800 text-[11px] leading-snug">{match ? match[1] : entry}</span>
+                      {match && (
+                        <span className="text-emerald-700 font-semibold text-[10px] shrink-0">{match[2]}</span>
+                      )}
+                    </div>
+                  )
+                })}
+                {displayItems.length > 6 && (
+                  <p className="text-[10px] text-gray-400 pl-1">+{displayItems.length - 6} more items</p>
+                )}
+              </div>
+            </div>
+          )
+        })()}
+
+        {/* Workflow chips */}
+        <div className="pt-1.5 border-t border-blue-100/50 space-y-1.5">
+          {completed.length > 0 && (
+            <div>
+              <p className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wider mb-1">Completed</p>
+              <div className="flex flex-wrap gap-1">
+                {completed.map((c) => (
+                  <span key={c} className={toneChip("emerald")}>✓ {c}</span>
+                ))}
               </div>
             </div>
           )}
-          {item.approval_authority && (
-            <div className="flex items-start gap-1.5">
-              <CheckCircle2 className="h-3 w-3 mt-0.5 text-muted-foreground flex-shrink-0" />
-              <div>
-                <p className="text-[10px] text-muted-foreground uppercase">Manager</p>
-                <p className="font-medium truncate">{item.approval_authority}</p>
-              </div>
-            </div>
-          )}
-          {item.po_number && (
-            <div className="flex items-start gap-1.5">
-              <FileText className="h-3 w-3 mt-0.5 text-muted-foreground flex-shrink-0" />
-              <div>
-                <p className="text-[10px] text-muted-foreground uppercase">PO #</p>
-                <p className="font-medium truncate">{item.po_number}</p>
-              </div>
-            </div>
-          )}
-          {item.grn_number && (
-            <div className="flex items-start gap-1.5">
-              <ClipboardCheck className="h-3 w-3 mt-0.5 text-muted-foreground flex-shrink-0" />
-              <div>
-                <p className="text-[10px] text-muted-foreground uppercase">GRN</p>
-                <p className="font-medium truncate">{item.grn_number}</p>
-              </div>
-            </div>
-          )}
-          {item.vehicle_number && (
-            <div className="flex items-start gap-1.5">
-              <Truck className="h-3 w-3 mt-0.5 text-muted-foreground flex-shrink-0" />
-              <div>
-                <p className="text-[10px] text-muted-foreground uppercase">Vehicle</p>
-                <p className="font-medium">{item.vehicle_number}</p>
-              </div>
-            </div>
-          )}
-          {item.source_location && (
-            <div className="flex items-start gap-1.5">
-              <MapPin className="h-3 w-3 mt-0.5 text-muted-foreground flex-shrink-0" />
-              <div>
-                <p className="text-[10px] text-muted-foreground uppercase">Source</p>
-                <p className="font-medium truncate">{item.source_location}</p>
+          {pending.length > 0 && (
+            <div>
+              <p className="text-[10px] font-semibold text-amber-600 uppercase tracking-wider mb-1">Pending</p>
+              <div className="flex flex-wrap gap-1">
+                {pending.map((p) => (
+                  <span key={p} className={toneChip("amber")}>○ {p}</span>
+                ))}
               </div>
             </div>
           )}
         </div>
 
-        {(item.total_amount != null || item.net_weight != null || item.box_count != null) && (
-          <div className="flex items-center gap-3 pt-2 border-t text-[11px]">
-            {item.total_amount != null && (
-              <div>
-                <span className="text-muted-foreground">Value: </span>
-                <span className="font-medium">₹{item.total_amount.toLocaleString()}</span>
+        {/* Footer */}
+        {(item.created_by || item.remark) && (
+          <div className="pt-1.5 border-t border-blue-100/50 space-y-0.5 text-[10px]">
+            {item.created_by && (
+              <div className="flex justify-between gap-2">
+                <span className="text-gray-400">Created by</span>
+                <span className="font-medium text-gray-600">{item.created_by}</span>
               </div>
             )}
-            {item.net_weight != null && (
-              <div>
-                <span className="text-muted-foreground">Net: </span>
-                <span className="font-medium">{item.net_weight}kg</span>
+            {item.remark && (
+              <div className="flex justify-between gap-2">
+                <span className="text-gray-400 shrink-0">Remark</span>
+                <span className="font-medium text-gray-600 text-right truncate max-w-[200px]" title={item.remark}>{item.remark}</span>
               </div>
             )}
-            {item.box_count != null && (
-              <div>
-                <span className="text-muted-foreground">Boxes: </span>
-                <span className="font-medium">{item.box_count}</span>
-              </div>
-            )}
-            {rate && (
-              <div>
-                <span className="text-muted-foreground">Rate: </span>
-                <span className="font-medium">₹{rate}/box</span>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      <div className="px-4 py-3 space-y-1.5">
-        {completed.length > 0 && (
-          <div>
-            <p className="text-[10px] font-medium text-emerald-700 uppercase mb-1">Completed</p>
-            <div className="flex flex-wrap gap-1">
-              {completed.map((c) => (
-                <Badge key={c} variant="outline" className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200">
-                  ✓ {c}
-                </Badge>
-              ))}
-            </div>
-          </div>
-        )}
-        {pending.length > 0 && (
-          <div>
-            <p className="text-[10px] font-medium text-amber-700 uppercase mb-1">Pending</p>
-            <div className="flex flex-wrap gap-1">
-              {pending.map((p) => (
-                <Badge key={p} variant="outline" className="text-[10px] bg-amber-50 text-amber-700 border-amber-200">
-                  ○ {p}
-                </Badge>
-              ))}
-            </div>
           </div>
         )}
       </div>
     </div>
+  )
+}
+
+
+function InwardHoverPortal({ item }: { item: InwardListItem }) {
+  const [show, setShow] = useState(false)
+  const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number; maxHeight: number }>({ left: 0, maxHeight: 480 })
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const triggerRef = useRef<HTMLSpanElement>(null)
+
+  const CARD_WIDTH = 380
+  const MARGIN = 8
+  const GAP = 6
+
+  const computePosition = useCallback(() => {
+    if (!triggerRef.current) return
+    const rect = triggerRef.current.getBoundingClientRect()
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+
+    let left = rect.left
+    if (left + CARD_WIDTH > vw - MARGIN) left = Math.max(MARGIN, vw - CARD_WIDTH - MARGIN)
+    if (left < MARGIN) left = MARGIN
+
+    const spaceAbove = rect.top - MARGIN
+    const spaceBelow = vh - rect.bottom - MARGIN
+    const maxHeight = Math.min(480, spaceAbove >= spaceBelow ? spaceAbove - GAP : spaceBelow - GAP)
+
+    if (spaceAbove >= spaceBelow && spaceAbove >= 100) {
+      setPos({ bottom: vh - rect.top + GAP, left, maxHeight })
+    } else {
+      setPos({ top: rect.bottom + GAP, left, maxHeight })
+    }
+  }, [])
+
+  const open = useCallback(() => {
+    if (hideTimer.current) clearTimeout(hideTimer.current)
+    computePosition()
+    setShow(true)
+  }, [computePosition])
+
+  const scheduleClose = useCallback(() => {
+    hideTimer.current = setTimeout(() => setShow(false), 180)
+  }, [])
+
+  const cancelClose = useCallback(() => {
+    if (hideTimer.current) clearTimeout(hideTimer.current)
+  }, [])
+
+  return (
+    <>
+      <span
+        ref={triggerRef}
+        onMouseEnter={open}
+        onMouseLeave={scheduleClose}
+        className="font-medium cursor-help underline-offset-2 hover:underline"
+      >
+        {item.transaction_no}
+      </span>
+      {show && typeof document !== "undefined" && createPortal(
+        <div
+          onMouseEnter={cancelClose}
+          onMouseLeave={scheduleClose}
+          style={{
+            position: "fixed",
+            ...(pos.bottom !== undefined ? { bottom: pos.bottom } : { top: pos.top }),
+            left: pos.left,
+            width: Math.min(CARD_WIDTH, window.innerWidth - MARGIN * 2),
+            maxHeight: pos.maxHeight,
+            zIndex: 9999,
+            overflowY: "auto",
+            borderRadius: "1rem",
+          }}
+        >
+          <TransactionStatusCard item={item} />
+        </div>,
+        document.body
+      )}
+    </>
   )
 }
 
@@ -366,7 +511,7 @@ export default function InwardListPage({ params }: InwardListPageProps) {
     !!(item.warehouse || item.approval_authority || item.vehicle_number || item.transporter_name || item.lr_number || item.grn_number || item.challan_number)
 
   const hasCompleteGrn = (item: InwardListItem) =>
-    !!(item.grn_number && item.grn_quantity != null && item.system_grn_date)
+    !!(item.grn_number)
 
   const filteredRecords = React.useMemo(() => {
     let result = allRecords
@@ -433,7 +578,7 @@ export default function InwardListPage({ params }: InwardListPageProps) {
     if (!deleteTarget) return
     try {
       setDeleting(true)
-      await inwardApiService.deleteInward(company, deleteTarget.transaction_no)
+      await inwardApiService.deleteInward(company, deleteTarget.transaction_no, user?.email)
       setDeleteTarget(null)
       fetchData()
     } catch (err) {
@@ -787,7 +932,7 @@ export default function InwardListPage({ params }: InwardListPageProps) {
             ) : (
               <>
                 {/* Desktop table */}
-                <div className="hidden md:block overflow-x-auto">
+                <div className="hidden md:block">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b bg-muted/30">
@@ -809,14 +954,7 @@ export default function InwardListPage({ params }: InwardListPageProps) {
                           className="border-b last:border-0 hover:bg-muted/20 transition-colors"
                         >
                           <td className="px-4 py-3">
-                            <HoverCard openDelay={200}>
-                              <HoverCardTrigger asChild>
-                                <span className="font-medium cursor-help underline-offset-2 hover:underline">{txnNo}</span>
-                              </HoverCardTrigger>
-                              <HoverCardContent className="w-80 p-0" align="start">
-                                <TransactionStatusCard item={item} />
-                              </HoverCardContent>
-                            </HoverCard>
+                            <InwardHoverPortal item={item} />
                           </td>
                           <td className="px-4 py-3 text-muted-foreground">
                             {item.entry_date ? format(new Date(item.entry_date), "dd MMM yyyy") : "—"}
@@ -824,7 +962,7 @@ export default function InwardListPage({ params }: InwardListPageProps) {
                           <td className="px-4 py-3">
                             <StatusBadge status={item.status} hasEdits={item.has_edits} />
                           </td>
-                          <td className="px-4 py-3 text-muted-foreground truncate max-w-[200px]">
+                          <td className="px-4 py-3 text-muted-foreground max-w-[160px] truncate" title={item.vendor_supplier_name || undefined}>
                             {item.vendor_supplier_name || "—"}
                           </td>
                           <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">

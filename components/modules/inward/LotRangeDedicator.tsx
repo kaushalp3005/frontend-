@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tag, ChevronDown, ChevronUp, X, Plus } from "lucide-react"
-import { isColdWarehouse } from "@/lib/constants/warehouses"
 
 export interface LotRange {
   from: number
@@ -20,14 +19,16 @@ interface LotRangeDedicatorProps {
 }
 
 export function LotRangeDedicator({ warehouse, totalBoxes, onApply }: LotRangeDedicatorProps) {
+  // warehouse is accepted for API compatibility (callers pass it) but the
+  // panel renders for ALL warehouses now — operators may want to assign lot
+  // ranges on any inward, not only cold storage.
+  void warehouse
   const [expanded, setExpanded] = useState(false)
   const [ranges, setRanges] = useState<LotRange[]>([])
   const [fromInput, setFromInput] = useState("")
   const [toInput, setToInput] = useState("")
   const [lotInput, setLotInput] = useState("")
   const [addError, setAddError] = useState<string | null>(null)
-
-  if (!isColdWarehouse(warehouse)) return null
 
   const validateAndAdd = () => {
     setAddError(null)

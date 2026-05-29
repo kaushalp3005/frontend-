@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback } from "react"
 import { createPortal } from "react-dom"
-import { ArrowRight, Loader2 } from "lucide-react"
+import { ArrowRight, Loader2, AlertTriangle } from "lucide-react"
 
 export type HoverLine = {
   name: string
@@ -12,9 +12,21 @@ export type HoverLine = {
   lotFrom?: string
   lotTo?: string
   count?: number  // unit_pack_size × qty, shown for PM/packaging items
+  sourceStorage?: string  // cold storage unit, e.g. "Savla D-39", "Rishi"
 }
 
 export type HoverMeta = { label: string; value: string; tone?: "default" | "warn" | "success" }
+
+export type DiscrepancyLine = {
+  article: string
+  lotNumber?: string
+  count: number           // boxes with this discrepancy
+  remarks?: string
+  netWeight?: string      // actual received weight
+  totalWeight?: string    // actual gross weight
+  casePack?: string       // actual case pack
+  unmatched?: number      // unmatched (no corresponding source box)
+}
 
 export function ChallanHoverCard({
   challanNo,
@@ -24,18 +36,21 @@ export function ChallanHoverCard({
   lines,
   fetchLines,
   meta,
+  discrepancies,
 }: {
   challanNo: string
   from?: string
   to?: string
   reason?: string
   lines?: HoverLine[]
-  fetchLines?: () => Promise<{ lines: HoverLine[]; meta?: HoverMeta[] }>
+  fetchLines?: () => Promise<{ lines: HoverLine[]; meta?: HoverMeta[]; discrepancies?: DiscrepancyLine[] }>
   meta?: HoverMeta[]
+  discrepancies?: DiscrepancyLine[]
 }) {
   const [show, setShow] = useState(false)
   const [fetched, setFetched] = useState<HoverLine[] | null>(null)
   const [fetchedMeta, setFetchedMeta] = useState<HoverMeta[] | null>(null)
+  const [fetchedDiscrepancies, setFetchedDiscrepancies] = useState<DiscrepancyLine[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number; maxHeight: number }>({ left: 0, maxHeight: 380 })
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -43,6 +58,7 @@ export function ChallanHoverCard({
 
   const displayLines = fetched ?? lines
   const displayMeta = fetchedMeta ?? meta
+  const displayDiscrepancies = fetchedDiscrepancies ?? discrepancies
 
   const computePosition = useCallback(() => {
     if (!triggerRef.current) return
@@ -79,6 +95,7 @@ export function ChallanHoverCard({
         const result = await fetchLines()
         setFetched(result.lines)
         if (result.meta) setFetchedMeta(result.meta)
+        if (result.discrepancies) setFetchedDiscrepancies(result.discrepancies)
       } catch { setFetched([]) }
       finally { setLoading(false) }
     }
@@ -115,7 +132,7 @@ export function ChallanHoverCard({
             position: "fixed",
             ...(pos.bottom !== undefined ? { bottom: pos.bottom } : { top: pos.top }),
             left: pos.left,
-            width: 304,
+            width: displayDiscrepancies && displayDiscrepancies.length > 0 ? 340 : 304,
             maxHeight: pos.maxHeight,
             background: "linear-gradient(135deg, #eff6ff 0%, #ffffff 45%, #faf5ff 100%)",
             boxShadow: "0 20px 40px -10px rgba(79, 70, 229, 0.22), 0 8px 16px -4px rgba(236, 72, 153, 0.14), 0 0 0 1px rgba(147, 197, 253, 0.45)",
@@ -177,6 +194,11 @@ export function ChallanHoverCard({
                       {line.lotNumber && (
                         <span className="font-mono text-indigo-600">Lot: {line.lotNumber}</span>
                       )}
+                      {line.sourceStorage && (
+                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded border bg-violet-50 text-violet-700 border-violet-200">
+                          <span className="opacity-60">From: </span>{line.sourceStorage}
+                        </span>
+                      )}
                     </div>
                     {line.lotFrom && line.lotTo && (
                       <div className="flex items-center gap-1 text-[11px] font-mono mt-0.5">
@@ -192,6 +214,46 @@ export function ChallanHoverCard({
               <p className="text-xs text-gray-400 py-1">No item details available</p>
             )}
           </div>
+
+          {displayDiscrepancies && displayDiscrepancies.length > 0 && (
+            <div className="border-t border-gray-100 pt-2">
+              <p className="text-[10px] font-semibold text-rose-500 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                <AlertTriangle className="h-3 w-3" /> Discrepancies
+              </p>
+              <div className="space-y-1">
+                {displayDiscrepancies.map((disc, i) => (
+                  <div key={i} className="text-xs bg-rose-50/70 border border-rose-200 rounded-lg px-2 py-1.5 shadow-sm">
+                    <div className="flex items-start justify-between gap-2 mb-0.5">
+                      <span className="font-medium text-rose-700">{disc.article}</span>
+                      <span className="shrink-0 text-rose-600 text-[11px] font-medium tabular-nums">{disc.count} box{disc.count > 1 ? 'es' : ''}</span>
+                    </div>
+                    {disc.lotNumber && (
+                      <div className="text-[11px] text-rose-600 mb-0.5">
+                        Lot: <span className="font-mono">{disc.lotNumber}</span>
+                      </div>
+                    )}
+                    {disc.remarks && typeof disc.remarks === 'string' && (
+                      <div className="text-[11px] text-rose-700 mb-0.5">
+                        <span className="opacity-70">Remark:</span> {disc.remarks}
+                      </div>
+                    )}
+                    {(disc.netWeight || disc.totalWeight || disc.casePack) && (
+                      <div className="flex flex-wrap gap-2 text-[10px] text-rose-600 mt-0.5">
+                        {disc.netWeight && <span>Net: <span className="font-medium">{disc.netWeight} kg</span></span>}
+                        {disc.totalWeight && <span>Gross: <span className="font-medium">{disc.totalWeight} kg</span></span>}
+                        {disc.casePack && typeof disc.casePack === 'string' && disc.casePack !== '' && <span>Case Pack: <span className="font-medium">{disc.casePack}</span></span>}
+                      </div>
+                    )}
+                    {disc.unmatched !== undefined && disc.unmatched > 0 && (
+                      <div className="text-[11px] text-rose-700 font-medium mt-0.5">
+                        {disc.unmatched} unmatched
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>,
         document.body
       )}
@@ -254,6 +316,7 @@ export function groupBoxesByItem(boxes: any[]): HoverLine[] {
     lotNumber?: string
     countable: boolean
     unitPackSize: number
+    sourceUnits: Set<string>        // canonical sub-cold names seen for this (article, lot)
   }
   const grouped = new Map<string, Agg>()
   for (const b of boxes) {
@@ -267,21 +330,32 @@ export function groupBoxesByItem(boxes: any[]): HoverLine[] {
       lotNumber: lot || undefined,
       countable: isCountableLine(b),
       unitPackSize: parseFloat(String(b.unit_pack_size || 0)) || 0,
+      sourceUnits: new Set<string>(),
     }
     g.qty += 1
     g.netWeight += Number(b.net_weight || 0)
     if (!g.unitPackSize) g.unitPackSize = parseFloat(String(b.unit_pack_size || 0)) || 0
     if (!g.countable) g.countable = isCountableLine(b)
+    // Lot-level dominant unit (computed server-side from master cold_stocks +
+    // pending_transfer_stock) is the authoritative single value per lot.
+    // Fall back to the per-box source_unit / storage_location only if the
+    // lot-level lookup didn't resolve.
+    const u = (b.lot_origin_unit || b.source_unit || b.source_storage || "").toString().trim()
+    if (u) g.sourceUnits.add(u)
     grouped.set(key, g)
   }
   return Array.from(grouped.values()).map(g => {
     const count = g.countable && g.unitPackSize > 0 ? g.unitPackSize * g.qty : 0
+    const sourceStorage = g.sourceUnits.size > 0
+      ? Array.from(g.sourceUnits).sort().join(", ")
+      : undefined
     return {
       name: g.name,
       qty: g.qty,
       netWeight: g.netWeight > 0 ? Number(g.netWeight.toFixed(3)) : undefined,
       lotNumber: g.lotNumber,
       count: count > 0 ? count : undefined,
+      sourceStorage,
     }
   })
 }
