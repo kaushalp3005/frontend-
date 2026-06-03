@@ -35,6 +35,7 @@ import {
 } from "@/types/inward"
 import { PermissionGuard } from "@/components/auth/permission-gate"
 import { dropdownApi } from "@/lib/api"
+import { computeArticleAggregatesFromBoxes } from "@/lib/inward/aggregates"
 import { cn } from "@/lib/utils"
 import { useToast } from "@/hooks/use-toast"
 import { useAuthStore } from "@/lib/stores/auth"
@@ -841,22 +842,9 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
   }
 
   const recomputeArticleFromBoxes = (boxes: BoxForm[], articleDesc: string) => {
-    const articleBoxes = boxes.filter((b) => b.article_description === articleDesc)
-    const totalNet = articleBoxes.reduce((sum, b) => sum + (parseFloat(b.net_weight) || 0), 0)
-    const totalGross = articleBoxes.reduce((sum, b) => sum + (parseFloat(b.gross_weight) || 0), 0)
-    const boxCount = articleBoxes.length
-
+    const agg = computeArticleAggregatesFromBoxes(boxes, articleDesc)
     setArticleApprovalForms((prev) =>
-      prev.map((a) =>
-        a.item_description === articleDesc
-          ? {
-              ...a,
-              quantity_units: String(boxCount),
-              net_weight: totalNet > 0 ? String(parseFloat(totalNet.toFixed(3))) : "",
-              total_weight: totalGross > 0 ? String(parseFloat(totalGross.toFixed(3))) : "",
-            }
-          : a
-      )
+      prev.map((a) => (a.item_description === articleDesc ? { ...a, ...agg } : a))
     )
   }
 

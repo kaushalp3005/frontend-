@@ -17,6 +17,8 @@ import {
 } from "lucide-react"
 import { format } from "date-fns"
 import { cn } from "@/lib/utils"
+import { StatusChip } from "@/components/modules/inward/StatusChip"
+import { inwardStatusSplit } from "@/lib/inward/status"
 import { PermissionGuard } from "@/components/auth/permission-gate"
 import { useAuthStore } from "@/lib/stores/auth"
 import {
@@ -27,6 +29,8 @@ import { coldStorageDashboardApi } from "@/lib/api/coldStorageDashboardApi"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import { usePersistedState, setSerializers } from "@/lib/hooks/usePersistedState"
 import { getDisplayWarehouseName, isColdWarehouse, normalizeWarehouseName } from "@/lib/constants/warehouses"
+import { makeRecordSearch, parseSearchTerms } from "@/lib/search/recordSearch"
+import { readDashboardCache, writeDashboardCache } from "@/lib/cache/dashboardCache"
 
 interface Props { params: { company: string } }
 
@@ -51,6 +55,13 @@ const GROUP_OPTIONS: { value: GroupByKey; label: string }[] = [
   { value: "customer", label: "Customer" }, { value: "item_category", label: "Category" },
   { value: "sub_category", label: "Sub Category" }, { value: "material_type", label: "Material" },
   { value: "month", label: "Month" }, { value: "purchased_by", label: "Purchased By" },
+]
+
+// Fields matched by the smart search box (record-level, multi-term, AND).
+const INWARD_SEARCH_FIELDS: (keyof InwardRecord & string)[] = [
+  "transaction_no", "grn_number", "invoice_number", "po_number", "lot_number",
+  "item_description", "item_category", "sub_category", "material_type", "quality_grade",
+  "warehouse", "vendor", "customer", "purchased_by", "status", "entry_date", "sku_id",
 ]
 
 const DATE_PRESETS = [
@@ -89,6 +100,7 @@ export default function InwardDashboard({ params }: Props) {
   const [allRecords, setAllRecords] = useState<InwardRecord[]>([])
   const [filterOpts, setFilterOpts] = useState<FilterOptions | null>(null)
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // Filters (client-side — no refetch). Persisted to sessionStorage so
@@ -126,31 +138,54 @@ export default function InwardDashboard({ params }: Props) {
   const [coldTopGroups, setColdTopGroups] = useState<{ name: string; kgs: number; percent: number }[]>([])
   const [coldAvgRate, setColdAvgRate] = useState(0)
 
-  // Load data once
-  const fetchData = useCallback(async () => {
-    setLoading(true); setError(null)
+  // Canonicalize every record up-front so chips, grouping, and filtering all see
+  // the same normalized values (no "ALMOND" vs "almond" duplicates, "old_savla"
+  // merges with "Savla D-39", etc.).
+  const applyData = useCallback((rawRecords: InwardRecord[], opts: FilterOptions | null) => {
+    const normalized: InwardRecord[] = (rawRecords || []).map((r) => ({
+      ...r,
+      warehouse: normalizeWarehouseName(r.warehouse) || r.warehouse || "",
+      item_category: titleFold(r.item_category),
+      sub_category: titleFold(r.sub_category),
+      material_type: titleFold(r.material_type),
+    }))
+    setAllRecords(normalized)
+    if (opts) setFilterOpts(opts)
+  }, [])
+
+  // Stale-while-revalidate: a silent run keeps the table on screen (no skeleton)
+  // and only swaps numbers in; the skeleton shows only on the first-ever load.
+  const fetchData = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent ?? false
+    if (silent) setRefreshing(true)
+    else { setLoading(true); setError(null) }
     try {
-      const [data, opts] = await Promise.all([
+      const [data, fopts] = await Promise.all([
         inwardDashboardApi.getAllData(company),
         inwardDashboardApi.getFilterOptions(company),
       ])
-      // Canonicalize every record up-front so chips, grouping, and filtering
-      // all see the same normalized values (no "ALMOND" vs "almond" duplicates,
-      // "old_savla" merges with "Savla D-39", etc.).
-      const normalized: InwardRecord[] = (data.records || []).map((r) => ({
-        ...r,
-        warehouse: normalizeWarehouseName(r.warehouse) || r.warehouse || "",
-        item_category: titleFold(r.item_category),
-        sub_category: titleFold(r.sub_category),
-        material_type: titleFold(r.material_type),
-      }))
-      setAllRecords(normalized); setFilterOpts(opts)
+      applyData(data.records || [], fopts)
+      writeDashboardCache(`inward-dashboard:cache:v1:${company}`, { records: data.records || [], filterOptions: fopts })
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load")
-    } finally { setLoading(false) }
-  }, [company])
+      if (!silent) setError(err instanceof Error ? err.message : "Failed to load")
+    } finally {
+      if (silent) setRefreshing(false)
+      else setLoading(false)
+    }
+  }, [company, applyData])
 
-  useEffect(() => { fetchData() }, [fetchData])
+  // On mount: paint instantly from cache (if any), then revalidate in background.
+  useEffect(() => {
+    const cached = readDashboardCache<{ records: InwardRecord[]; filterOptions: FilterOptions | null }>(`inward-dashboard:cache:v1:${company}`)
+    if (cached?.payload?.records?.length) {
+      applyData(cached.payload.records, cached.payload.filterOptions)
+      setLoading(false)
+      fetchData({ silent: true })
+    } else {
+      fetchData({ silent: false })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [company])
 
   useEffect(() => {
     const fetchColdStorage = async () => {
@@ -196,6 +231,16 @@ export default function InwardDashboard({ params }: Props) {
   const activeFilterCount = [dateFrom, dateTo].filter(Boolean).length +
     [selWarehouses, selVendors, selCustomers, selCategories, selMaterial, selStatus].filter(s => s.size > 0).length
 
+  // Smart search: record-level, multi-term (every word must match somewhere),
+  // across all fields — drives the whole screen (KPIs, tree, totals) and prunes
+  // the tree to matches.
+  const searchTerms = useMemo(() => parseSearchTerms(searchQuery), [searchQuery])
+  const isSearching = searchTerms.length > 0
+  const searchMatch = useMemo(
+    () => makeRecordSearch<InwardRecord>(searchQuery, INWARD_SEARCH_FIELDS),
+    [searchQuery],
+  )
+
   const filtered = useMemo(() => {
     return allRecords.filter(r => {
       if (dateFrom && r.entry_date < dateFrom) return false
@@ -206,9 +251,10 @@ export default function InwardDashboard({ params }: Props) {
       if (selCategories.size > 0 && !selCategories.has(r.item_category)) return false
       if (selMaterial.size > 0 && !selMaterial.has(r.material_type)) return false
       if (selStatus.size > 0 && !selStatus.has(r.status)) return false
+      if (!searchMatch(r)) return false
       return true
     })
-  }, [allRecords, dateFrom, dateTo, selWarehouses, selVendors, selCustomers, selCategories, selMaterial, selStatus])
+  }, [allRecords, dateFrom, dateTo, selWarehouses, selVendors, selCustomers, selCategories, selMaterial, selStatus, searchMatch])
 
   // ── Cascading filter options (only show options available in current filtered set) ──
   const cascadedOpts = useMemo(() => {
@@ -243,21 +289,32 @@ export default function InwardDashboard({ params }: Props) {
 
   // ── KPIs (computed from filtered) ──
   const kpis = useMemo(() => {
-    const txns = new Set(filtered.map(r => r.transaction_no))
-    const totalNet = filtered.reduce((s, r) => s + (r.net_weight || 0), 0)
-    const totalGross = filtered.reduce((s, r) => s + (r.total_weight || 0), 0)
-    const totalValue = filtered.reduce((s, r) => s + (r.total_amount || 0), 0)
+    // Item 3: one tested split feeds both the headline totals (ALL inwards) and the non-destructive
+    // Stock Inward vs Pending Approval breakdown — nothing is filtered out. stock_* + pending_* === all.
+    const split = inwardStatusSplit(filtered)
     const vendors = new Set(filtered.map(r => r.vendor).filter(Boolean))
     const items = new Set(filtered.map(r => r.item_description).filter(Boolean))
-    const pending = new Set(filtered.filter(r => r.status === "pending").map(r => r.transaction_no))
+
+    // total_weight keeps the existing "net, else gross" convention; the breakdown uses the same
+    // basis so the pending/stock weights reconcile exactly to the headline.
+    const useNet = split.all.net > 0
+    const headlineWeight = useNet ? split.all.net : split.all.gross
+    const pendingWeight = useNet ? split.pending.net : split.pending.gross
+
     return {
-      total_inwards: txns.size,
+      total_inwards: split.all.count,
       // total_weight kept as the primary (net); total_gross_weight exposes gross alongside.
-      total_weight: totalNet || totalGross,
-      total_net_weight: totalNet,
-      total_gross_weight: totalGross,
-      total_value: totalValue,
-      unique_vendors: vendors.size, unique_items: items.size, pending_count: pending.size,
+      total_weight: headlineWeight,
+      total_net_weight: split.all.net,
+      total_gross_weight: split.all.gross,
+      total_value: split.all.value,
+      unique_vendors: vendors.size, unique_items: items.size, pending_count: split.pending.count,
+      // Breakdown (stock_* + pending_* === headline) — pending entries remain counted above.
+      pending_weight: pendingWeight,
+      pending_value: split.pending.value,
+      stock_weight: headlineWeight - pendingWeight,
+      stock_value: split.all.value - split.pending.value,
+      stock_count: split.stock.count,
     }
   }, [filtered])
 
@@ -360,15 +417,8 @@ export default function InwardDashboard({ params }: Props) {
       }
     })
 
-    // Apply search — filter L1 groups by search query across group_label, children labels, item names
-    const sq = searchQuery.toLowerCase().trim()
-    const searched = sq ? data.filter(l1 =>
-      l1.group_label.toLowerCase().includes(sq) ||
-      l1.children.some(l2 => l2.sub_label.toLowerCase().includes(sq) ||
-        l2.children.some(l3 => l3.item_description.toLowerCase().includes(sq)))
-    ) : data
-
-    // Apply sort
+    // Search is applied at the record level (it already pruned `filtered`, so it
+    // drives KPIs + the tree); here we only sort the L1 groups.
     const sortFn = (a: typeof data[0], b: typeof data[0]) => {
       switch (sortBy) {
         case "value": return b.total_value - a.total_value
@@ -379,8 +429,8 @@ export default function InwardDashboard({ params }: Props) {
       }
     }
 
-    return [...searched].sort(sortFn)
-  }, [filtered, groupBy, searchQuery, sortBy])
+    return [...data].sort(sortFn)
+  }, [filtered, groupBy, sortBy])
 
   // Expand/collapse
   const toggle = (k: string) => setExpanded(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n })
@@ -390,6 +440,23 @@ export default function InwardDashboard({ params }: Props) {
     summary.forEach(l1 => { keys.add(l1.group_label); l1.children.forEach(l2 => keys.add(l1.group_label + "|||" + l2.sub_label)) })
     setExpanded(keys); setAllExpanded(true)
   }
+
+  // While searching, auto-expand down to item rows so matches are revealed
+  // inline; the user's manual expansion is preserved for when search clears.
+  const searchExpandKeys = useMemo(() => {
+    if (!isSearching) return null
+    const keys = new Set<string>()
+    summary.forEach(l1 => {
+      keys.add(l1.group_label)
+      l1.children.forEach(l2 => {
+        const k2 = l1.group_label + "|||" + l2.sub_label
+        keys.add(k2)
+        l2.children.forEach(l3 => keys.add(k2 + "|||" + l3.item_description))
+      })
+    })
+    return keys
+  }, [isSearching, summary])
+  const effExpanded = searchExpandKeys ?? expanded
 
   // Popups
   const openItem = async (item: string) => {
@@ -473,8 +540,8 @@ export default function InwardDashboard({ params }: Props) {
             </div>
           </div>
           <div className="flex items-center gap-1.5 flex-wrap">
-            <Button variant="outline" size="sm" className="h-8 gap-1 text-xs" onClick={() => { fetchData() }}>
-              <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} /><span className="hidden sm:inline">Refresh</span>
+            <Button variant="outline" size="sm" className="h-8 gap-1 text-xs" onClick={() => fetchData({ silent: true })}>
+              <RefreshCw className={cn("h-3.5 w-3.5", (loading || refreshing) && "animate-spin")} /><span className="hidden sm:inline">Refresh</span>
             </Button>
             <Button variant="outline" size="sm" className="h-8 gap-1 text-xs" onClick={handleCopy}>
               <Copy className="h-3.5 w-3.5" /><span className="hidden sm:inline">{copied ? "Copied!" : "Copy"}</span>
@@ -623,14 +690,34 @@ export default function InwardDashboard({ params }: Props) {
                     : "")
                 }
                 color="bg-emerald-100 text-emerald-600 dark:bg-emerald-900/40 dark:text-emerald-400"
+                sub={kpis.pending_weight > 0
+                  ? <span className="text-amber-700 dark:text-amber-400">of which {fmtN(Math.round(kpis.pending_weight))} Kgs pending approval</span>
+                  : <span className="text-emerald-700 dark:text-emerald-400">all stock inward</span>}
               />
             )}
             {(viewMode === "value" || viewMode === "both") && (
-              <KPI icon={<ShoppingCart className="h-5 w-5" />} label="Total Value" value={fmtV(kpis.total_value)} color="bg-violet-100 text-violet-600 dark:bg-violet-900/40 dark:text-violet-400" />
+              <KPI
+                icon={<ShoppingCart className="h-5 w-5" />}
+                label="Total Value"
+                value={fmtV(kpis.total_value)}
+                color="bg-violet-100 text-violet-600 dark:bg-violet-900/40 dark:text-violet-400"
+                sub={kpis.pending_value > 0
+                  ? <span className="text-amber-700 dark:text-amber-400">of which {fmtV(kpis.pending_value)} pending approval</span>
+                  : <span className="text-emerald-700 dark:text-emerald-400">all stock inward</span>}
+              />
             )}
             <KPI icon={<Users className="h-5 w-5" />} label="Vendors" value={fmtN(kpis.unique_vendors)} color="bg-cyan-100 text-cyan-600 dark:bg-cyan-900/40 dark:text-cyan-400" />
             <KPI icon={<Package className="h-5 w-5" />} label="Items / SKUs" value={fmtN(kpis.unique_items)} color="bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400" />
-            <KPI icon={<AlertTriangle className="h-5 w-5" />} label="Pending" value={fmtN(kpis.pending_count)} amber={kpis.pending_count > 0} color="bg-amber-100 text-amber-600 dark:bg-amber-900/40 dark:text-amber-400" />
+            <KPI
+              icon={<AlertTriangle className="h-5 w-5" />}
+              label="Pending Approval"
+              value={fmtN(kpis.pending_count)}
+              amber={kpis.pending_count > 0}
+              color="bg-amber-100 text-amber-600 dark:bg-amber-900/40 dark:text-amber-400"
+              sub={kpis.pending_count > 0
+                ? <span className="text-amber-700 dark:text-amber-400">{fmtN(Math.round(kpis.pending_weight))} Kgs · {fmtV(kpis.pending_value)}</span>
+                : <span className="text-emerald-700 dark:text-emerald-400">{fmtN(kpis.stock_count)} stock inward</span>}
+            />
           </div>
         )}
 
@@ -833,7 +920,7 @@ export default function InwardDashboard({ params }: Props) {
                 </thead>
                 <tbody>
                   {summary.map(l1 => {
-                    const k1 = l1.group_label; const open1 = expanded.has(k1)
+                    const k1 = l1.group_label; const open1 = effExpanded.has(k1)
                     return (<React.Fragment key={k1}>
                       <tr className="border-b cursor-pointer hover:opacity-90 transition-colors bg-[#0f172a] text-white font-semibold" onClick={() => toggle(k1)}>
                         <td className="px-3 py-2.5 pl-3">
@@ -850,7 +937,7 @@ export default function InwardDashboard({ params }: Props) {
                         <td className="text-right px-3 py-2.5 tabular-nums">{l1.sku_count}</td>
                       </tr>
                       {open1 && l1.children.map(l2 => {
-                        const k2 = k1 + "|||" + l2.sub_label; const open2 = expanded.has(k2)
+                        const k2 = k1 + "|||" + l2.sub_label; const open2 = effExpanded.has(k2)
                         return (<React.Fragment key={k2}>
                           <tr className="border-b cursor-pointer hover:bg-slate-200/50 transition-colors bg-slate-100 dark:bg-slate-800 font-medium border-l-[3px] border-l-teal-500" onClick={() => toggle(k2)}>
                             <td className="px-3 py-2 pl-8">
@@ -863,7 +950,7 @@ export default function InwardDashboard({ params }: Props) {
                             <td className="text-right px-3 py-2 tabular-nums">{l2.sku_count}</td>
                           </tr>
                           {open2 && l2.children.map(l3 => {
-                            const k3 = k2 + "|||" + l3.item_description; const open3 = expanded.has(k3)
+                            const k3 = k2 + "|||" + l3.item_description; const open3 = effExpanded.has(k3)
                             return (<React.Fragment key={k3}>
                               <tr className="border-b cursor-pointer hover:bg-slate-100/80 transition-colors bg-slate-50 dark:bg-slate-800/50" onClick={() => toggle(k3)}>
                                 <td className="px-3 py-2 pl-14">
@@ -886,9 +973,10 @@ export default function InwardDashboard({ params }: Props) {
                                 <tr key={`${tx.transaction_no}-${i}`} className="border-b text-xs bg-white dark:bg-slate-900/80 text-slate-600 dark:text-slate-400">
                                   <td className="px-3 py-1.5 pl-20">
                                     <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+                                      <StatusChip status={tx.status} className="flex-shrink-0" />
                                       <HoverCard openDelay={300} closeDelay={150}>
                                         <HoverCardTrigger asChild>
-                                          <span className="font-medium text-teal-600 cursor-default hover:underline">{tx.transaction_no}</span>
+                                          <Link href={`/${company}/inward/${tx.transaction_no}`} className="font-medium text-teal-600 cursor-pointer hover:underline" title="Open transaction entry">{tx.transaction_no}</Link>
                                         </HoverCardTrigger>
                                         <HoverCardContent className="w-80 p-3" align="start">
                                           <InwardPeekCard tx={tx} company={company} />
@@ -898,8 +986,6 @@ export default function InwardDashboard({ params }: Props) {
                                       {tx.vendor && <span className="cursor-pointer text-teal-600 hover:underline" onClick={() => openVendor(tx.vendor)}>{tx.vendor}</span>}
                                       {tx.warehouse && <span className="text-muted-foreground">{getDisplayWarehouseName(tx.warehouse)}</span>}
                                       {tx.lot_number && <span className="text-muted-foreground">Lot: {tx.lot_number}</span>}
-                                      <span className={cn("text-[10px] px-1 py-0.5 rounded-full",
-                                        tx.status === "approved" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700")}>{tx.status}</span>
                                     </div>
                                   </td>
                                   <td />
@@ -1048,10 +1134,7 @@ function InwardPeekCard({ tx, company }: { tx: InwardRecord; company: string }) 
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
         <span className="font-semibold text-sm text-teal-600">{tx.transaction_no}</span>
-        <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full font-medium",
-          tx.status === "approved" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700")}>
-          {tx.status}
-        </span>
+        <StatusChip status={tx.status} />
       </div>
       <div className="text-xs text-muted-foreground">
         {tx.entry_date && format(new Date(tx.entry_date), "dd MMM yyyy")}
@@ -1079,7 +1162,7 @@ function InwardPeekCard({ tx, company }: { tx: InwardRecord; company: string }) 
   )
 }
 
-function KPI({ icon, label, value, amber, color }: { icon: React.ReactNode; label: string; value: string; amber?: boolean; color?: string }) {
+function KPI({ icon, label, value, amber, color, sub }: { icon: React.ReactNode; label: string; value: string; amber?: boolean; color?: string; sub?: React.ReactNode }) {
   return (
     <Card className={cn("overflow-hidden transition-shadow hover:shadow-md", amber && "border-amber-300 bg-amber-50/50 dark:bg-amber-950/20")}>
       <CardContent className="p-4">
@@ -1088,6 +1171,7 @@ function KPI({ icon, label, value, amber, color }: { icon: React.ReactNode; labe
         </div>
         <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">{label}</p>
         <p className={cn("text-xl font-bold tabular-nums mt-1 leading-tight", amber && "text-amber-700 dark:text-amber-400")}>{value}</p>
+        {sub && <div className="mt-1 text-[10px] leading-tight">{sub}</div>}
       </CardContent>
     </Card>
   )

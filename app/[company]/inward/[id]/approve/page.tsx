@@ -12,6 +12,8 @@ import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
+import { computeArticleAggregatesFromBoxes } from "@/lib/inward/aggregates"
+import { boxLabelQrPayload } from "@/lib/inward/qr"
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader,
@@ -121,6 +123,7 @@ export default function ApprovePage({ params }: ApprovePageProps) {
   const [bulkAddQty, setBulkAddQty] = useState("")
   const [bulkAddNetWeight, setBulkAddNetWeight] = useState("")
   const [bulkAddGrossWeight, setBulkAddGrossWeight] = useState("")
+  const [addingBulkBoxes, setAddingBulkBoxes] = useState(false)
 
   // Box delete confirmation
   const [deleteBoxIdx, setDeleteBoxIdx] = useState<number | null>(null)
@@ -312,24 +315,11 @@ export default function ApprovePage({ params }: ApprovePageProps) {
     }
   }
 
-  // Recompute article totals from its boxes
+  // Recompute article totals from its boxes (shared, tested helper — see lib/inward/aggregates.ts)
   const recomputeArticleFromBoxes = (boxes: BoxForm[], articleDesc: string) => {
-    const articleBoxes = boxes.filter((b) => b.article_description === articleDesc)
-    const totalNet = articleBoxes.reduce((sum, b) => sum + (parseFloat(b.net_weight) || 0), 0)
-    const totalGross = articleBoxes.reduce((sum, b) => sum + (parseFloat(b.gross_weight) || 0), 0)
-    const boxCount = articleBoxes.length
-
+    const agg = computeArticleAggregatesFromBoxes(boxes, articleDesc)
     setArticleForms((prev) =>
-      prev.map((a) =>
-        a.item_description === articleDesc
-          ? {
-              ...a,
-              quantity_units: String(boxCount),
-              net_weight: totalNet > 0 ? String(parseFloat(totalNet.toFixed(3))) : "",
-              total_weight: totalGross > 0 ? String(parseFloat(totalGross.toFixed(3))) : "",
-            }
-          : a
-      )
+      prev.map((a) => (a.item_description === articleDesc ? { ...a, ...agg } : a))
     )
   }
 
@@ -426,7 +416,123 @@ export default function ApprovePage({ params }: ApprovePageProps) {
     recomputeArticleFromBoxes(newBoxes, articleDescription)
   }
 
-  const addBulkBoxes = (articleDescription: string) => {
+  // Item 2: batch-print every just-added box in ONE print dialog (mirrors handlePrintBox's 4x2in
+  // label + the same { tx, bi } QR payload, so downstream scanners are unchanged).
+  const printBulkLabels = async (
+    boxes: Array<{
+      box_id: string
+      box_number: number
+      article_description: string
+      net_weight?: string
+      gross_weight?: string
+      lot_number?: string
+      count?: string
+    }>,
+  ) => {
+    if (!data || boxes.length === 0) return
+    const txn = data.transaction
+
+    const formatDate = (d: string) => {
+      if (!d) return ""
+      try {
+        return new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "2-digit" })
+      } catch { return "" }
+    }
+
+    const qrCodes = await Promise.all(
+      boxes.map((box) =>
+        QRCode.toDataURL(boxLabelQrPayload(txn.transaction_no, box.box_id), {
+          width: 170,
+          margin: 1,
+          errorCorrectionLevel: "M",
+        })
+      )
+    )
+
+    const labelsHtml = boxes.map((box, i) => {
+      const article = articleForms.find((a) => a.item_description === box.article_description)
+      return `
+        <div class="label">
+          <div class="qr"><img src="${qrCodes[i]}" /></div>
+          <div class="info">
+            <div>
+              <div class="company">${company}</div>
+              <div class="txn">${txn.transaction_no}</div>
+              <div class="boxid">ID: ${box.box_id}</div>
+            </div>
+            <div class="item">${article?.item_description || box.article_description}</div>
+            <div>
+              <div class="detail"><b>Box #${box.box_number}</b> &nbsp; Net: ${box.net_weight || "—"}kg &nbsp; Gross: ${box.gross_weight || "—"}kg</div>
+              ${box.count ? `<div class="detail">Count: ${box.count}</div>` : ""}
+              <div class="detail">Entry: ${formatDate(txn.entry_date)}</div>
+              ${article?.expiry_date ? `<div class="detail exp">Exp: ${formatDate(article.expiry_date)}</div>` : ""}
+            </div>
+            <div class="lot">${(box.lot_number || article?.lot_number || "").substring(0, 20)}${txn.customer_party_name ? ` · ${txn.customer_party_name}` : ""}</div>
+          </div>
+        </div>
+      `
+    }).join("\n")
+
+    const iframe = document.createElement("iframe")
+    iframe.style.position = "fixed"
+    iframe.style.left = "-9999px"
+    iframe.style.top = "-9999px"
+    iframe.style.width = "0"
+    iframe.style.height = "0"
+    document.body.appendChild(iframe)
+
+    const doc = iframe.contentWindow?.document
+    if (!doc) return
+
+    doc.open()
+    doc.write(`<!DOCTYPE html><html><head><title>Bulk Labels</title><style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { background: white; }
+      @page { size: 4in 2in; margin: 0; padding: 0; }
+      @media print {
+        html, body { background: white; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        * { visibility: visible; }
+      }
+      .label { width: 4in; height: 2in; background: white; border: 1px solid #000; display: flex; font-family: Arial, sans-serif; page-break-after: always; page-break-inside: avoid; }
+      .label:last-child { page-break-after: auto; }
+      .qr { width: 2in; height: 2in; display: flex; align-items: center; justify-content: center; padding: 0.1in; }
+      .qr img { width: 1.7in; height: 1.7in; }
+      .info { width: 2in; height: 2in; padding: 0.08in; font-size: 8pt; line-height: 1.2; display: flex; flex-direction: column; justify-content: space-between; }
+      .company { font-weight: bold; font-size: 9pt; }
+      .txn { font-family: monospace; font-size: 7pt; }
+      .boxid { font-family: monospace; font-size: 6.5pt; color: #555; }
+      .item { font-weight: bold; font-size: 7.5pt; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+      .detail { font-size: 7pt; }
+      .exp { color: red; }
+      .lot { font-family: monospace; border-top: 1px solid #ccc; padding-top: 2px; font-size: 6.5pt; }
+    </style></head><body>
+      ${labelsHtml}
+      <script>
+        window.onafterprint = function() { window.parent.postMessage('print-complete', '*'); };
+        window.onload = function() {
+          setTimeout(function() { window.print(); }, 400);
+        };
+      </script>
+    </body></html>`)
+    doc.close()
+
+    const cleanup = (e: MessageEvent) => {
+      if (e.data === "print-complete") {
+        window.removeEventListener("message", cleanup)
+        if (document.body.contains(iframe)) document.body.removeChild(iframe)
+      }
+    }
+    window.addEventListener("message", cleanup)
+
+    setTimeout(() => {
+      if (document.body.contains(iframe)) {
+        document.body.removeChild(iframe)
+        window.removeEventListener("message", cleanup)
+      }
+    }, 30000)
+  }
+
+  const addBulkBoxes = async (articleDescription: string) => {
     const qty = parseInt(bulkAddQty) || 0
     if (qty < 1) return
 
@@ -435,36 +541,73 @@ export default function ApprovePage({ params }: ApprovePageProps) {
     const startNum = existing.length + 1
     const carton = parseFloat(parentArticle?.carton_weight || "") || 0
 
-    const newBoxes: BoxForm[] = []
-    for (let i = 0; i < qty; i++) {
-      const grossVal = bulkAddGrossWeight
-      let netVal = bulkAddNetWeight
-      // Auto-calc net from gross - carton if carton is set and no net provided
-      if (!netVal && grossVal && carton > 0) {
-        const net = Math.max(0, (parseFloat(grossVal) || 0) - carton)
-        netVal = String(parseFloat(net.toFixed(3)))
+    setAddingBulkBoxes(true)
+    try {
+      // Build the drafts locally
+      const drafts: BoxForm[] = []
+      for (let i = 0; i < qty; i++) {
+        const grossVal = bulkAddGrossWeight
+        let netVal = bulkAddNetWeight
+        // Auto-calc net from gross - carton if carton is set and no net provided
+        if (!netVal && grossVal && carton > 0) {
+          const net = Math.max(0, (parseFloat(grossVal) || 0) - carton)
+          netVal = String(parseFloat(net.toFixed(3)))
+        }
+        drafts.push({
+          article_description: articleDescription,
+          box_number: startNum + i,
+          net_weight: netVal,
+          gross_weight: grossVal,
+          lot_number: parentArticle?.lot_number || "",
+          count: "",
+          box_id: undefined,
+          is_printed: false,
+        })
       }
-      newBoxes.push({
-        article_description: articleDescription,
-        box_number: startNum + i,
-        net_weight: netVal,
-        gross_weight: grossVal,
-        lot_number: parentArticle?.lot_number || "",
-        count: "",
-        box_id: undefined,
-        is_printed: false,
-      })
+
+      // Persist each box so it gets a box_id (the QR needs it; the backend also recomputes the
+      // parent article's aggregates on each upsert — Item 1A).
+      const persisted = await Promise.all(
+        drafts.map((b) =>
+          inwardApiService.upsertBox(company, transactionNo, {
+            article_description: b.article_description,
+            box_number: b.box_number,
+            net_weight: b.net_weight ? parseFloat(b.net_weight) : undefined,
+            gross_weight: b.gross_weight ? parseFloat(b.gross_weight) : undefined,
+            lot_number: b.lot_number || undefined,
+          }).then((res) => ({ ...b, box_id: res.box_id, is_printed: true }))
+        )
+      )
+
+      const updatedBoxes = [...boxForms, ...persisted]
+      setBoxForms(updatedBoxes)
+      recomputeArticleFromBoxes(updatedBoxes, articleDescription)
+
+      // One print dialog for all the just-added labels.
+      await printBulkLabels(
+        persisted
+          .filter((b) => b.box_id)
+          .map((b) => ({
+            box_id: b.box_id as string,
+            box_number: b.box_number,
+            article_description: b.article_description,
+            net_weight: b.net_weight,
+            gross_weight: b.gross_weight,
+            lot_number: b.lot_number,
+            count: b.count,
+          }))
+      )
+
+      // Reset bulk add form
+      setBulkAddArticle(null)
+      setBulkAddQty("")
+      setBulkAddNetWeight("")
+      setBulkAddGrossWeight("")
+    } catch (err) {
+      console.error("Bulk add boxes failed:", err)
+    } finally {
+      setAddingBulkBoxes(false)
     }
-
-    const updatedBoxes = [...boxForms, ...newBoxes]
-    setBoxForms(updatedBoxes)
-    recomputeArticleFromBoxes(updatedBoxes, articleDescription)
-
-    // Reset bulk add form
-    setBulkAddArticle(null)
-    setBulkAddQty("")
-    setBulkAddNetWeight("")
-    setBulkAddGrossWeight("")
   }
 
   const applyLotRanges = (articleDescription: string, ranges: LotRange[]) => {
@@ -1156,10 +1299,14 @@ export default function ApprovePage({ params }: ApprovePageProps) {
                         size="sm"
                         className="h-6 text-xs gap-1"
                         onClick={() => addBulkBoxes(article.item_description)}
-                        disabled={!bulkAddQty || parseInt(bulkAddQty) < 1}
+                        disabled={addingBulkBoxes || !bulkAddQty || parseInt(bulkAddQty) < 1}
                       >
-                        <Plus className="h-3 w-3" />
-                        Add {parseInt(bulkAddQty) || 0} Boxes
+                        {addingBulkBoxes ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Plus className="h-3 w-3" />
+                        )}
+                        {addingBulkBoxes ? "Adding…" : `Add ${parseInt(bulkAddQty) || 0} Boxes`}
                       </Button>
                       <Button
                         variant="ghost"
