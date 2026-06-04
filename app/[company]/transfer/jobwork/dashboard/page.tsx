@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
+import { makeRecordSearch } from "@/lib/search/recordSearch"
 import { useToast } from "@/hooks/use-toast"
 import type { Company } from "@/types/auth"
 import type {
@@ -19,7 +20,7 @@ import type {
 } from "@/types/jobwork"
 import {
   Copy, Download, Send, Loader2, ChevronDown,
-  ChevronRight, X, Filter, ArrowLeft, Package,
+  ChevronRight, X, Filter, ArrowLeft, Package, Search,
   TrendingUp, AlertTriangle, Clock, CheckCircle, BarChart3,
 } from "lucide-react"
 
@@ -159,6 +160,17 @@ export default function JobworkDashboardPage({ params }: Props) {
   const [dateFrom, setDateFrom] = useState("")
   const [dateTo, setDateTo] = useState("")
   const [groupBy, setGroupBy] = useState<GroupByOption>("vendor")
+  // Smart search: record-level, multi-term across JWO id, vendor, item, process,
+  // status and date.
+  const [searchQuery, setSearchQuery] = useState("")
+  const searchFields: (keyof JobworkDetailRow & string)[] = [
+    "jwo_id", "vendor_name", "item_name", "process_type",
+    "jwo_status", "loss_status", "dispatch_date",
+  ]
+  const searchMatch = useMemo(
+    () => makeRecordSearch<JobworkDetailRow>(searchQuery, searchFields),
+    [searchQuery],
+  )
 
   // Expansion state
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
@@ -176,9 +188,10 @@ export default function JobworkDashboardPage({ params }: Props) {
       if (selLoss.size > 0 && !selLoss.has(j.loss_status)) return false
       if (dateFrom && j.dispatch_date < dateFrom) return false
       if (dateTo && j.dispatch_date > dateTo) return false
+      if (!searchMatch(j)) return false
       return true
     })
-  }, [selVendors, selItems, selProcess, selStatus, selLoss, dateFrom, dateTo])
+  }, [jwoRows, selVendors, selItems, selProcess, selStatus, selLoss, dateFrom, dateTo, searchMatch])
 
   // â”€â”€ Cascading: available options based on current filtered data â”€â”€
   const availableVendors = useMemo(() => [...new Set(jwoRows.filter(j => {
@@ -409,6 +422,25 @@ export default function JobworkDashboardPage({ params }: Props) {
                 <X className="h-3 w-3 mr-1" />Clear all
               </Button>
             )}
+          </div>
+
+          {/* Search */}
+          <div>
+            <label className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-1.5 block">Search</label>
+            <div className="relative max-w-sm">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+              <Input
+                placeholder="Search JWO, vendor, item, process, status…"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                className="h-8 pl-8 text-xs"
+              />
+              {searchQuery && (
+                <button onClick={() => setSearchQuery("")} className="absolute right-2 top-1/2 -translate-y-1/2">
+                  <X className="h-3 w-3 text-gray-400 hover:text-gray-600" />
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Date Range */}

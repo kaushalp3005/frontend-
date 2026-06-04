@@ -805,15 +805,13 @@ export default function TransferPage({ params }: TransferPageProps) {
                               if (!res.ok) return { lines: [] }
                               const data = await res.json()
                               const fromColdUnit: string | undefined = data.from_cold_unit || t.from_cold_unit || undefined
-                              // Per-line sourceStorage now comes from the canonical
-                              // source_unit on each box (groupBoxesByItem). Don't
-                              // override with the header aggregate — that would lie
-                              // about which sub-cold a specific lot was picked from.
+                              // Per-lot cold unit (lot_origin_unit) when the server can map it;
+                              // otherwise fall back to the transfer's cold unit (fromColdUnit).
                               const lines = (data.boxes || []).length > 0
-                                ? groupBoxesByItem(data.boxes)
-                                : groupLinesByItem(data.lines || [])
+                                ? groupBoxesByItem(data.boxes, fromColdUnit)
+                                : groupLinesByItem(data.lines || [], fromColdUnit)
                               const meta: HoverMeta[] = []
-                              if (fromColdUnit) meta.push({ label: "Cold Unit", value: fromColdUnit, tone: "success" })
+                              // Cold source shows per-lot (lot_origin_unit); falls back to fromColdUnit so the chip always shows for cold transfers
                               if (data.vehicle_no || data.vehicle_number) meta.push({ label: "Vehicle", value: data.vehicle_no || data.vehicle_number })
                               if (data.driver_name) meta.push({ label: "Driver", value: data.driver_name })
                               if (data.has_variance) meta.push({ label: "Variance", value: "Yes", tone: "warn" })
@@ -898,15 +896,13 @@ export default function TransferPage({ params }: TransferPageProps) {
                                 if (!res.ok) return { lines: [] }
                                 const data = await res.json()
                                 const fromColdUnit: string | undefined = data.from_cold_unit || t.from_cold_unit || undefined
-                                // Per-line sourceStorage now comes from the canonical
-                                // source_unit on each box (groupBoxesByItem). Don't
-                                // override with the header aggregate — that would lie
-                                // about which sub-cold a specific lot was picked from.
+                                // Per-lot cold unit (lot_origin_unit) when the server can map it;
+                                // otherwise fall back to the transfer's cold unit (fromColdUnit).
                                 const lines = (data.boxes || []).length > 0
-                                  ? groupBoxesByItem(data.boxes)
-                                  : groupLinesByItem(data.lines || [])
+                                  ? groupBoxesByItem(data.boxes, fromColdUnit)
+                                  : groupLinesByItem(data.lines || [], fromColdUnit)
                                 const meta: HoverMeta[] = []
-                                if (fromColdUnit) meta.push({ label: "Cold Unit", value: fromColdUnit, tone: "success" })
+                                // Cold source shows per-lot (lot_origin_unit); falls back to fromColdUnit so the chip always shows for cold transfers
                                 if (data.vehicle_no || data.vehicle_number) meta.push({ label: "Vehicle", value: data.vehicle_no || data.vehicle_number })
                                 if (data.driver_name) meta.push({ label: "Driver", value: data.driver_name })
                                 return { lines, meta }
@@ -1531,15 +1527,13 @@ export default function TransferPage({ params }: TransferPageProps) {
                               if (!res.ok) return { lines: [] }
                               const data = await res.json()
                               const fromColdUnit: string | undefined = data.from_cold_unit || t.from_cold_unit || undefined
-                              // Per-line sourceStorage now comes from the canonical
-                              // source_unit on each box (groupBoxesByItem). Don't
-                              // override with the header aggregate — that would lie
-                              // about which sub-cold a specific lot was picked from.
+                              // Per-lot cold unit (lot_origin_unit) when the server can map it;
+                              // otherwise fall back to the transfer's cold unit (fromColdUnit).
                               const lines = (data.boxes || []).length > 0
-                                ? groupBoxesByItem(data.boxes)
-                                : groupLinesByItem(data.lines || [])
+                                ? groupBoxesByItem(data.boxes, fromColdUnit)
+                                : groupLinesByItem(data.lines || [], fromColdUnit)
                               const meta: HoverMeta[] = []
-                              if (fromColdUnit) meta.push({ label: "Cold Unit", value: fromColdUnit, tone: "success" })
+                              // Cold source shows per-lot (lot_origin_unit); falls back to fromColdUnit so the chip always shows for cold transfers
                               if (data.vehicle_no || data.vehicle_number) meta.push({ label: "Vehicle", value: data.vehicle_no || data.vehicle_number })
                               if (data.driver_name) meta.push({ label: "Driver", value: data.driver_name })
                               if (data.has_variance) meta.push({ label: "Variance", value: "Yes", tone: "warn" })
@@ -1609,15 +1603,13 @@ export default function TransferPage({ params }: TransferPageProps) {
                               if (!res.ok) return { lines: [] }
                               const data = await res.json()
                               const fromColdUnit: string | undefined = data.from_cold_unit || t.from_cold_unit || undefined
-                              // Per-line sourceStorage now comes from the canonical
-                              // source_unit on each box (groupBoxesByItem). Don't
-                              // override with the header aggregate — that would lie
-                              // about which sub-cold a specific lot was picked from.
+                              // Per-lot cold unit (lot_origin_unit) when the server can map it;
+                              // otherwise fall back to the transfer's cold unit (fromColdUnit).
                               const lines = (data.boxes || []).length > 0
-                                ? groupBoxesByItem(data.boxes)
-                                : groupLinesByItem(data.lines || [])
+                                ? groupBoxesByItem(data.boxes, fromColdUnit)
+                                : groupLinesByItem(data.lines || [], fromColdUnit)
                               const meta: HoverMeta[] = []
-                              if (fromColdUnit) meta.push({ label: "Cold Unit", value: fromColdUnit, tone: "success" })
+                              // Cold source shows per-lot (lot_origin_unit); falls back to fromColdUnit so the chip always shows for cold transfers
                               if (data.vehicle_no || data.vehicle_number) meta.push({ label: "Vehicle", value: data.vehicle_no || data.vehicle_number })
                               if (data.driver_name) meta.push({ label: "Driver", value: data.driver_name })
                               if (data.has_variance) meta.push({ label: "Variance", value: "Yes", tone: "warn" })

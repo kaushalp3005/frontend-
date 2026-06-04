@@ -9,10 +9,11 @@ import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import {
   Loader2, Package, Search, Camera, ArrowLeft, ArrowRight, Inbox,
   CheckCircle, ClipboardCheck, CheckCheck, Hash, FileText,
-  AlertTriangle, X, Building2, Snowflake, Printer, ChevronDown
+  AlertTriangle, X, Building2, Snowflake, Printer, ChevronDown, Pencil
 } from "lucide-react"
 import { toast } from "sonner"
 import { InterunitApiService } from "@/lib/interunitApiService"
@@ -22,6 +23,7 @@ import { useAuthStore } from "@/lib/stores/auth"
 import QRCode from "qrcode"
 import HighPerformanceQRScanner from "@/components/transfer/high-performance-qr-scanner"
 import type { Company } from "@/types/auth"
+import { LotRangeDedicator, type LotRange } from "@/components/modules/inward/LotRangeDedicator"
 
 interface TransferInPageProps {
   params: {
@@ -57,6 +59,12 @@ export default function TransferInPage({ params }: TransferInPageProps) {
 
   // ── Pending transfer-in state (real-time acknowledge) ──
   const [pendingHeaderId, setPendingHeaderId] = useState<number | null>(null)
+  const [reopening, setReopening] = useState(false)
+  // Step 4 — close-with-shortage (partial receipt that won't complete)
+  const [shortageDialogOpen, setShortageDialogOpen] = useState(false)
+  const [shortageReason, setShortageReason] = useState("")
+  const [closingShortage, setClosingShortage] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
   const [pendingGrnNumber, setPendingGrnNumber] = useState<string>("")
   const [inwardTransactionNo, setInwardTransactionNo] = useState<string | null>(null)
   const [generatingQRs, setGeneratingQRs] = useState(false)
@@ -102,9 +110,22 @@ export default function TransferInPage({ params }: TransferInPageProps) {
     return ci?.lot_no?.trim() || null
   }
 
+  // Lot Dedicator: assign a lot number to a range of box numbers. The override
+  // takes precedence over the per-item cold lot at the per-box acknowledge sites.
+  const [boxLotRanges, setBoxLotRanges] = useState<LotRange[]>([])
+  const dedicatedLot = (b: any): string | null => {
+    const n = Number(b?.box_number)
+    if (!Number.isFinite(n)) return null
+    const r = boxLotRanges.find((x) => n >= x.from && n <= x.to)
+    return r ? r.lot : null
+  }
+
   // ── Authorized users for acknowledge / print QR / issue actions ──
   const AUTHORIZED_ACKNOWLEDGE_USERS = ["yash@candorfoods.in", "b.hrithik@candorfoods.in", "sunil.jasoria@candorfoods.in"]
   const isAuthorizedUser = AUTHORIZED_ACKNOWLEDGE_USERS.includes(user?.email?.toLowerCase() || "")
+  // Only this user may re-open a Received transfer-in back to Pending (to correct
+  // a lot number / raise a box issue). Enforced again server-side.
+  const canReopenReceived = (user?.email?.toLowerCase() || "") === "b.hrithik@candorfoods.in"
 
   // ── Cold storage check (moved above `lines` so cold-storage branch can swap source) ──
   const COLD_STORAGE_WAREHOUSES = ["Cold Storage", "Rishi", "Savla D-39", "Savla D-514", "Supreme"]
@@ -521,6 +542,30 @@ export default function TransferInPage({ params }: TransferInPageProps) {
 
   const handleSearch = () => loadTransferDetails(transferNumber)
 
+  // Re-open a Received transfer-in: reverses the receipt's stock movement
+  // (server-side, gated to b.hrithik), then reloads so the user can un-acknowledge
+  // a box, correct its lot / raise an issue, and Confirm Receipt again.
+  const handleReopenReceipt = async () => {
+    if (!transferData?.id) return
+    if (typeof window !== "undefined" && !window.confirm(
+      "Re-open this received transfer-in?\n\nStock will be moved back to in-transit so you can un-acknowledge boxes, correct lot numbers / raise issues, then confirm receipt again."
+    )) return
+    setReopening(true)
+    try {
+      const result = await InterunitApiService.reopenTransferIn(transferData.id, user?.email || "")
+      toast.success("Receipt re-opened — un-acknowledge a box to change its lot or raise an issue, then Confirm Receipt again.")
+      const transferNo = transferData.challan_no || transferData.transfer_no || transferNumber
+      await loadTransferDetails(transferNo)
+      // Adopt the existing (re-opened) Pending transfer-in header so the screen
+      // edits it in place instead of creating a duplicate header.
+      if (result?.id) { setPendingHeaderId(result.id); setPendingGrnNumber(result.grn_number || null) }
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to re-open receipt")
+    } finally {
+      setReopening(false)
+    }
+  }
+
   // ── Resume from URL query param ──
   const resumeTransferNo = searchParams.get("resume")
   const resumeHandledRef = useRef<string | null>(null)
@@ -590,7 +635,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
         transfer_out_box_id: box.id,
         article: box.article ? String(box.article) : null,
         batch_number: box.batch_number ? String(box.batch_number) : null,
-        lot_number: box.lot_number ? String(box.lot_number) : null,
+        lot_number: dedicatedLot(box) || (box.lot_number ? String(box.lot_number) : null),
         transaction_no: box.transaction_no ? String(box.transaction_no) : null,
         net_weight: box.net_weight ? Number(box.net_weight) : null,
         gross_weight: box.gross_weight ? Number(box.gross_weight) : null,
@@ -687,7 +732,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
         transfer_out_box_id: b.id,
         article: b.article ? String(b.article) : null,
         batch_number: b.batch_number ? String(b.batch_number) : null,
-        lot_number: b.lot_number ? String(b.lot_number) : null,
+        lot_number: dedicatedLot(b) || (b.lot_number ? String(b.lot_number) : null),
         transaction_no: b.transaction_no ? String(b.transaction_no) : null,
         net_weight: b.net_weight ? Number(b.net_weight) : null,
         gross_weight: b.gross_weight ? Number(b.gross_weight) : null,
@@ -718,14 +763,14 @@ export default function TransferInPage({ params }: TransferInPageProps) {
       const boxRef = lineBoxDataMap[line.id] || {}
       const scanned = scannedRef || scannedLineData[lineIndex] || {}
       const articleName = line.item_desc_raw || line.item_description || ""
-      const sentBoxId = scanned.box_id || line.box_id || boxRef.box_id || `ART-${lineIndex + 1}`
+      const sentBoxId = scanned.box_id || generatedBoxIds[lineIndex] || line.box_id || boxRef.box_id || `ART-${lineIndex + 1}`
       const isQrScan = !!scanned.box_id
       const resp = await InterunitApiService.acknowledgeBox(headerId, {
         box_id: sentBoxId,
         article: articleName,
         batch_number: line.batch_number || null,
-        lot_number: getColdLotNo(articleName) || line.lot_number || null,
-        transaction_no: scanned.transaction_no || line.transaction_no || boxRef.transaction_no || null,
+        lot_number: dedicatedLot(line?._box_origin) || getColdLotNo(articleName) || line.lot_number || null,
+        transaction_no: scanned.transaction_no || inwardTransactionNo || line.transaction_no || boxRef.transaction_no || null,
         net_weight: w.net_weight ? Number(w.net_weight) : (line.net_weight ? Number(line.net_weight) : null),
         gross_weight: w.total_weight ? Number(w.total_weight) : (line.total_weight ? Number(line.total_weight) : null),
         is_matched: true,
@@ -854,11 +899,11 @@ export default function TransferInPage({ params }: TransferInPageProps) {
         const targetBoxRef = lineBoxDataMap[targetLine.id] || {}
         const targetArticle = targetLine.item_desc_raw || targetLine.item_description || ""
         await InterunitApiService.acknowledgeBox(headerId, {
-          box_id: targetLine.box_id || targetBoxRef.box_id || `ART-${idx + 1}`,
+          box_id: generatedBoxIds[idx] || targetLine.box_id || targetBoxRef.box_id || `ART-${idx + 1}`,
           article: targetArticle,
           batch_number: targetLine.batch_number || null,
-          lot_number: getColdLotNo(targetArticle) || targetLine.lot_number || null,
-          transaction_no: targetLine.transaction_no || targetBoxRef.transaction_no || null,
+          lot_number: dedicatedLot(targetLine?._box_origin) || getColdLotNo(targetArticle) || targetLine.lot_number || null,
+          transaction_no: inwardTransactionNo || targetLine.transaction_no || targetBoxRef.transaction_no || null,
           net_weight: issueNetWt ? Number(issueNetWt) : (targetLine.net_weight ? Number(targetLine.net_weight) : null),
           gross_weight: issueTotalWt ? Number(issueTotalWt) : (targetLine.total_weight ? Number(targetLine.total_weight) : null),
           is_matched: false,
@@ -920,11 +965,11 @@ export default function TransferInPage({ params }: TransferInPageProps) {
         const boxRef = lineBoxDataMap[line.id] || {}
         const articleName = line.item_desc_raw || line.item_description || ""
         batchItems.push({
-          box_id: line.box_id || boxRef.box_id || `ART-${i + 1}`,
+          box_id: generatedBoxIds[i] || line.box_id || boxRef.box_id || `ART-${i + 1}`,
           article: articleName,
           batch_number: line.batch_number || null,
-          lot_number: getColdLotNo(articleName) || line.lot_number || null,
-          transaction_no: line.transaction_no || boxRef.transaction_no || null,
+          lot_number: dedicatedLot(line?._box_origin) || getColdLotNo(articleName) || line.lot_number || null,
+          transaction_no: inwardTransactionNo || line.transaction_no || boxRef.transaction_no || null,
           net_weight: w.net_weight ? Number(w.net_weight) : (line.net_weight ? Number(line.net_weight) : null),
           gross_weight: w.total_weight ? Number(w.total_weight) : (line.total_weight ? Number(line.total_weight) : null),
           is_matched: true,
@@ -940,7 +985,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
           transfer_out_box_id: b.id,
           article: b.article ? String(b.article) : null,
           batch_number: b.batch_number ? String(b.batch_number) : null,
-          lot_number: b.lot_number ? String(b.lot_number) : null,
+          lot_number: dedicatedLot(b) || (b.lot_number ? String(b.lot_number) : null),
           transaction_no: b.transaction_no ? String(b.transaction_no) : null,
           net_weight: b.net_weight ? Number(b.net_weight) : null,
           gross_weight: b.gross_weight ? Number(b.gross_weight) : null,
@@ -985,11 +1030,11 @@ export default function TransferInPage({ params }: TransferInPageProps) {
         const boxRef = lineBoxDataMap[line.id] || {}
         const articleName = line.item_desc_raw || line.item_description || ""
         batchBoxes.push({
-          box_id: line.box_id || boxRef.box_id || `ART-${i + 1}`,
+          box_id: generatedBoxIds[i] || line.box_id || boxRef.box_id || `ART-${i + 1}`,
           article: articleName,
           batch_number: line.batch_number || null,
-          lot_number: getColdLotNo(articleName) || line.lot_number || null,
-          transaction_no: line.transaction_no || boxRef.transaction_no || null,
+          lot_number: dedicatedLot(line?._box_origin) || getColdLotNo(articleName) || line.lot_number || null,
+          transaction_no: inwardTransactionNo || line.transaction_no || boxRef.transaction_no || null,
           net_weight: w.net_weight ? Number(w.net_weight) : (line.net_weight ? Number(line.net_weight) : null),
           gross_weight: w.total_weight ? Number(w.total_weight) : (line.total_weight ? Number(line.total_weight) : null),
           is_matched: true,
@@ -1028,7 +1073,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
         transfer_out_box_id: b.id,
         article: b.article ? String(b.article) : null,
         batch_number: b.batch_number ? String(b.batch_number) : null,
-        lot_number: b.lot_number ? String(b.lot_number) : null,
+        lot_number: dedicatedLot(b) || (b.lot_number ? String(b.lot_number) : null),
         transaction_no: b.transaction_no ? String(b.transaction_no) : null,
         net_weight: b.net_weight ? Number(b.net_weight) : null,
         gross_weight: b.gross_weight ? Number(b.gross_weight) : null,
@@ -1193,7 +1238,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
             box_id: generatedBoxIds[lineIndex] || line.box_id || boxRef.box_id || `ART-${lineIndex + 1}`,
             article: articleName,
             batch_number: line.batch_number || null,
-            lot_number: getColdLotNo(articleName) || line.lot_number || null,
+            lot_number: dedicatedLot(line?._box_origin) || getColdLotNo(articleName) || line.lot_number || null,
             transaction_no: inwardTransactionNo || line.transaction_no || boxRef.transaction_no || null,
             net_weight: w.net_weight ? Number(w.net_weight) : (line.net_weight ? Number(line.net_weight) : null),
             gross_weight: w.total_weight ? Number(w.total_weight) : (line.total_weight ? Number(line.total_weight) : null),
@@ -1537,14 +1582,14 @@ export default function TransferInPage({ params }: TransferInPageProps) {
       }
 
       const boxRef = lineBoxDataMap[line.id] || {}
-      const boxId = line.box_id || boxRef.box_id || `ART-${i + 1}`
-      const txNo = line.transaction_no || boxRef.transaction_no || ""
+      const boxId = generatedBoxIds[i] || line.box_id || boxRef.box_id || `ART-${i + 1}`
+      const txNo = inwardTransactionNo || line.transaction_no || boxRef.transaction_no || ""
 
       batchItems.push({
         box_id: boxId,
         article: articleName,
         batch_number: line.batch_number || null,
-        lot_number: getColdLotNo(articleName) || line.lot_number || null,
+        lot_number: dedicatedLot(line?._box_origin) || getColdLotNo(articleName) || line.lot_number || null,
         transaction_no: txNo || null,
         net_weight: netWt,
         gross_weight: calculatedGrossWt,
@@ -1683,7 +1728,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
     } finally {
       setBulkPrinting(false)
     }
-  }, [lines, bulkFromBox, bulkToBox, bulkEmptyCartonWeights, bulkRangeArticles, lineWeights, lineBoxDataMap, linesMatchMap, linesIssueMap, transferData, company])
+  }, [lines, bulkFromBox, bulkToBox, bulkEmptyCartonWeights, bulkRangeArticles, lineWeights, lineBoxDataMap, linesMatchMap, linesIssueMap, transferData, company, generatedBoxIds, inwardTransactionNo])
 
   const handleConfirmReceipt = async () => {
     if (!transferData) return
@@ -1756,11 +1801,11 @@ export default function TransferInPage({ params }: TransferInPageProps) {
           const boxRef = lineBoxDataMap[line.id] || {}
           const articleName = line.item_desc_raw || line.item_description || ""
           syncBatch.push({
-            box_id: line.box_id || boxRef.box_id || `ART-${i + 1}`,
+            box_id: generatedBoxIds[i] || line.box_id || boxRef.box_id || `ART-${i + 1}`,
             article: articleName,
             batch_number: line.batch_number || null,
-            lot_number: getColdLotNo(articleName) || line.lot_number || null,
-            transaction_no: line.transaction_no || boxRef.transaction_no || null,
+            lot_number: dedicatedLot(line?._box_origin) || getColdLotNo(articleName) || line.lot_number || null,
+            transaction_no: inwardTransactionNo || line.transaction_no || boxRef.transaction_no || null,
             net_weight: issue?.net_weight
               ? Number(issue.net_weight)
               : (w.net_weight ? Number(w.net_weight) : (line.net_weight ? Number(line.net_weight) : null)),
@@ -1789,7 +1834,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
             transfer_out_box_id: b.id,
             article: articleName || null,
             batch_number: b.batch_number ? String(b.batch_number) : null,
-            lot_number: coldLot || (b.lot_number ? String(b.lot_number) : null),
+            lot_number: dedicatedLot(b) || coldLot || (b.lot_number ? String(b.lot_number) : null),
             transaction_no: b.transaction_no ? String(b.transaction_no) : null,
             net_weight: b.net_weight ? Number(b.net_weight) : null,
             gross_weight: b.gross_weight ? Number(b.gross_weight) : null,
@@ -1824,7 +1869,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
               transfer_out_box_id: b.id,
               article: articleName || null,
               batch_number: b.batch_number ? String(b.batch_number) : null,
-              lot_number: coldLot || (b.lot_number ? String(b.lot_number) : null),
+              lot_number: dedicatedLot(b) || coldLot || (b.lot_number ? String(b.lot_number) : null),
               transaction_no: b.transaction_no ? String(b.transaction_no) : null,
               net_weight: b.net_weight ? Number(b.net_weight) : null,
               gross_weight: b.gross_weight ? Number(b.gross_weight) : null,
@@ -1841,12 +1886,12 @@ export default function TransferInPage({ params }: TransferInPageProps) {
             const boxRef = lineBoxDataMap[line.id] || {}
             const articleName = line.item_desc_raw || line.item_description || ""
             return {
-              box_id: line.box_id || boxRef.box_id || `ART-${i + 1}`,
+              box_id: generatedBoxIds[i] || line.box_id || boxRef.box_id || `ART-${i + 1}`,
               transfer_out_box_id: null,
               article: articleName,
               batch_number: line.batch_number || null,
-              lot_number: getColdLotNo(articleName) || line.lot_number || null,
-              transaction_no: line.transaction_no || boxRef.transaction_no || null,
+              lot_number: dedicatedLot(line?._box_origin) || getColdLotNo(articleName) || line.lot_number || null,
+              transaction_no: inwardTransactionNo || line.transaction_no || boxRef.transaction_no || null,
               net_weight: w.net_weight ? Number(w.net_weight) : (line.net_weight ? Number(line.net_weight) : null),
               gross_weight: w.total_weight ? Number(w.total_weight) : (line.total_weight ? Number(line.total_weight) : null),
               is_matched: true,
@@ -1862,12 +1907,12 @@ export default function TransferInPage({ params }: TransferInPageProps) {
             const boxRef = lineBoxDataMap[line.id] || {}
             const articleName = line.item_desc_raw || line.item_description || ""
             return {
-              box_id: line.box_id || boxRef.box_id || `ART-${i + 1}`,
+              box_id: generatedBoxIds[i] || line.box_id || boxRef.box_id || `ART-${i + 1}`,
               transfer_out_box_id: null,
               article: articleName,
               batch_number: line.batch_number || null,
-              lot_number: getColdLotNo(articleName) || line.lot_number || null,
-              transaction_no: line.transaction_no || boxRef.transaction_no || null,
+              lot_number: dedicatedLot(line?._box_origin) || getColdLotNo(articleName) || line.lot_number || null,
+              transaction_no: inwardTransactionNo || line.transaction_no || boxRef.transaction_no || null,
               net_weight: w.net_weight ? Number(w.net_weight) : (line.net_weight ? Number(line.net_weight) : null),
               gross_weight: w.total_weight ? Number(w.total_weight) : (line.total_weight ? Number(line.total_weight) : null),
               is_matched: false,
@@ -1914,6 +1959,35 @@ export default function TransferInPage({ params }: TransferInPageProps) {
     }
   }
 
+  // Step 4 — close a partial receipt as a genuine shortage: receive the acknowledged
+  // boxes, write off the unreceived (still in-transit) ones, and mark both headers
+  // Received. Only for boxes that are truly not coming (the bridge invariant otherwise
+  // correctly keeps the transfer Pending).
+  const handleCloseWithShortage = async () => {
+    const headerId = await ensurePendingHeader()
+    if (!headerId) {
+      toast.error("Acknowledge at least one box before closing with a shortage")
+      return
+    }
+    setClosingShortage(true)
+    try {
+      const res = await InterunitApiService.closeTransferInWithShortage(
+        headerId,
+        user?.email || "",
+        shortageReason.trim() || undefined,
+      )
+      const written = res?.written_off ?? res?.shortage ?? Math.max(totalItems - totalMatched, 0)
+      toast.success(`Receipt closed with shortage — ${written} box(es) written off.`)
+      setShortageDialogOpen(false)
+      setShortageReason("")
+      setTimeout(() => router.push(`/${company}/transfer`), 1500)
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to close with shortage")
+    } finally {
+      setClosingShortage(false)
+    }
+  }
+
   return (
     <div className="p-3 sm:p-4 lg:p-6 space-y-4 bg-gray-50 min-h-screen">
       {/* ── Header ── */}
@@ -1933,6 +2007,35 @@ export default function TransferInPage({ params }: TransferInPageProps) {
           </h1>
           <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">Receive incoming stock transfers</p>
         </div>
+        {canReopenReceived && transferData?.status === "Received" && (
+          <Button
+            variant="outline" size="sm"
+            className="h-9 gap-1.5 text-xs border-amber-300 text-amber-700 hover:bg-amber-50 shrink-0"
+            onClick={handleReopenReceipt}
+            disabled={reopening}
+            title="Re-open this received transfer-in to correct a lot number or raise a box issue"
+          >
+            {reopening ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <AlertTriangle className="h-3.5 w-3.5" />}
+            Re-open receipt
+          </Button>
+        )}
+        {canReopenReceived && transferData?.status === "Received" && (
+          <Button
+            variant="outline" size="sm"
+            className="h-9 gap-1.5 text-xs border-teal-300 text-teal-700 hover:bg-teal-50 shrink-0"
+            onClick={() => setEditOpen(true)}
+            title="Edit this received transfer-in (header + box details)"
+          >
+            <Pencil className="h-3.5 w-3.5" /> Edit receipt
+          </Button>
+        )}
+        <EditReceiptDialog
+          open={editOpen}
+          transferOutId={transferData?.id ?? null}
+          userEmail={user?.email || ""}
+          onClose={() => setEditOpen(false)}
+          onSaved={() => loadTransferDetails(transferData?.challan_no || transferData?.transfer_no || transferNumber)}
+        />
       </div>
 
       {/* ── Transfer Number Input ── */}
@@ -1996,6 +2099,20 @@ export default function TransferInPage({ params }: TransferInPageProps) {
           </Card>
 
           {/* ══════ Cold Storage Fields (Savla / Rishi) ══════ */}
+          {isColdStorageTransfer && boxes.length > 0 && (
+            <Card className="border-0 shadow-sm overflow-hidden">
+              <CardHeader className="pb-2 pt-3 px-4 bg-gradient-to-r from-amber-50 to-orange-50 border-b">
+                <CardTitle className="text-sm font-semibold text-gray-800 flex items-center gap-2">
+                  <Hash className="h-4 w-4 text-amber-600" />
+                  Lot Dedicator
+                </CardTitle>
+                <p className="text-xs text-muted-foreground mt-0.5">Assign a lot number to a range of box numbers — overrides the per-item lot for those boxes on acknowledge.</p>
+              </CardHeader>
+              <CardContent className="p-3 sm:p-4">
+                <LotRangeDedicator warehouse={toWarehouse} totalBoxes={boxes.length} onApply={(ranges) => setBoxLotRanges(ranges)} />
+              </CardContent>
+            </Card>
+          )}
           {isColdStorageTransfer && (
             <Card className="border-0 shadow-sm overflow-hidden">
               <CardHeader className="pb-3 bg-gradient-to-r from-blue-50 to-indigo-50 border-b">
@@ -2930,8 +3047,62 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                   </span>
                 )}
               </Button>
+              {pendingHeaderId && totalItems > 0 && totalMatched > 0 && !allMatched && (
+                <Button
+                  variant="outline"
+                  onClick={() => setShortageDialogOpen(true)}
+                  disabled={loading}
+                  className="w-full h-10 mt-2 gap-2 text-xs sm:text-sm border-amber-300 text-amber-700 hover:bg-amber-50"
+                  title="Receive the acknowledged boxes and write off the rest as a shortage"
+                >
+                  <AlertTriangle className="h-4 w-4" />
+                  Close with shortage — write off {totalItems - totalMatched} unreceived
+                </Button>
+              )}
             </CardContent>
           </Card>
+
+          {/* ══════ Close-with-shortage confirm dialog ══════ */}
+          <Dialog open={shortageDialogOpen} onOpenChange={(o) => { if (!closingShortage) setShortageDialogOpen(o) }}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-amber-700">
+                  <AlertTriangle className="h-5 w-5" /> Close with shortage
+                </DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3 text-sm">
+                <p className="text-muted-foreground">
+                  This receives the <span className="font-semibold text-gray-800">{totalMatched}</span> acknowledged item(s)
+                  and <span className="font-semibold text-amber-700">writes off {totalItems - totalMatched}</span> unreceived box(es).
+                  Both the transfer-in and transfer-out are then marked <span className="font-semibold">Received</span>.
+                  Use this only when the missing boxes are genuinely not coming.
+                </p>
+                <div>
+                  <label className="text-xs font-medium text-gray-600">Shortage reason (optional)</label>
+                  <Input
+                    value={shortageReason}
+                    onChange={(e) => setShortageReason(e.target.value)}
+                    placeholder="e.g. damaged in transit, miscount at source"
+                    className="mt-1 h-9"
+                  />
+                </div>
+                <div className="flex justify-end gap-2 pt-1">
+                  <Button variant="outline" size="sm" onClick={() => setShortageDialogOpen(false)} disabled={closingShortage}>
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="bg-amber-600 hover:bg-amber-700 text-white gap-2"
+                    onClick={handleCloseWithShortage}
+                    disabled={closingShortage}
+                  >
+                    {closingShortage ? <Loader2 className="h-4 w-4 animate-spin" /> : <AlertTriangle className="h-4 w-4" />}
+                    Close & write off {totalItems - totalMatched}
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
         </>
       )}
 
@@ -2968,5 +3139,146 @@ export default function TransferInPage({ params }: TransferInPageProps) {
         </div>
       )}
     </div>
+  )
+}
+
+// ── Privileged "Edit Receipt" dialog (gated to b.hrithik server-side) ──
+// Loads the transfer-in (header + boxes) for the transfer-out, lets the fields be
+// edited, and on Save calls the edit endpoint which syncs receipt + source
+// transfer-out boxes + destination cold stock.
+function EditReceiptDialog({ open, transferOutId, userEmail, onClose, onSaved }: {
+  open: boolean
+  transferOutId: number | null
+  userEmail: string
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [hdr, setHdr] = useState<any>(null)
+  const [boxes, setBoxes] = useState<any[]>([])
+
+  useEffect(() => {
+    if (!open || !transferOutId) return
+    let cancelled = false
+    setLoading(true); setHdr(null); setBoxes([])
+    InterunitApiService.getTransferInByTransferOut(transferOutId)
+      .then((res: any) => {
+        if (cancelled) return
+        const h = res?.header
+        if (!h) { toast.error("No transfer-in found to edit"); onClose(); return }
+        setHdr({
+          grn_number: h.grn_number || "",
+          receiving_warehouse: h.receiving_warehouse || "",
+          box_condition: h.box_condition || "",
+          condition_remarks: h.condition_remarks || "",
+          status: h.status,
+        })
+        setBoxes((h.boxes || []).map((b: any) => ({
+          box_id: b.box_id,
+          article: b.article || "",
+          lot_number: b.lot_number || "",
+          net_weight: b.net_weight ?? "",
+          gross_weight: b.gross_weight ?? "",
+        })))
+      })
+      .catch((e: any) => { if (!cancelled) { toast.error(e?.message || "Failed to load receipt"); onClose() } })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [open, transferOutId])
+
+  const setBox = (i: number, field: string, val: string) =>
+    setBoxes((prev) => prev.map((b, idx) => (idx === i ? { ...b, [field]: val } : b)))
+
+  const handleSave = async () => {
+    if (!transferOutId || !hdr) return
+    setSaving(true)
+    try {
+      // Parse a weight input → finite number, or null to mean "leave unchanged".
+      // Guards blank/whitespace/non-numeric (Number(" ")===0 would zero the weight).
+      const num = (v: any): number | null => {
+        const s = String(v ?? "").trim()
+        if (s === "") return null
+        const n = Number(s)
+        return Number.isFinite(n) ? n : null
+      }
+      // Send only changed/non-empty values; the backend COALESCEs nulls to "leave
+      // unchanged", so omitting a field never blanks it.
+      const payload = {
+        grn_number: hdr.grn_number || undefined,
+        receiving_warehouse: hdr.receiving_warehouse || undefined,
+        box_condition: hdr.box_condition || undefined,
+        condition_remarks: hdr.condition_remarks || undefined,
+        boxes: boxes.map((b) => ({
+          box_id: b.box_id,
+          article: b.article || undefined,
+          lot_number: b.lot_number || undefined,
+          net_weight: num(b.net_weight),
+          gross_weight: num(b.gross_weight),
+        })),
+      }
+      await InterunitApiService.editTransferIn(transferOutId, payload, userEmail)
+      toast.success("Receipt updated — synced to source transfer & destination stock.")
+      onSaved()
+      onClose()
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to save edits")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Edit Receipt</DialogTitle>
+        </DialogHeader>
+        {loading ? (
+          <div className="flex items-center justify-center h-32"><Loader2 className="h-6 w-6 animate-spin text-teal-600" /></div>
+        ) : hdr ? (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1"><Label className="text-xs">GRN No</Label><Input value={hdr.grn_number} onChange={(e) => setHdr({ ...hdr, grn_number: e.target.value })} className="h-8 text-xs" /></div>
+              <div className="space-y-1"><Label className="text-xs">Receiving Warehouse</Label><Input value={hdr.receiving_warehouse} onChange={(e) => setHdr({ ...hdr, receiving_warehouse: e.target.value })} className="h-8 text-xs" /></div>
+              <div className="space-y-1"><Label className="text-xs">Box Condition</Label><Input value={hdr.box_condition} onChange={(e) => setHdr({ ...hdr, box_condition: e.target.value })} className="h-8 text-xs" /></div>
+              <div className="space-y-1"><Label className="text-xs">Condition Remarks</Label><Input value={hdr.condition_remarks} onChange={(e) => setHdr({ ...hdr, condition_remarks: e.target.value })} className="h-8 text-xs" /></div>
+            </div>
+            <div className="border rounded-lg overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead><tr className="border-b bg-muted/50">
+                  <th className="text-left px-2 py-1.5 font-medium">Box</th>
+                  <th className="text-left px-2 py-1.5 font-medium">Article</th>
+                  <th className="text-left px-2 py-1.5 font-medium">Lot No</th>
+                  <th className="text-right px-2 py-1.5 font-medium">Net Wt</th>
+                  <th className="text-right px-2 py-1.5 font-medium">Gross Wt</th>
+                </tr></thead>
+                <tbody>
+                  {boxes.map((b, i) => (
+                    <tr key={b.box_id || i} className="border-b last:border-0">
+                      <td className="px-2 py-1 font-mono text-[11px] text-muted-foreground whitespace-nowrap">{b.box_id}</td>
+                      <td className="px-2 py-1"><Input value={b.article} onChange={(e) => setBox(i, "article", e.target.value)} className="h-7 text-xs" /></td>
+                      <td className="px-2 py-1"><Input value={b.lot_number} onChange={(e) => setBox(i, "lot_number", e.target.value)} className="h-7 text-xs" /></td>
+                      <td className="px-2 py-1"><Input type="number" step="any" value={b.net_weight} onChange={(e) => setBox(i, "net_weight", e.target.value)} className="h-7 text-xs text-right" /></td>
+                      <td className="px-2 py-1"><Input type="number" step="any" value={b.gross_weight} onChange={(e) => setBox(i, "gross_weight", e.target.value)} className="h-7 text-xs text-right" /></td>
+                    </tr>
+                  ))}
+                  {boxes.length === 0 && <tr><td colSpan={5} className="px-2 py-6 text-center text-muted-foreground">No boxes on this receipt.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[10px] text-muted-foreground">Saving updates the receipt, the source transfer-out boxes, and the destination cold-storage stock.</p>
+              <div className="flex gap-2 shrink-0">
+                <Button variant="outline" size="sm" onClick={onClose} disabled={saving}>Cancel</Button>
+                <Button size="sm" onClick={handleSave} disabled={saving}>
+                  {saving ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />Saving…</> : "Save changes"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </DialogContent>
+    </Dialog>
   )
 }

@@ -575,8 +575,61 @@ export class InterunitApiService {
     })
   }
 
+  /**
+   * POST /interunit/transfer-in/{headerId}/close-with-shortage — close a PENDING
+   * transfer-in that has a genuine shortage: receive the acknowledged boxes, write
+   * off the unreceived (still In-Transit) boxes, and mark BOTH headers Received with
+   * a shortage note. Use only when the missing boxes are truly not coming — the bridge
+   * invariant otherwise (correctly) keeps the transfer Pending. Returns { shortage,
+   * written_off, ... }.
+   */
+  static async closeTransferInWithShortage(headerId: number, closedBy: string, shortageReason?: string): Promise<any> {
+    const qs = new URLSearchParams()
+    if (closedBy) qs.set('closed_by', closedBy)
+    if (shortageReason) qs.set('shortage_reason', shortageReason)
+    return await fetchJSON(`${API_BASE_URL}/interunit/transfer-in/${headerId}/close-with-shortage?${qs.toString()}`, {
+      method: 'POST'
+    })
+  }
+
   static async getPendingByTransferOut(transferOutId: number): Promise<any> {
     return await fetchJSON(`${API_BASE_URL}/interunit/transfer-in/pending/by-transfer-out/${transferOutId}`)
+  }
+
+  /**
+   * POST /interunit/transfer-in/reopen-by-transfer-out/{transferOutId} — re-open a
+   * Received transfer-in back to Pending (gated server-side to
+   * b.hrithik@candorfoods.in) so a box can be un-acknowledged / its lot corrected /
+   * an issue raised, then re-finalized. Reverses the receipt's stock movement;
+   * boxes are kept. Keyed by the Transfer OUT id (which the receive screen holds).
+   */
+  static async reopenTransferIn(transferOutId: number, userEmail: string): Promise<any> {
+    return await fetchJSON(`${API_BASE_URL}/interunit/transfer-in/reopen-by-transfer-out/${transferOutId}?user_email=${encodeURIComponent(userEmail)}`, {
+      method: 'POST'
+    })
+  }
+
+  /** GET the transfer-in (header + boxes), any status, to pre-fill the edit form. */
+  static async getTransferInByTransferOut(transferOutId: number): Promise<any> {
+    return await fetchJSON(`${API_BASE_URL}/interunit/transfer-in/by-transfer-out/${transferOutId}`)
+  }
+
+  /**
+   * PUT a privileged full-receipt edit (gated server-side to b.hrithik@candorfoods.in).
+   * Updates the transfer-in header + boxes and syncs the source transfer-out boxes
+   * and the destination cold-storage stock.
+   */
+  static async editTransferIn(transferOutId: number, payload: {
+    grn_number?: string
+    receiving_warehouse?: string
+    box_condition?: string
+    condition_remarks?: string
+    boxes: { box_id: string; article?: string; batch_number?: string; lot_number?: string; net_weight?: number | null; gross_weight?: number | null }[]
+  }, userEmail: string): Promise<any> {
+    return await fetchJSON(`${API_BASE_URL}/interunit/transfer-in/by-transfer-out/${transferOutId}/edit?user_email=${encodeURIComponent(userEmail)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    })
   }
 
   // Get transfer by transfer number (challan_no)

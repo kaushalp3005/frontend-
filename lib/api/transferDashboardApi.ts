@@ -38,3 +38,53 @@ export const transferDashboardApi = {
     return handle(await fetch(`${API_URL}/transfer-dashboard/filter-options`, { headers: headers() }))
   },
 }
+
+// ── Local cache (stale-while-revalidate) ─────────────────────────────
+// The dashboard paints instantly from this cache on open, then revalidates in
+// the background so the skeleton is shown only on the very first visit. Raw
+// (pre-normalization) records are stored, so a future normalization change can
+// never serve a stale shape.
+// Company-scoped so switching company never paints another tenant's records.
+const cacheKey = (company: string) => `transfer-dashboard:${company}:cache:v1`
+
+export interface TransferCache {
+  records: TransferRecord[]
+  filterOptions: TransferFilterOptions | null
+  savedAt: number
+}
+
+export function readTransferCache(company: string): TransferCache | null {
+  if (typeof window === "undefined") return null
+  try {
+    const raw = window.localStorage.getItem(cacheKey(company))
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as TransferCache
+    if (!parsed || !Array.isArray(parsed.records)) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+export function writeTransferCache(
+  data: { records: TransferRecord[] },
+  filterOptions: TransferFilterOptions | null,
+  company: string,
+): void {
+  if (typeof window === "undefined") return
+  try {
+    const payload: TransferCache = { records: data.records, filterOptions, savedAt: Date.now() }
+    window.localStorage.setItem(cacheKey(company), JSON.stringify(payload))
+  } catch {
+    // Quota exceeded or serialization failure — degrade silently (no instant paint).
+  }
+}
+
+export function clearTransferCache(company: string): void {
+  if (typeof window === "undefined") return
+  try {
+    window.localStorage.removeItem(cacheKey(company))
+  } catch {
+    // ignore
+  }
+}

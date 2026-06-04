@@ -285,6 +285,7 @@ type PendingTransferEntry = {
   reason_code?: string
   transfer_status?: string
   has_variance?: boolean
+  updated_ts?: string | null  // set when this transfer was edited after initial entry
 }
 type PendingInfo = {
   pending_cartons: number
@@ -473,6 +474,14 @@ function CartonCellWithPending({ record, pending }: { record: ColdStorageStockRe
                     {t.has_variance && (
                       <span className="text-[9px] font-medium px-1 py-0.5 rounded bg-red-100 text-red-700">
                         Variance
+                      </span>
+                    )}
+                    {t.updated_ts && (
+                      <span
+                        title={`Edited ${new Date(t.updated_ts).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "2-digit" })} — changed after initial entry`}
+                        className="text-[9px] font-medium px-1 py-0.5 rounded bg-violet-100 text-violet-700"
+                      >
+                        Edited
                       </span>
                     )}
                     {t.dispatched_at && (

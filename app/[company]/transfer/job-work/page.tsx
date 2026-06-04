@@ -906,6 +906,8 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
   const [rptFilterFrom, setRptFilterFrom] = useState("")
   const [rptFilterTo, setRptFilterTo] = useState("")
   const [rptActiveView, setRptActiveView] = useState<"process" | "vendor" | "item" | "trend" | "matrix">("process")
+  const [rptSearch, setRptSearch] = useState("")
+  const ymdLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
 
   const loadReportWithParams = async (filterProcess: string, filterVendor: string, filterItem: string, from: string, to: string) => {
     setRptLoading(true)
@@ -952,6 +954,12 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
   const rptByItem = rptData?.by_item || []
   const rptMonthly = rptData?.monthly_trend || []
   const rptVendorItem = rptData?.vendor_item_matrix || []
+  // Client-side "search within results" applied to the active breakdown view.
+  const rptQ = rptSearch.toLowerCase().trim()
+  const fProcess = rptQ ? rptByProcess.filter((r: any) => String(r.process || "").toLowerCase().includes(rptQ)) : rptByProcess
+  const fVendor = rptQ ? rptByVendor.filter((r: any) => String(r.vendor || "").toLowerCase().includes(rptQ)) : rptByVendor
+  const fItem = rptQ ? rptByItem.filter((r: any) => String(r.item || "").toLowerCase().includes(rptQ)) : rptByItem
+  const fMatrix = rptQ ? rptVendorItem.filter((r: any) => (String(r.vendor || "") + " " + String(r.item || "")).toLowerCase().includes(rptQ)) : rptVendorItem
   // Hardcoded options (same as material-out form) merged with DB options
   const PROCESS_OPTIONS = ["De seeding", "Dicing", "Cracking", "Stuffing", "Vacuum Packaging", "Slicing", "Thermopacking"]
   const VENDOR_OPTIONS = ["UNAZO CORPORATION", "Krishnat Kerba Chavan", "AL SAKHI ENTERPRISES", "MIE FOODS INDIA PRIVATE LIMITED", "HAG CORPORATION"]
@@ -2293,6 +2301,18 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
               </div>
             </CardHeader>
             <CardContent className="p-4">
+              <div className="flex flex-wrap items-center gap-1.5 mb-3">
+                <span className="text-[10px] font-medium text-gray-500 uppercase tracking-wider mr-1">Quick range</span>
+                {[
+                  { label: "Today", fn: () => { const d = ymdLocal(new Date()); setRptFilterFrom(d); setRptFilterTo(d) } },
+                  { label: "This Month", fn: () => { const n = new Date(); setRptFilterFrom(ymdLocal(new Date(n.getFullYear(), n.getMonth(), 1))); setRptFilterTo(ymdLocal(n)) } },
+                  { label: "Last Month", fn: () => { const n = new Date(); setRptFilterFrom(ymdLocal(new Date(n.getFullYear(), n.getMonth() - 1, 1))); setRptFilterTo(ymdLocal(new Date(n.getFullYear(), n.getMonth(), 0))) } },
+                  { label: "All Time", fn: () => { setRptFilterFrom(""); setRptFilterTo("") } },
+                ].map(p => (
+                  <button key={p.label} onClick={p.fn}
+                    className={`text-xs font-medium px-3 py-1.5 rounded-lg border transition-all ${(p.label === "All Time" && !rptFilterFrom && !rptFilterTo) ? "bg-[#0f172a] text-white border-[#0f172a]" : "bg-white hover:bg-slate-100 border-slate-200"}`}>{p.label}</button>
+                ))}
+              </div>
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                 <div className="space-y-1">
                   <Label className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Process</Label>
@@ -2343,23 +2363,23 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
           ) : rptData ? (
             <>
               {/* ─── KPI Cards ─── */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
                 {[
-                  { label: "Total JWOs", value: rptSummary.total_jwo, icon: ClipboardList, color: "text-blue-600", bg: "bg-blue-50" },
-                  { label: "Dispatched", value: `${(rptSummary.total_dispatched_kgs || 0).toLocaleString()} kg`, icon: Send, color: "text-indigo-600", bg: "bg-indigo-50" },
-                  { label: "FG Received", value: `${(rptSummary.total_fg_kgs || 0).toLocaleString()} kg`, icon: Package, color: "text-emerald-600", bg: "bg-emerald-50" },
-                  { label: "Waste + Rejection", value: `${((rptSummary.total_waste_kgs || 0) + (rptSummary.total_rejection_kgs || 0)).toLocaleString()} kg`, icon: Trash2, color: "text-orange-600", bg: "bg-orange-50" },
-                  { label: "Overall Loss", value: `${rptSummary.overall_loss_pct || 0}%`, icon: TrendingUp, color: rptSummary.overall_loss_pct > 10 ? "text-red-600" : "text-emerald-600", bg: rptSummary.overall_loss_pct > 10 ? "bg-red-50" : "bg-emerald-50" },
-                ].map((kpi, idx) => (
-                  <Card key={idx} className="border-0 shadow-sm">
-                    <CardContent className="p-3 sm:p-4">
-                      <div className="flex items-center gap-2 mb-1.5">
-                        <div className={`h-7 w-7 rounded-lg ${kpi.bg} flex items-center justify-center`}>
-                          <kpi.icon className={`h-3.5 w-3.5 ${kpi.color}`} />
-                        </div>
+                  { label: "Total JWOs", value: `${rptSummary.total_jwo ?? 0}`, icon: ClipboardList },
+                  { label: "Dispatched", value: `${(rptSummary.total_dispatched_kgs || 0).toLocaleString()} kg`, icon: Send },
+                  { label: "FG Received", value: `${(rptSummary.total_fg_kgs || 0).toLocaleString()} kg`, icon: Package },
+                  { label: "Waste + Rejection", value: `${((rptSummary.total_waste_kgs || 0) + (rptSummary.total_rejection_kgs || 0)).toLocaleString()} kg`, icon: Trash2, amber: true },
+                  { label: "Overall Loss", value: `${rptSummary.overall_loss_pct || 0}%`, icon: TrendingUp, red: rptSummary.overall_loss_pct > 10 },
+                ].map((kpi: any, idx: number) => (
+                  <Card key={idx} className={`overflow-hidden ${kpi.red ? "border-red-300 bg-red-50 dark:bg-red-950/30" : kpi.amber ? "border-amber-200 bg-amber-50/50 dark:bg-amber-950/20" : ""}`}>
+                    <CardContent className="p-3 flex items-start gap-2 min-h-[68px]">
+                      <div className={`flex-shrink-0 mt-0.5 ${kpi.red ? "text-red-600" : kpi.amber ? "text-amber-600" : "text-muted-foreground"}`}>
+                        <kpi.icon className="h-4 w-4" />
                       </div>
-                      <p className="text-lg sm:text-xl font-bold text-gray-900">{kpi.value}</p>
-                      <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wider">{kpi.label}</p>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[10px] uppercase tracking-wider text-muted-foreground truncate">{kpi.label}</p>
+                        <p className={`text-sm sm:text-base font-bold tabular-nums break-all leading-tight mt-0.5 ${kpi.red ? "text-red-700 dark:text-red-400" : ""}`}>{kpi.value}</p>
+                      </div>
                     </CardContent>
                   </Card>
                 ))}
@@ -2385,22 +2405,31 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                 </CardContent>
               </Card>
 
-              {/* ─── Sub-view Tabs ─── */}
-              <div className="flex flex-wrap gap-1.5 bg-gray-100 rounded-lg p-1">
-                {[
-                  { key: "process" as const, label: "By Process", icon: Layers },
-                  { key: "vendor" as const, label: "By Vendor", icon: Users },
-                  { key: "item" as const, label: "By Item", icon: Box },
-                  { key: "trend" as const, label: "Monthly Trend", icon: TrendingUp },
-                  { key: "matrix" as const, label: "Vendor × Item", icon: BarChart3 },
-                ].map(({ key, label, icon: Icon }) => (
-                  <button key={key} onClick={() => setRptActiveView(key)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                      rptActiveView === key ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'
-                    }`}>
-                    <Icon className="h-3 w-3" />{label}
-                  </button>
-                ))}
+              {/* ─── Sub-view Tabs + Search ─── */}
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 justify-between">
+                <div className="flex flex-wrap gap-1.5 bg-gray-100 rounded-lg p-1">
+                  {[
+                    { key: "process" as const, label: "By Process", icon: Layers },
+                    { key: "vendor" as const, label: "By Vendor", icon: Users },
+                    { key: "item" as const, label: "By Item", icon: Box },
+                    { key: "trend" as const, label: "Monthly Trend", icon: TrendingUp },
+                    { key: "matrix" as const, label: "Vendor × Item", icon: BarChart3 },
+                  ].map(({ key, label, icon: Icon }) => (
+                    <button key={key} onClick={() => setRptActiveView(key)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                        rptActiveView === key ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'
+                      }`}>
+                      <Icon className="h-3 w-3" />{label}
+                    </button>
+                  ))}
+                </div>
+                {rptActiveView !== "trend" && (
+                  <div className="relative w-full sm:max-w-[260px]">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+                    <Input placeholder="Search within results…" value={rptSearch} onChange={(e) => setRptSearch(e.target.value)} className="h-8 pl-8 pr-7 text-xs" />
+                    {rptSearch && <button onClick={() => setRptSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm leading-none">×</button>}
+                  </div>
+                )}
               </div>
 
               {/* ─── By Process ─── */}
@@ -2421,7 +2450,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                         </tr>
                       </thead>
                       <tbody>
-                        {rptByProcess.map((r: any, idx: number) => (
+                        {fProcess.map((r: any, idx: number) => (
                           <tr key={idx} className={`border-b last:border-0 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
                             <td className="px-4 py-2.5 text-xs font-semibold">{r.process}</td>
                             <td className="px-4 py-2.5 text-right text-xs">{r.jwo_count}</td>
@@ -2434,7 +2463,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                             </td>
                           </tr>
                         ))}
-                        {rptByProcess.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-xs text-gray-400">No data</td></tr>}
+                        {fProcess.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-xs text-gray-400">No data</td></tr>}
                       </tbody>
                     </table>
                   </CardContent>
@@ -2458,7 +2487,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                         </tr>
                       </thead>
                       <tbody>
-                        {rptByVendor.map((r: any, idx: number) => (
+                        {fVendor.map((r: any, idx: number) => (
                           <tr key={idx} className={`border-b last:border-0 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
                             <td className="px-4 py-2.5 text-xs font-semibold max-w-[200px] truncate" title={r.vendor}>{r.vendor}</td>
                             <td className="px-4 py-2.5 text-right text-xs">{r.jwo_count}</td>
@@ -2470,7 +2499,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                             </td>
                           </tr>
                         ))}
-                        {rptByVendor.length === 0 && <tr><td colSpan={4} className="px-4 py-8 text-center text-xs text-gray-400">No data</td></tr>}
+                        {fVendor.length === 0 && <tr><td colSpan={4} className="px-4 py-8 text-center text-xs text-gray-400">No data</td></tr>}
                       </tbody>
                     </table>
                   </CardContent>
@@ -2495,7 +2524,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                         </tr>
                       </thead>
                       <tbody>
-                        {rptByItem.map((r: any, idx: number) => (
+                        {fItem.map((r: any, idx: number) => (
                           <tr key={idx} className={`border-b last:border-0 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
                             <td className="px-4 py-2.5 text-xs font-semibold max-w-[200px] truncate" title={r.item}>{r.item}</td>
                             <td className="px-4 py-2.5 text-right text-xs">{r.jwo_count}</td>
@@ -2508,7 +2537,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                             </td>
                           </tr>
                         ))}
-                        {rptByItem.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-xs text-gray-400">No data</td></tr>}
+                        {fItem.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-xs text-gray-400">No data</td></tr>}
                       </tbody>
                     </table>
                   </CardContent>
@@ -2562,7 +2591,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                         </tr>
                       </thead>
                       <tbody>
-                        {rptVendorItem.map((r: any, idx: number) => (
+                        {fMatrix.map((r: any, idx: number) => (
                           <tr key={idx} className={`border-b last:border-0 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
                             <td className="px-4 py-2.5 text-xs font-medium max-w-[150px] truncate" title={r.vendor}>{r.vendor}</td>
                             <td className="px-4 py-2.5 text-xs max-w-[150px] truncate" title={r.item}>{r.item}</td>
@@ -2575,7 +2604,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                             </td>
                           </tr>
                         ))}
-                        {rptVendorItem.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-xs text-gray-400">No data</td></tr>}
+                        {fMatrix.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-xs text-gray-400">No data</td></tr>}
                       </tbody>
                     </table>
                   </CardContent>

@@ -267,7 +267,7 @@ const isCountableLine = (l: any) => {
   return mt === "PM" || cat === "PACKAGING"
 }
 
-export function groupLinesByItem(lines: any[]): HoverLine[] {
+export function groupLinesByItem(lines: any[], fallbackUnit?: string): HoverLine[] {
   type Agg = {
     name: string
     qty: number
@@ -275,6 +275,7 @@ export function groupLinesByItem(lines: any[]): HoverLine[] {
     lotNumber?: string
     countable: boolean
     unitPackSize: number
+    lotOriginUnit?: string  // authoritative single per-lot cold unit (from cold_stocks)
   }
   const grouped = new Map<string, Agg>()
   for (const l of lines) {
@@ -294,6 +295,10 @@ export function groupLinesByItem(lines: any[]): HoverLine[] {
     // Use first non-zero unit_pack_size we see for this item
     if (!g.unitPackSize) g.unitPackSize = parseFloat(String(l.unit_pack_size || 0)) || 0
     if (!g.countable) g.countable = isCountableLine(l)
+    // Single authoritative per-lot cold unit (server-computed from cold_stocks),
+    // so line-only transfers show the same per-lot "From" chip as box transfers.
+    const lou = (l.lot_origin_unit || "").toString().trim()
+    if (lou && !g.lotOriginUnit) g.lotOriginUnit = lou
     grouped.set(key, g)
   }
   return Array.from(grouped.values()).map(g => {
@@ -304,11 +309,14 @@ export function groupLinesByItem(lines: any[]): HoverLine[] {
       netWeight: g.netWeight > 0 ? Number(g.netWeight.toFixed(3)) : undefined,
       lotNumber: g.lotNumber,
       count: count > 0 ? count : undefined,
+      // Per-lot cold unit when known; else the transfer-level cold unit so a
+      // cold-sourced transfer always shows a "From" chip.
+      sourceStorage: g.lotOriginUnit || fallbackUnit,
     }
   })
 }
 
-export function groupBoxesByItem(boxes: any[]): HoverLine[] {
+export function groupBoxesByItem(boxes: any[], fallbackUnit?: string): HoverLine[] {
   type Agg = {
     name: string
     qty: number
@@ -316,7 +324,11 @@ export function groupBoxesByItem(boxes: any[]): HoverLine[] {
     lotNumber?: string
     countable: boolean
     unitPackSize: number
-    sourceUnits: Set<string>        // canonical sub-cold names seen for this (article, lot)
+    // Authoritative single per-lot cold unit (server-computed from cold_stocks).
+    lotOriginUnit?: string
+    // Per-box fallback units + frequencies — used ONLY when lotOriginUnit is absent,
+    // and even then we surface the single most-common one (never a joined list).
+    fallbackCounts: Map<string, number>
   }
   const grouped = new Map<string, Agg>()
   for (const b of boxes) {
@@ -330,25 +342,34 @@ export function groupBoxesByItem(boxes: any[]): HoverLine[] {
       lotNumber: lot || undefined,
       countable: isCountableLine(b),
       unitPackSize: parseFloat(String(b.unit_pack_size || 0)) || 0,
-      sourceUnits: new Set<string>(),
+      fallbackCounts: new Map<string, number>(),
     }
     g.qty += 1
     g.netWeight += Number(b.net_weight || 0)
     if (!g.unitPackSize) g.unitPackSize = parseFloat(String(b.unit_pack_size || 0)) || 0
     if (!g.countable) g.countable = isCountableLine(b)
-    // Lot-level dominant unit (computed server-side from master cold_stocks +
-    // pending_transfer_stock) is the authoritative single value per lot.
-    // Fall back to the per-box source_unit / storage_location only if the
-    // lot-level lookup didn't resolve.
-    const u = (b.lot_origin_unit || b.source_unit || b.source_storage || "").toString().trim()
-    if (u) g.sourceUnits.add(u)
+    // A lot maps to exactly ONE warehouse. The authoritative value is the
+    // server-computed `lot_origin_unit` (the dominant unit for this lot across
+    // cfpl/cdpl cold_stocks). Take it as the single source of truth.
+    const lou = (b.lot_origin_unit || "").toString().trim()
+    if (lou && !g.lotOriginUnit) g.lotOriginUnit = lou
+    const fb = (b.source_unit || b.source_storage || "").toString().trim()
+    if (fb) g.fallbackCounts.set(fb, (g.fallbackCounts.get(fb) || 0) + 1)
     grouped.set(key, g)
   }
   return Array.from(grouped.values()).map(g => {
     const count = g.countable && g.unitPackSize > 0 ? g.unitPackSize * g.qty : 0
-    const sourceStorage = g.sourceUnits.size > 0
-      ? Array.from(g.sourceUnits).sort().join(", ")
-      : undefined
+    // Exactly one warehouse per lot: authoritative cold_stocks unit first; else the
+    // single most-common per-box unit. Never list multiple.
+    let sourceStorage = g.lotOriginUnit
+    if (!sourceStorage && g.fallbackCounts.size > 0) {
+      sourceStorage = Array.from(g.fallbackCounts.entries())
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0][0]
+    }
+    // Last resort: the transfer-level cold unit (header from_cold_unit), so a
+    // cold-sourced transfer always shows a "From" chip even when a lot can't be
+    // mapped per-row (e.g. cold_stocks already consumed on a dispatched transfer).
+    if (!sourceStorage) sourceStorage = fallbackUnit
     return {
       name: g.name,
       qty: g.qty,

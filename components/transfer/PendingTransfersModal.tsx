@@ -25,6 +25,8 @@ export type PendingTransferRecord = {
   dispatched_by: string
   status: string
   header_status: string
+  unallocated_boxes?: number  // ordered boxes that could not be found in the stock sheets
+  updated_ts?: string | null  // set when the transfer was edited after initial entry
 }
 
 type Props = {
@@ -574,16 +576,36 @@ export default function PendingTransfersModal({ open, onClose, company, apiBaseU
                     <td className="px-3 py-2.5 text-right tabular-nums font-medium text-gray-900">{formatNumber(r.total_kg, 2)}</td>
                     <td className="px-3 py-2.5 text-gray-600">{r.dispatched_by || "—"}</td>
                     <td className="px-3 py-2.5">
-                      <Badge
-                        variant="outline"
-                        className={`text-[10px] font-medium ${
-                          r.header_status === "Partial"
-                            ? "bg-amber-50 text-amber-700 border-amber-300"
-                            : "bg-sky-50 text-sky-700 border-sky-200"
-                        }`}
-                      >
-                        {r.header_status === "Partial" ? "Partial (GRN raised)" : r.status}
-                      </Badge>
+                      <div className="flex flex-col items-start gap-1">
+                        <Badge
+                          variant="outline"
+                          className={`text-[10px] font-medium ${
+                            r.header_status === "Partial"
+                              ? "bg-amber-50 text-amber-700 border-amber-300"
+                              : "bg-sky-50 text-sky-700 border-sky-200"
+                          }`}
+                        >
+                          {r.header_status === "Partial" ? "Partial (GRN raised)" : r.status}
+                        </Badge>
+                        {(r.unallocated_boxes ?? 0) > 0 && (
+                          <span
+                            title={`${r.unallocated_boxes} ordered box${
+                              (r.unallocated_boxes ?? 0) > 1 ? "es" : ""
+                            } could not be matched to stock in the sheets — needs review`}
+                            className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded border bg-rose-50 text-rose-700 border-rose-200"
+                          >
+                            <AlertTriangle className="h-3 w-3" /> {r.unallocated_boxes} short
+                          </span>
+                        )}
+                        {r.updated_ts && (
+                          <span
+                            title={`Edited ${formatDate(r.updated_ts)} — changed after initial entry`}
+                            className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded border bg-violet-50 text-violet-700 border-violet-200"
+                          >
+                            Edited {formatDate(r.updated_ts)}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     {showCancelColumn && (
                       <td className="px-3 py-2.5 text-right">

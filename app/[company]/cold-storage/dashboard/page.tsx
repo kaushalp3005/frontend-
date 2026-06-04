@@ -31,6 +31,8 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as ReTooltip,
   ResponsiveContainer, Cell,
 } from "recharts"
+import { parseSearchTerms, matchesAllTerms } from "@/lib/search/recordSearch"
+import { readDashboardCache, writeDashboardCache } from "@/lib/cache/dashboardCache"
 import {
   coldStorageDashboardApi,
   type StockSummaryResponse, type StockLayer1, type StockLayer2, type StockLayer3,
@@ -126,6 +128,11 @@ const L_PL = ["pl-3", "pl-8", "pl-14", "pl-20"]
 // Legend colors (per dashboard legend): emerald, lime, amber, orange, red.
 type AgeingMode = "months" | "days"
 const AgeingModeContext = createContext<AgeingMode>("months")
+// Lot -> in-transit pending {cartons, kg, box_count}. Powers the dashboard "in transit"
+// context badge. NOTE: these boxes are already removed from cold_stocks at dispatch, so
+// this is DISPLAY context only — never subtract it from the shown available stock.
+type InTransitInfo = { cartons: number; kg: number; box_count: number }
+const InTransitContext = createContext<Record<string, InTransitInfo>>({})
 const BRACKET_LABELS_MONTHS = ["< 6 Months", "6-12 Months", "12-18 Months", "18-24 Months", "> 24 Months"] as const
 const BRACKET_LABELS_DAYS = ["< 30D", "30-60D", "60-90D", "90-180D", "> 180D"] as const
 const BRACKET_COLORS = [
@@ -177,6 +184,7 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
 
   const [activeTab, setActiveTab] = useState<"stock" | "ageing" | "concentration">("stock")
   const [companyFilter, setCompanyFilter] = useState<string>("all")
+  const [inTransitByLot, setInTransitByLot] = useState<Record<string, InTransitInfo>>({})
   const [selectedLocation, setSelectedLocation] = useState<string>("all")
   const [rawLocations, setRawLocations] = useState<string[]>([])
   const [ageingView, setAgeingView] = useState<"kgs" | "value" | "both">("both")
@@ -237,6 +245,17 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
   // Search, sort, filter controls
   const [searchQuery, setSearchQuery] = useState("")
   const [sortBy, setSortBy] = useState<"value" | "kgs" | "lots" | "name">("value")
+  // Smart search: multi-term (every word must match somewhere). The haystack
+  // spans a node's location, group, sub-groups and item marks.
+  const searchTerms = useMemo(() => parseSearchTerms(searchQuery), [searchQuery])
+  const searchHaystack = (l1: any): string => {
+    const parts: string[] = [l1.storage_location || "", l1.group_name || ""]
+    l1.children?.forEach((l2: any) => {
+      parts.push(l2.item_subgroup || "")
+      l2.children?.forEach((l3: any) => parts.push(l3.item_mark || ""))
+    })
+    return parts.join(" ").toLowerCase()
+  }
   const [hideUnassigned, setHideUnassigned] = useState(false)
   const [copyLayerOpen, setCopyLayerOpen] = useState(false)
   const [snapshotLayerOpen, setSnapshotLayerOpen] = useState(false)
@@ -251,6 +270,21 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
   const concRef = useRef<HTMLDivElement>(null)
   const tableRef = activeTab === "stock" ? stockRef : activeTab === "ageing" ? ageingRef : concRef
   const snapshotPanelRef = useRef<HTMLDivElement>(null)
+  // Sticky table header: pin the column header (Category / Kgs / Value / …) just
+  // below the sticky tabs+search toolbar. The toolbar height changes with the
+  // active tab and responsive wrapping, so measure it instead of hardcoding.
+  const toolbarRef = useRef<HTMLDivElement>(null)
+  const [stickyHeaderTop, setStickyHeaderTop] = useState(150)
+  useEffect(() => {
+    const el = toolbarRef.current
+    if (!el) return
+    const update = () => setStickyHeaderTop(56 + el.offsetHeight) // 56px = top-14 nav
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    window.addEventListener("resize", update)
+    return () => { ro.disconnect(); window.removeEventListener("resize", update) }
+  }, [activeTab])
   const copyPanelRef = useRef<HTMLDivElement>(null)
 
   // Close Snapshot / Copy popups on outside click or Escape key.
@@ -312,14 +346,38 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
       ])
       setStockData(s); setAgeingData(a); setAgeingDaysData(ad); setConcentrationData(c); setTrendData(t); setRawLocations(l)
       setAttentionData(af); setSlowMovingData(sm); setRundownData(rd)
+      // Cache for instant paint on the next open (stale-while-revalidate).
+      writeDashboardCache(`cold-storage-dashboard:cache:v1:${companyFilter}`, { s, a, ad, c, t, l, af, sm, rd })
+      // In-transit overlay (best-effort, non-blocking): lot -> pending in-transit cartons.
+      try {
+        const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+        const coParam = companyFilter !== "all" ? `?company=${encodeURIComponent(companyFilter)}` : ""
+        const itRes = await fetch(`${apiBase}/interunit/pending-stock/in-transit-by-lot${coParam}`)
+        if (itRes.ok) setInTransitByLot(await itRes.json())
+      } catch { /* overlay is optional — never block the dashboard */ }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load dashboard")
+      // Don't blank the screen with an error during a silent background refresh —
+      // keep the cached data and let the next refresh recover (matches inward/RTV).
+      if (!showRefresh) setError(err instanceof Error ? err.message : "Failed to load dashboard")
     } finally {
       setLoading(false); setRefreshing(false)
     }
   }, [companyFilter])
 
-  useEffect(() => { fetchData() }, [fetchData])
+  // On mount: paint instantly from cache (if any), then revalidate in background.
+  useEffect(() => {
+    const cached = readDashboardCache<any>(`cold-storage-dashboard:cache:v1:${companyFilter}`)
+    if (cached?.payload?.s) {
+      const p = cached.payload
+      setStockData(p.s); setAgeingData(p.a); setAgeingDaysData(p.ad); setConcentrationData(p.c); setTrendData(p.t); setRawLocations(p.l)
+      setAttentionData(p.af); setSlowMovingData(p.sm); setRundownData(p.rd)
+      setLoading(false)
+      fetchData(true)
+    } else {
+      fetchData(false)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyFilter])
 
   // IntersectionObserver: update activeSection as the user scrolls within the Concentration tab
   useEffect(() => {
@@ -477,11 +535,7 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
     // Client-side location filter (canonical code match)
     if (selectedLocation !== "all") data = data.filter(l1 => l1.storage_location === selectedLocation)
     if (hideUnassigned) data = data.filter(l1 => l1.storage_location !== "Unassigned" && l1.group_name !== "Ungrouped")
-    const sq = searchQuery.toLowerCase().trim()
-    if (sq) data = data.filter(l1 =>
-      l1.storage_location.toLowerCase().includes(sq) || l1.group_name.toLowerCase().includes(sq) ||
-      l1.children.some(l2 => l2.item_subgroup.toLowerCase().includes(sq) ||
-        l2.children.some(l3 => l3.item_mark.toLowerCase().includes(sq))))
+    if (searchTerms.length) data = data.filter(l1 => matchesAllTerms(searchHaystack(l1), searchTerms))
     const sortFn = (a: StockLayer1, b: StockLayer1) => {
       switch (sortBy) { case "value": return b.total_value - a.total_value; case "kgs": return b.total_kgs - a.total_kgs; case "lots": return b.lot_count - a.lot_count; case "name": return a.storage_location.localeCompare(b.storage_location); default: return 0 }
     }
@@ -493,11 +547,7 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
     let data = ageingDaysData.data.map(l1 => ({ ...l1, storage_location: normalizeWarehouseName(l1.storage_location) || "Unassigned" }))
     if (selectedLocation !== "all") data = data.filter(l1 => l1.storage_location === selectedLocation)
     if (hideUnassigned) data = data.filter(l1 => l1.storage_location !== "Unassigned" && l1.group_name !== "Ungrouped")
-    const sq = searchQuery.toLowerCase().trim()
-    if (sq) data = data.filter(l1 =>
-      l1.storage_location.toLowerCase().includes(sq) || l1.group_name.toLowerCase().includes(sq) ||
-      l1.children.some(l2 => l2.item_subgroup.toLowerCase().includes(sq) ||
-        l2.children.some(l3 => l3.item_mark.toLowerCase().includes(sq))))
+    if (searchTerms.length) data = data.filter(l1 => matchesAllTerms(searchHaystack(l1), searchTerms))
     return [...data].sort((a, b) => {
       switch (sortBy) {
         case "value": return (b.grand_total_value || 0) - (a.grand_total_value || 0)
@@ -515,11 +565,7 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
     let data = ageingData.data.map(l1 => ({ ...l1, storage_location: normalizeWarehouseName(l1.storage_location) || "Unassigned" }))
     if (selectedLocation !== "all") data = data.filter(l1 => l1.storage_location === selectedLocation)
     if (hideUnassigned) data = data.filter(l1 => l1.storage_location !== "Unassigned" && l1.group_name !== "Ungrouped")
-    const sq = searchQuery.toLowerCase().trim()
-    if (sq) data = data.filter(l1 =>
-      l1.storage_location.toLowerCase().includes(sq) || l1.group_name.toLowerCase().includes(sq) ||
-      l1.children.some(l2 => l2.item_subgroup.toLowerCase().includes(sq) ||
-        l2.children.some(l3 => l3.item_mark.toLowerCase().includes(sq))))
+    if (searchTerms.length) data = data.filter(l1 => matchesAllTerms(searchHaystack(l1), searchTerms))
     return [...data].sort((a, b) => {
       switch (sortBy) { case "value": return (b.grand_total_value || 0) - (a.grand_total_value || 0); case "kgs": return b.grand_total_kgs - a.grand_total_kgs; case "name": return a.storage_location.localeCompare(b.storage_location); default: return b.grand_total_kgs - a.grand_total_kgs }
     })
@@ -969,31 +1015,61 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
   // content selects what gets emitted: stock / ageing / both. Scope handles dates/other/both bifurcation inside each.
   const buildSnapshotHtml = (scope: Scope, layer: 1 | 2 | 3, content: Content): string => {
     const d = format(new Date(), "dd MMM yyyy")
+    // Escape operator-entered values before interpolating into the snapshot HTML
+    // (category / location / mark names can contain <, &, " and would break it).
+    const esc = (v: unknown) => String(v ?? "").replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string))
     const headerLabel = content === "stock" ? "Stock Summary"
       : content === "ageing" ? `Ageing Analysis (${ageingMode === "months" ? "Months" : "Days"})`
       : `Stock Summary + Ageing Analysis (${ageingMode === "months" ? "Months" : "Days"})`
     const subtitle = `${d} · ${companyFilter.toUpperCase()} · ${selectedLocation === "all" ? "All Locations" : selectedLocation}`
 
+    // Render one L1 group as a contiguous run of <tr> rows (dark header with the
+    // group's totals, then its children per the chosen layer). Returns the rows
+    // plus an estimated height (row count) used to balance columns.
+    const stockGroupRows = (l1: typeof filteredStock[number]): { html: string; rows: number } => {
+      let h = `<tr style="background:#1e293b;color:#fff;font-weight:600"><td style="padding:6px 10px">${esc(l1.storage_location)} — ${esc(l1.group_name)}</td><td style="text-align:right;padding:6px 10px">${fmtKgs(l1.total_kgs)}</td><td style="text-align:right;padding:6px 10px">${fmtVal(l1.total_value)}</td><td style="text-align:right;padding:6px 10px">${fmtRate(l1.avg_rate)}</td><td style="text-align:right;padding:6px 10px">${l1.lot_count}</td></tr>`
+      let rows = 1
+      if (layer >= 2) l1.children.forEach((l2, i) => {
+        h += `<tr style="background:${i % 2 ? "#ffffff" : "#f1f5f9"}"><td style="padding:4px 10px 4px 22px;color:#334155">${esc(l2.item_subgroup)}</td><td style="text-align:right;padding:4px 10px">${fmtKgs(l2.total_kgs)}</td><td style="text-align:right;padding:4px 10px">${fmtVal(l2.total_value)}</td><td style="text-align:right;padding:4px 10px;color:#64748b">${fmtRate(l2.avg_rate)}</td><td style="text-align:right;padding:4px 10px;color:#64748b">${l2.lot_count}</td></tr>`
+        rows++
+        if (layer >= 3) l2.children.forEach(l3 => {
+          h += `<tr style="background:#fff"><td style="padding:3px 10px 3px 38px;color:#64748b;font-size:11px">${esc(l3.item_mark)}</td><td style="text-align:right;padding:3px 10px;font-size:11px;color:#64748b">${fmtKgs(l3.total_kgs)}</td><td style="text-align:right;padding:3px 10px;font-size:11px;color:#64748b">${fmtVal(l3.total_value)}</td><td style="text-align:right;padding:3px 10px;font-size:11px;color:#94a3b8">${fmtRate(l3.avg_rate)}</td><td style="text-align:right;padding:3px 10px;font-size:11px;color:#94a3b8">${l3.lot_count}</td></tr>`
+          rows++
+        })
+      })
+      return { html: h, rows }
+    }
+
+    const stockColgroup = `<colgroup><col style="width:42%"><col style="width:16%"><col style="width:22%"><col style="width:12%"><col style="width:8%"></colgroup>`
+    const stockHead = `<tr style="background:#0f172a;color:#fff"><th style="text-align:left;padding:7px 10px;font-size:11px;letter-spacing:0.3px">CATEGORY</th><th style="text-align:right;padding:7px 10px;font-size:11px">KGS</th><th style="text-align:right;padding:7px 10px;font-size:11px">VALUE</th><th style="text-align:right;padding:7px 10px;font-size:11px">RATE</th><th style="text-align:right;padding:7px 10px;font-size:11px">LOTS</th></tr>`
+
+    // Greedily distribute group blocks into `nCols` columns, balancing height so
+    // the rendered image is a compact rectangle instead of one very long column.
+    const packStockColumns = (blocks: { html: string; rows: number }[], nCols: number): string[] => {
+      const cols = Array.from({ length: nCols }, () => ({ html: "", h: 0 }))
+      blocks.forEach(b => {
+        const c = cols.reduce((min, cur) => (cur.h < min.h ? cur : min), cols[0])
+        c.html += b.html; c.h += b.rows
+      })
+      return cols
+        .filter(c => c.html)
+        .map(c => `<table style="width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed">${stockColgroup}${stockHead}${c.html}</table>`)
+    }
+
     const buildStockSection = (rows: typeof filteredStock, title: string): string => {
+      if (!rows.length) return ""
       const sub = {
         kgs: rows.reduce((s, r) => s + (r.total_kgs || 0), 0),
         val: rows.reduce((s, r) => s + (r.total_value || 0), 0),
         lots: rows.reduce((s, r) => s + (r.lot_count || 0), 0),
       }
-      let h = `<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:12px">`
-      h += `<tr style="background:#0e7490;color:#fff"><td colspan="5" style="padding:8px;font-weight:700;letter-spacing:0.5px">${title} — ${fmtKgs(sub.kgs)} Kgs · ${fmtVal(sub.val)} · ${sub.lots} lots</td></tr>`
-      h += `<tr style="background:#0f172a;color:#fff"><th style="text-align:left;padding:6px 8px">Category</th><th style="text-align:right;padding:6px 8px">Kgs</th><th style="text-align:right;padding:6px 8px">Value</th><th style="text-align:right;padding:6px 8px">Rate</th><th style="text-align:right;padding:6px 8px">Lots</th></tr>`
-      rows.forEach(l1 => {
-        h += `<tr style="background:#1e293b;color:#fff;font-weight:600"><td style="padding:5px 8px">${l1.storage_location} — ${l1.group_name}</td><td style="text-align:right;padding:5px 8px">${fmtKgs(l1.total_kgs)}</td><td style="text-align:right;padding:5px 8px">${fmtVal(l1.total_value)}</td><td style="text-align:right;padding:5px 8px">${fmtRate(l1.avg_rate)}</td><td style="text-align:right;padding:5px 8px">${l1.lot_count}</td></tr>`
-        if (layer >= 2) l1.children.forEach(l2 => {
-          h += `<tr style="background:#f1f5f9"><td style="padding:4px 8px 4px 20px">${l2.item_subgroup}</td><td style="text-align:right;padding:4px 8px">${fmtKgs(l2.total_kgs)}</td><td style="text-align:right;padding:4px 8px">${fmtVal(l2.total_value)}</td><td style="text-align:right;padding:4px 8px">${fmtRate(l2.avg_rate)}</td><td style="text-align:right;padding:4px 8px">${l2.lot_count}</td></tr>`
-          if (layer >= 3) l2.children.forEach(l3 => {
-            h += `<tr style="background:#fff"><td style="padding:4px 8px 4px 36px">${l3.item_mark}</td><td style="text-align:right;padding:4px 8px">${fmtKgs(l3.total_kgs)}</td><td style="text-align:right;padding:4px 8px">${fmtVal(l3.total_value)}</td><td style="text-align:right;padding:4px 8px">${fmtRate(l3.avg_rate)}</td><td style="text-align:right;padding:4px 8px">${l3.lot_count}</td></tr>`
-          })
-        })
-      })
-      h += `</table>`
-      return h
+      const blocks = rows.map(stockGroupRows)
+      const nCols = blocks.length >= 5 ? 2 : 1
+      const cols = packStockColumns(blocks, nCols)
+      const band = `<div style="background:#0e7490;color:#fff;padding:9px 12px;font-weight:700;letter-spacing:0.4px;border-radius:6px 6px 0 0">${title} &nbsp;—&nbsp; ${fmtKgs(sub.kgs)} Kgs · ${fmtVal(sub.val)} · ${sub.lots} lots</div>`
+      const grid = `<div style="display:flex;gap:14px;align-items:flex-start;padding:8px 0 4px">${cols.map(c => `<div style="flex:1;min-width:0">${c}</div>`).join("")}</div>`
+      return `<div style="margin-bottom:18px">${band}${grid}</div>`
     }
 
     const showVal = ageingView !== "kgs"
@@ -1014,15 +1090,15 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
       h += `<tr style="background:#0e7490;color:#fff"><td colspan="${1 + ageingCols.length + 1}" style="padding:8px;font-weight:700;letter-spacing:0.5px">${title} — ${fmtKgs(sub.kgs)} Kgs · ${fmtVal(sub.val)}</td></tr>`
       h += `<tr style="background:#0f172a;color:#fff"><th style="text-align:left;padding:6px 8px">Category</th>${ageingCols.map(c => `<th style="text-align:right;padding:6px 8px">${c.lbl}</th>`).join("")}<th style="text-align:right;padding:6px 8px">Total</th></tr>`
       rows.forEach(l1 => {
-        h += `<tr style="background:#1e293b;color:#fff;font-weight:600"><td style="padding:5px 8px">${l1.storage_location} — ${l1.group_name}</td>`
+        h += `<tr style="background:#1e293b;color:#fff;font-weight:600"><td style="padding:5px 8px">${esc(l1.storage_location)} — ${esc(l1.group_name)}</td>`
         ageingCols.forEach(c => { h += cellVal(l1[c.kk], l1[c.vk], c.warn) })
         h += `<td style="text-align:right;padding:5px 8px">${fmtKgs(l1.grand_total_kgs)}${showVal && l1.grand_total_value ? `<div style="font-size:10px;color:#cbd5e1">${fmtVal(l1.grand_total_value)}</div>` : ""}</td></tr>`
         if (layer >= 2) (l1.children || []).forEach((l2: any) => {
-          h += `<tr style="background:#f1f5f9"><td style="padding:4px 8px 4px 20px">${l2.item_subgroup}</td>`
+          h += `<tr style="background:#f1f5f9"><td style="padding:4px 8px 4px 20px">${esc(l2.item_subgroup)}</td>`
           ageingCols.forEach(c => { h += cellVal(l2[c.kk], l2[c.vk], c.warn) })
           h += `<td style="text-align:right;padding:4px 8px">${fmtKgs(l2.grand_total_kgs)}${showVal && l2.grand_total_value ? `<div style="font-size:10px;color:#64748b">${fmtVal(l2.grand_total_value)}</div>` : ""}</td></tr>`
           if (layer >= 3) (l2.children || []).forEach((l3: any) => {
-            h += `<tr style="background:#fff"><td style="padding:4px 8px 4px 36px">${l3.item_mark}</td>`
+            h += `<tr style="background:#fff"><td style="padding:4px 8px 4px 36px">${esc(l3.item_mark)}</td>`
             ageingCols.forEach(c => { h += cellVal(l3[c.kk], l3[c.vk], c.warn) })
             h += `<td style="text-align:right;padding:4px 8px">${fmtKgs(l3.grand_total_kgs)}${showVal && l3.grand_total_value ? `<div style="font-size:10px;color:#64748b">${fmtVal(l3.grand_total_value)}</div>` : ""}</td></tr>`
           })
@@ -1035,13 +1111,11 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
     const stockBlock = (): string => {
       const datesRows = filteredStock.filter(l1 => isDateCategory(l1.group_name))
       const otherRows = filteredStock.filter(l1 => !isDateCategory(l1.group_name))
-      let b = `<h3 style="margin:0 0 8px;font-size:15px;color:#0f172a;border-bottom:2px solid #0f172a;padding-bottom:4px">Stock Summary</h3>`
-      if (scope === "both") {
-        b += `<div style="display:flex;gap:16px;align-items:flex-start"><div style="flex:1;min-width:0">${buildStockSection(datesRows, "DATES")}</div><div style="flex:1;min-width:0">${buildStockSection(otherRows, "OTHER CATEGORIES")}</div></div>`
-      } else if (scope === "dates") b += buildStockSection(datesRows, "DATES")
-      else b += buildStockSection(otherRows, "OTHER CATEGORIES")
+      let b = ""
+      if (scope === "both" || scope === "dates") b += buildStockSection(datesRows, "DATES")
+      if (scope === "both" || scope === "other") b += buildStockSection(otherRows, "OTHER CATEGORIES")
       const gt = stockData?.grand_total
-      if (gt) b += `<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:6px"><tr style="background:#0f172a;color:#fff;font-weight:700"><td style="padding:8px">Stock Grand Total</td><td style="text-align:right;padding:8px">${fmtKgs(gt.total_kgs)} Kgs</td><td style="text-align:right;padding:8px">${fmtVal(gt.total_value)}</td><td style="text-align:right;padding:8px">${fmtRate(gt.avg_rate)}/Kg</td><td style="text-align:right;padding:8px">${gt.lot_count} lots</td></tr></table>`
+      if (gt) b += `<table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:4px"><tr style="background:#0f172a;color:#fff;font-weight:700"><td style="padding:11px 12px;border-radius:6px 0 0 6px">STOCK GRAND TOTAL</td><td style="text-align:right;padding:11px 12px">${fmtKgs(gt.total_kgs)} Kgs</td><td style="text-align:right;padding:11px 12px">${fmtVal(gt.total_value)}</td><td style="text-align:right;padding:11px 12px">${fmtRate(gt.avg_rate)}/Kg</td><td style="text-align:right;padding:11px 12px;border-radius:0 6px 6px 0">${gt.lot_count} lots</td></tr></table>`
       return b
     }
 
@@ -1058,13 +1132,55 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
       return b
     }
 
+    // Management KPI strip + inventory notices (derived from stock totals).
+    const buildKpisAndNotices = (): string => {
+      const gt = stockData?.grand_total
+      if (!gt) return ""
+      const all = filteredStock
+      const locations = new Set(all.map(l1 => l1.storage_location))
+      const datesVal = all.filter(l1 => isDateCategory(l1.group_name)).reduce((s, r) => s + (r.total_value || 0), 0)
+      const otherVal = (gt.total_value || 0) - datesVal
+      const pct = (v: number) => gt.total_value ? Math.round((v / gt.total_value) * 100) : 0
+      const topByVal = [...all].sort((a, b) => (b.total_value || 0) - (a.total_value || 0))[0]
+      const topPct = topByVal ? pct(topByVal.total_value || 0) : 0
+      const topRate = [...all].filter(l1 => (l1.total_kgs || 0) > 0).sort((a, b) => (b.avg_rate || 0) - (a.avg_rate || 0))[0]
+
+      const kpi = (label: string, value: string, accent?: string) =>
+        `<div style="flex:1;min-width:120px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.6px;color:#64748b">${label}</div><div style="font-size:17px;font-weight:800;color:${accent || "#0f172a"};margin-top:2px">${value}</div></div>`
+      const kpis = `<div style="display:flex;gap:10px;flex-wrap:wrap;margin:16px 0 12px">
+        ${kpi("Total Stock", `${fmtKgs(gt.total_kgs)} Kgs`)}
+        ${kpi("Total Value", fmtVal(gt.total_value), "#0e7490")}
+        ${kpi("Avg Rate", `${fmtRate(gt.avg_rate)}/Kg`)}
+        ${kpi("Lots", `${gt.lot_count}`)}
+        ${kpi("Category Groups", `${all.length}`)}
+        ${kpi("Locations", `${locations.size}`)}
+      </div>`
+
+      const notice = (icon: string, text: string, tone: "info" | "warn") => {
+        const c = tone === "warn" ? { bg: "#fffbeb", br: "#fde68a", fg: "#92400e" } : { bg: "#f0f9ff", br: "#bae6fd", fg: "#075985" }
+        return `<div style="flex:1;min-width:240px;background:${c.bg};border:1px solid ${c.br};border-radius:8px;padding:9px 12px;font-size:12px;color:${c.fg};line-height:1.45"><b>${icon}</b> ${text}</div>`
+      }
+      const notices: string[] = []
+      if (topByVal) notices.push(notice("&#9873;", `Concentration: <b>${esc(topByVal.storage_location)} &mdash; ${esc(topByVal.group_name)}</b> holds ${fmtVal(topByVal.total_value)} (<b>${topPct}%</b> of value) across ${topByVal.lot_count} lots.`, topPct >= 25 ? "warn" : "info"))
+      notices.push(notice("&#9711;", `Value split &mdash; Dates <b>${pct(datesVal)}%</b> (${fmtVal(datesVal)}) &middot; Other <b>${pct(otherVal)}%</b> (${fmtVal(otherVal)}).`, "info"))
+      if (topRate) notices.push(notice("&#8377;", `Highest rate: <b>${esc(topRate.group_name)}</b> at ${fmtRate(topRate.avg_rate)}/Kg &mdash; premium capital to watch.`, "info"))
+      return kpis + `<div style="display:flex;gap:10px;flex-wrap:wrap;margin:0 0 18px">${notices.join("")}</div>`
+    }
+
     let body = ""
     if (content === "stock" || content === "both") body += stockBlock()
     if (content === "ageing" || content === "both") body += ageingBlock()
 
-    return `<div style="font-family:system-ui,sans-serif;padding:24px;background:#fff;${scope === "both" ? "min-width:1400px" : "min-width:700px"}">
-      <h2 style="margin:0 0 4px;font-size:18px">Cold Storage — ${headerLabel}</h2>
-      <p style="margin:0 0 16px;font-size:12px;color:#64748b">${subtitle}</p>
+    const headerExtras = (content === "stock" || content === "both") ? buildKpisAndNotices() : ""
+    return `<div style="font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;padding:28px;background:#fff;width:100%;box-sizing:border-box;color:#0f172a">
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;border-bottom:3px solid #0f172a;padding-bottom:10px">
+        <div>
+          <div style="font-size:21px;font-weight:800;letter-spacing:-0.3px">Cold Storage &mdash; ${headerLabel}</div>
+          <div style="font-size:12px;color:#64748b;margin-top:3px">${subtitle}</div>
+        </div>
+        <div style="font-size:11px;color:#94a3b8;text-align:right;line-height:1.5">Candor IMS<br/>Generated ${format(new Date(), "dd MMM yyyy, HH:mm")}</div>
+      </div>
+      ${headerExtras}
       ${body}
     </div>`
   }
@@ -1075,7 +1191,8 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
     try {
       const html = buildSnapshotHtml(scope, layer, content)
       const iframe = document.createElement("iframe")
-      const w = scope === "both" ? 1500 : 900
+      // Stock uses a fixed, balanced 2-column width; ageing keeps its wider grid.
+      const w = content === "ageing" ? (scope === "both" ? 1500 : 900) : 1400
       iframe.style.cssText = `position:fixed;left:-9999px;top:0;width:${w}px;height:auto;border:0`
       document.body.appendChild(iframe)
       iframe.contentDocument!.open()
@@ -1107,6 +1224,7 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
   return (
     <PermissionGuard module="cold-storage" action="view">
      <AgeingModeContext.Provider value={ageingMode}>
+     <InTransitContext.Provider value={inTransitByLot}>
       <div className="p-3 sm:p-4 md:p-6 max-w-[1600px] mx-auto space-y-4">
 
         {/* ── HEADER ── */}
@@ -1340,7 +1458,7 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
 
         {/* ── TABS ── */}
         <Tabs value={activeTab} onValueChange={v => { setActiveTab(v as any); setExpanded(new Set()); setAllExpanded(false) }}>
-          <div className="sticky top-14 z-30 bg-background/95 backdrop-blur -mx-3 sm:-mx-4 md:-mx-6 px-3 sm:px-4 md:px-6 pt-2 pb-2 border-b border-border/40">
+          <div ref={toolbarRef} className="sticky top-14 z-30 bg-background/95 backdrop-blur -mx-3 sm:-mx-4 md:-mx-6 px-3 sm:px-4 md:px-6 pt-2 pb-2 border-b border-border/40">
           <div className="flex items-center justify-between gap-2">
             <TabsList>
               <TabsTrigger value="stock" className="text-xs sm:text-sm">Stock Summary</TabsTrigger>
@@ -1395,9 +1513,9 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
             <DashboardLegend tab="stock" />
             <Card><CardContent className="p-0">
               {loading ? <TableSkeleton /> : (
-                <div ref={stockRef} className="overflow-x-auto">
+                <div ref={stockRef}>
                   <table className="w-full text-sm">
-                    <thead className="sticky top-0 z-10">
+                    <thead className="sticky z-20" style={{ top: stickyHeaderTop }}>
                       <tr className="border-b bg-muted/60 backdrop-blur">
                         <th className="text-left font-medium text-xs uppercase tracking-wider px-3 py-2.5 min-w-[280px]">Category</th>
                         <th className="text-right font-medium text-xs uppercase tracking-wider px-3 py-2.5 w-[130px]">Total Kgs</th>
@@ -1500,7 +1618,7 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
                 {loading ? <TableSkeleton /> : (
                   <div>
                     <table className="w-full text-sm">
-                      <thead className="sticky top-0 z-10">
+                      <thead className="sticky z-20" style={{ top: stickyHeaderTop }}>
                         <tr className="border-b">
                           <th className="text-left font-medium text-xs uppercase tracking-wider px-3 py-2.5 min-w-[180px] bg-muted/60">Category</th>
                           <th className="text-right font-medium text-xs uppercase tracking-wider px-3 py-2.5 w-[90px] bg-green-50 dark:bg-green-950/30">&lt; 30d</th>
@@ -1562,7 +1680,7 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
               {loading ? <TableSkeleton /> : (
                 <div ref={ageingRef}>
                   <table className="w-full text-sm">
-                    <thead className="sticky top-0 z-10">
+                    <thead className="sticky z-20" style={{ top: stickyHeaderTop }}>
                       <tr className="border-b">
                         <th className="text-left font-medium text-xs uppercase tracking-wider px-3 py-2.5 min-w-[180px] bg-muted/60">Category</th>
                         <th className="text-right font-medium text-xs uppercase tracking-wider px-3 py-2.5 w-[90px] bg-green-50 dark:bg-green-950/30">&lt; 6M</th>
@@ -1909,6 +2027,7 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
           </TabsContent>
         </Tabs>
       </div>
+     </InTransitContext.Provider>
      </AgeingModeContext.Provider>
     </PermissionGuard>
   )
@@ -2266,6 +2385,7 @@ function StockLotRow({ lot, avgRate }: { lot: LotDetail; avgRate: number }) {
   const params = useParams()
   const company = params?.company as string
   const ageingMode = useContext(AgeingModeContext)
+  const it = useContext(InTransitContext)[lot.lot_no]
   const devCls = lot.deviation_level === "anomaly" ? "bg-[#fee2e2] text-[#991b1b]" : lot.deviation_level === "review" ? "bg-[#fef3c7] text-[#92400e]" : "bg-[#dcfce7] text-[#166534]"
   const devIcon = lot.deviation_level === "normal" ? "●" : lot.deviation_pct > 0 ? "▲" : "▼"
   const ageInfo = getAgeingBracketInfo(lot.ageing_days, ageingMode)
@@ -2286,6 +2406,14 @@ function StockLotRow({ lot, avgRate }: { lot: LotDetail; avgRate: number }) {
               {lot.inward_no && <span className="text-muted-foreground">GRN: {lot.inward_no}</span>}
               {lot.box_count > 1 && <span className="text-blue-600 dark:text-blue-400 font-medium">{lot.box_count} boxes</span>}
               {lot.no_of_cartons > 0 && <span className="text-muted-foreground">{lot.no_of_cartons} ctns &times; {lot.weight_kg} Kg</span>}
+              {it && it.cartons > 0 && (
+                <span
+                  title={`${it.cartons.toLocaleString()} carton(s) of this lot are in transit (already removed from available stock)`}
+                  className="text-[10px] font-medium px-1.5 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200"
+                >
+                  +{it.cartons.toLocaleString()} in transit
+                </span>
+              )}
             </div>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5">
               {lot.ageing_days != null && (

@@ -21,16 +21,11 @@ import { PermissionGuard } from "@/components/auth/permission-gate"
 import { useAuthStore } from "@/lib/stores/auth"
 
 const DASHBOARD_ALLOWED_EMAILS = ["yash@candorfoods.in", "b.hrithik@candorfoods.in"]
-import { transferDashboardApi, type TransferRecord, type TransferFilterOptions } from "@/lib/api/transferDashboardApi"
+import { transferDashboardApi, readTransferCache, writeTransferCache, type TransferRecord, type TransferFilterOptions } from "@/lib/api/transferDashboardApi"
 import { getDisplayWarehouseName, normalizeWarehouseName } from "@/lib/constants/warehouses"
-
-// Title-case fold for collapsing "FARD"/"Fard"/"fard" duplicates.
-const titleFold = (s: string | null | undefined): string => {
-  if (!s) return ""
-  const t = String(s).trim()
-  if (!t) return ""
-  return t.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
-}
+import { canonicalizeCategory } from "@/lib/categories/canonicalize"
+import { buildSummary, DEFAULT_THEN_BY } from "@/lib/transfer/buildSummary"
+import { makeRecordSearch, parseSearchTerms } from "@/lib/search/recordSearch"
 import { usePersistedState, setSerializers } from "@/lib/hooks/usePersistedState"
 
 interface Props { params: { company: string } }
@@ -46,6 +41,14 @@ const GROUP_OPTIONS: { value: GroupByKey; label: string }[] = [
   { value: "item_category", label: "Category" }, { value: "sub_category", label: "Sub Category" },
   { value: "material_type", label: "Material" }, { value: "month", label: "Month" },
   { value: "status", label: "Status" }, { value: "created_by", label: "Created By" },
+]
+
+// Fields matched by the smart search box (record-level, multi-term, AND).
+const TRANSFER_SEARCH_FIELDS: (keyof TransferRecord & string)[] = [
+  "transfer_id", "challan_no", "lot_number", "item_description", "item_category",
+  "sub_category", "material_type", "from_warehouse", "to_warehouse", "vehicle_no",
+  "driver_name", "created_by", "status", "received_status", "remark", "transfer_date",
+  "issue_items",
 ]
 
 const DATE_PRESETS = [
@@ -93,6 +96,7 @@ export default function TransferDashboard({ params }: Props) {
   const [showIssuesOnly, setShowIssuesOnly] = usePersistedState(`${NS}:showIssuesOnly`, false)
 
   const [groupBy, setGroupBy] = usePersistedState<GroupByKey>(`${NS}:groupBy`, "from_warehouse")
+  const [thenBy, setThenBy] = usePersistedState<GroupByKey | "none">(`${NS}:thenBy`, DEFAULT_THEN_BY["from_warehouse"])
   const [viewMode, setViewMode] = usePersistedState<ViewMode>(`${NS}:viewMode`, "both")
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [allExpanded, setAllExpanded] = useState(false)
@@ -100,6 +104,9 @@ export default function TransferDashboard({ params }: Props) {
   const [searchQuery, setSearchQuery] = useState("")
   const [sortBy, setSortBy] = useState<"weight" | "boxes" | "count" | "name">("weight")
   const [selectedTransfer, setSelectedTransfer] = useState<number | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
+  const [lastUpdated, setLastUpdated] = useState<number | null>(null)
+  const [refreshError, setRefreshError] = useState<string | null>(null)
 
   const activeFilterCount = [dateFrom, dateTo].filter(Boolean).length +
     [selFrom, selTo, selCategory, selMaterial, selStatus].filter(s => s.size > 0).length +
@@ -120,6 +127,12 @@ export default function TransferDashboard({ params }: Props) {
   const availableGroupOptions = useMemo(() =>
     GROUP_OPTIONS.filter(g => !lockedDimensions.has(g.value)),
   [lockedDimensions])
+
+  // Dimensions selectable as the second level (then-by): not the current L1,
+  // not locked by a filter.
+  const thenByOptions = useMemo(() =>
+    GROUP_OPTIONS.filter(g => g.value !== groupBy && !lockedDimensions.has(g.value)),
+  [groupBy, lockedDimensions])
 
   // Cascading filter options
   const cascadedOpts = useMemo(() => {
@@ -143,28 +156,59 @@ export default function TransferDashboard({ params }: Props) {
     }
   }, [allRecords, dateFrom, dateTo, selFrom, selTo, selCategory, selMaterial, selStatus])
 
-  const fetchData = useCallback(async () => {
-    setLoading(true); setError(null)
+  // Normalize raw API records: canonical warehouse + category folding so
+  // case/spacing duplicates collapse in chips and grouping.
+  const applyData = useCallback((rawRecords: TransferRecord[], opts: TransferFilterOptions | null) => {
+    const normalized: TransferRecord[] = (rawRecords || []).map((r) => ({
+      ...r,
+      from_warehouse: normalizeWarehouseName(r.from_warehouse) || r.from_warehouse || "",
+      to_warehouse: normalizeWarehouseName(r.to_warehouse) || r.to_warehouse || "",
+      item_category: canonicalizeCategory(r.item_category),
+      sub_category: canonicalizeCategory(r.sub_category),
+      material_type: canonicalizeCategory(r.material_type),
+    }))
+    setAllRecords(normalized)
+    if (opts) setFilterOpts(opts)
+  }, [])
+
+  // Stale-while-revalidate: a silent run keeps the table on screen (no skeleton)
+  // and only swaps numbers in; the skeleton shows only on the first-ever load.
+  const fetchData = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent ?? false
+    if (silent) setRefreshing(true)
+    else { setLoading(true); setError(null) }
     try {
-      const [data, opts] = await Promise.all([
+      const [data, fopts] = await Promise.all([
         transferDashboardApi.getAllData(),
         transferDashboardApi.getFilterOptions(),
       ])
-      // Canonicalize so case/case+alias duplicates collapse in chips + grouping.
-      const normalized: TransferRecord[] = (data.records || []).map((r) => ({
-        ...r,
-        from_warehouse: normalizeWarehouseName(r.from_warehouse) || r.from_warehouse || "",
-        to_warehouse: normalizeWarehouseName(r.to_warehouse) || r.to_warehouse || "",
-        item_category: titleFold(r.item_category),
-        sub_category: titleFold(r.sub_category),
-        material_type: titleFold(r.material_type),
-      }))
-      setAllRecords(normalized); setFilterOpts(opts)
-    } catch (err) { setError(err instanceof Error ? err.message : "Failed to load") }
-    finally { setLoading(false) }
-  }, [])
+      applyData(data.records || [], fopts)
+      writeTransferCache(data, fopts, company)
+      setLastUpdated(Date.now())
+      setRefreshError(null)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to load"
+      if (silent) setRefreshError(msg)   // keep cached data on screen
+      else setError(msg)
+    } finally {
+      if (silent) setRefreshing(false)
+      else setLoading(false)
+    }
+  }, [applyData])
 
-  useEffect(() => { fetchData() }, [fetchData])
+  // On mount: paint instantly from cache (if any), then revalidate in background.
+  useEffect(() => {
+    const cached = readTransferCache(company)
+    if (cached) {
+      applyData(cached.records, cached.filterOptions)
+      setLastUpdated(cached.savedAt)
+      setLoading(false)
+      fetchData({ silent: true })
+    } else {
+      fetchData({ silent: false })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Auto-switch groupBy when current dimension gets locked by a filter
   useEffect(() => {
@@ -173,6 +217,26 @@ export default function TransferDashboard({ params }: Props) {
       setExpanded(new Set()); setAllExpanded(false)
     }
   }, [lockedDimensions, groupBy, availableGroupOptions])
+
+  // Keep thenBy (L2) valid: never equal to groupBy, never a locked dimension.
+  useEffect(() => {
+    const invalid = thenBy !== "none" && (thenBy === groupBy || lockedDimensions.has(thenBy))
+    if (invalid) {
+      const def = DEFAULT_THEN_BY[groupBy]
+      const ok = def !== "none" && def !== groupBy && !lockedDimensions.has(def)
+      setThenBy(ok ? def : "none")
+    }
+  }, [thenBy, groupBy, lockedDimensions])
+
+  // Smart search: record-level, multi-term (every word must match somewhere),
+  // across all fields. It drives the whole screen (KPIs, tree, Grand Total) so
+  // everything reduces to what's searched.
+  const searchTerms = useMemo(() => parseSearchTerms(searchQuery), [searchQuery])
+  const isSearching = searchTerms.length > 0
+  const searchMatch = useMemo(
+    () => makeRecordSearch<TransferRecord>(searchQuery, TRANSFER_SEARCH_FIELDS),
+    [searchQuery],
+  )
 
   // Client-side filtering
   const filtered = useMemo(() => allRecords.filter(r => {
@@ -184,8 +248,9 @@ export default function TransferDashboard({ params }: Props) {
     if (selMaterial.size > 0 && !selMaterial.has(r.material_type)) return false
     if (selStatus.size > 0 && !selStatus.has(r.status)) return false
     if (showIssuesOnly && !r.has_issue) return false
+    if (!searchMatch(r)) return false
     return true
-  }), [allRecords, dateFrom, dateTo, selFrom, selTo, selCategory, selMaterial, selStatus, showIssuesOnly])
+  }), [allRecords, dateFrom, dateTo, selFrom, selTo, selCategory, selMaterial, selStatus, showIssuesOnly, searchMatch])
 
   // KPIs
   const kpis = useMemo(() => {
@@ -207,174 +272,41 @@ export default function TransferDashboard({ params }: Props) {
     }
   }, [filtered])
 
-  // Grouped summary
-  const gf = (r: TransferRecord): string => {
-    switch (groupBy) {
-      case "from_warehouse": return r.from_warehouse || "Unknown"
-      case "to_warehouse": return r.to_warehouse || "Unknown"
-      case "item_category": return r.item_category || "Uncategorized"
-      case "sub_category": return r.sub_category || "General"
-      case "material_type": return r.material_type || "N/A"
-      case "month": return r.transfer_month || "Unknown"
-      case "status": return r.status || "Unknown"
-      case "created_by": return r.created_by || "Unknown"
-    }
-  }
-
-  const summary = useMemo(() => {
-    const l1Map = new Map<string, TransferRecord[]>()
-    for (const r of filtered) { const g = gf(r); if (!l1Map.has(g)) l1Map.set(g, []); l1Map.get(g)!.push(r) }
-
-    // Pick L2 dimension — best available that is different from L1 and not locked by filters
-    const l2Candidates: { key: GroupByKey; fn: (r: TransferRecord) => string }[] = [
-      { key: "from_warehouse", fn: r => r.from_warehouse || "Unknown" },
-      { key: "to_warehouse", fn: r => r.to_warehouse || "Unknown" },
-      { key: "item_category", fn: r => r.item_category || "Uncategorized" },
-      { key: "sub_category", fn: r => r.sub_category || "General" },
-      { key: "material_type", fn: r => r.material_type || "N/A" },
-      { key: "month", fn: r => r.transfer_month || "Unknown" },
-      { key: "status", fn: r => r.status || "Unknown" },
-      { key: "created_by", fn: r => r.created_by || "Unknown" },
-    ]
-
-    // Preferred L2 ordering based on what makes sense as a sub-group
-    const l2Preferred: Record<GroupByKey, GroupByKey[]> = {
-      from_warehouse: ["to_warehouse", "item_category", "sub_category", "material_type", "month", "status", "created_by"],
-      to_warehouse: ["from_warehouse", "item_category", "sub_category", "material_type", "month", "status", "created_by"],
-      item_category: ["sub_category", "from_warehouse", "to_warehouse", "material_type", "month", "status", "created_by"],
-      sub_category: ["item_category", "from_warehouse", "to_warehouse", "material_type", "month", "status", "created_by"],
-      material_type: ["item_category", "sub_category", "from_warehouse", "to_warehouse", "month", "status", "created_by"],
-      month: ["from_warehouse", "to_warehouse", "item_category", "sub_category", "material_type", "status", "created_by"],
-      status: ["from_warehouse", "to_warehouse", "item_category", "sub_category", "material_type", "month", "created_by"],
-      created_by: ["item_category", "from_warehouse", "to_warehouse", "sub_category", "material_type", "month", "status"],
-    }
-
-    // Find best L2 dimension: not same as L1 and not locked
-    const l2Pick = l2Preferred[groupBy]?.find(k => k !== groupBy && !lockedDimensions.has(k)) || "item_category"
-    const l2Fn = l2Candidates.find(c => c.key === l2Pick)?.fn || (r => r.item_category || "Uncategorized")
-    const l2Field = l2Fn
-
-    const sumNet = (rs: TransferRecord[]) => rs.reduce((s, r) => s + (r.net_weight || 0), 0)
-    const sumGross = (rs: TransferRecord[]) => rs.reduce((s, r) => s + (r.total_weight || 0), 0)
-
-    const data = Array.from(l1Map.entries()).map(([label, records]) => {
-      const tids = new Set(records.map(r => r.transfer_id))
-      const net = sumNet(records)
-      const gross = sumGross(records)
-      const weight = net || gross
-      const boxes = records.reduce((s, r) => s + (r.box_count || 0), 0)
-      const pend = new Set(records.filter(r => r.status === "Dispatch" || r.status === "Pending").map(r => r.transfer_id))
-
-      const l2Map = new Map<string, TransferRecord[]>()
-      for (const r of records) { const k = l2Field(r); if (!l2Map.has(k)) l2Map.set(k, []); l2Map.get(k)!.push(r) }
-
-      const children = Array.from(l2Map.entries()).map(([sl, recs]) => {
-        const sNet = sumNet(recs)
-        const sGross = sumGross(recs)
-        const sw = sNet || sGross
-        const sb = recs.reduce((s, r) => s + (r.box_count || 0), 0)
-
-        // L3 = item_category (new middle layer between L2 and items).
-        // Skipped when L1 or L2 is already item_category to avoid duplication.
-        const categoryAlreadyAtAncestor = groupBy === "item_category" || l2Pick === "item_category"
-        const l3CatMap = new Map<string, TransferRecord[]>()
-        for (const r of recs) {
-          const k = r.item_category || "Uncategorized"
-          if (!l3CatMap.has(k)) l3CatMap.set(k, [])
-          l3CatMap.get(k)!.push(r)
-        }
-
-        // Build category buckets, each with item_description children (the original L3 — now L4)
-        const categoryBuckets = Array.from(l3CatMap.entries()).map(([cat, crecs]) => {
-          const cNet = sumNet(crecs)
-          const cGross = sumGross(crecs)
-          const cw = cNet || cGross
-          const cb = crecs.reduce((s, r) => s + (r.box_count || 0), 0)
-          const itemMap = new Map<string, TransferRecord[]>()
-          for (const r of crecs) {
-            const k = r.item_description || "Unknown"
-            if (!itemMap.has(k)) itemMap.set(k, [])
-            itemMap.get(k)!.push(r)
-          }
-          const items = Array.from(itemMap.entries()).map(([item, irecs]) => {
-            const iNet = sumNet(irecs)
-            const iGross = sumGross(irecs)
-            const iw = iNet || iGross
-            const ib = irecs.reduce((s, r) => s + (r.box_count || 0), 0)
-            return {
-              item_description: item,
-              material_type: irecs[0]?.material_type || "",
-              total_weight: iw, total_net_weight: iNet, total_gross_weight: iGross,
-              total_boxes: ib,
-              tx_count: new Set(irecs.map(r => r.transfer_id)).size,
-              records: irecs,
-            }
-          }).sort((a, b) => b.total_weight - a.total_weight)
-          return {
-            category_label: cat,
-            tx_count: new Set(crecs.map(r => r.transfer_id)).size,
-            total_weight: cw, total_net_weight: cNet, total_gross_weight: cGross,
-            total_boxes: cb,
-            children: items,
-          }
-        }).sort((a, b) => b.total_weight - a.total_weight)
-
-        // If category layer would have only 1 bucket OR is redundant with an ancestor,
-        // skip it and surface item_description rows directly under L2.
-        const skipCategory = categoryAlreadyAtAncestor || categoryBuckets.length <= 1
-        const flatItems = categoryBuckets.flatMap(cb => cb.children)
-
-        return {
-          sub_label: sl,
-          tx_count: new Set(recs.map(r => r.transfer_id)).size,
-          total_weight: sw, total_net_weight: sNet, total_gross_weight: sGross,
-          total_boxes: sb,
-          // categoryBuckets when used (skipCategory=false), else fall back to flat items
-          categories: skipCategory ? [] : categoryBuckets,
-          children: skipCategory ? flatItems : [],
-          skipCategory,
-          skipL2: false,
-        }
-      }).sort((a, b) => b.total_weight - a.total_weight)
-
-      // If L1 has only 1 L2 child with same label — skip L2, go direct to items
-      const skipL2 = children.length === 1 && (
-        children[0].sub_label === label ||
-        children[0].sub_label.toLowerCase() === label.toLowerCase()
-      )
-
-      return { group_label: label, tx_count: tids.size, total_weight: weight, total_net_weight: net, total_gross_weight: gross, total_boxes: boxes, pending_count: pend.size, children, skipL2 }
-    })
-
-    type SummaryL1 = (typeof data)[number]
-
-    // Search
-    const sq = searchQuery.toLowerCase().trim()
-    const searched = sq ? data.filter(l1 =>
-      l1.group_label.toLowerCase().includes(sq) ||
-      l1.children.some(l2 => l2.sub_label.toLowerCase().includes(sq) ||
-        l2.children.some(l3 => l3.item_description.toLowerCase().includes(sq)))
-    ) : data
-
-    // Sort
-    const sortFn = (a: SummaryL1, b: SummaryL1) => {
-      switch (sortBy) {
-        case "weight": return b.total_weight - a.total_weight
-        case "boxes": return b.total_boxes - a.total_boxes
-        case "count": return b.tx_count - a.tx_count
-        case "name": return a.group_label.localeCompare(b.group_label)
-        default: return b.total_weight - a.total_weight
-      }
-    }
-    return [...searched].sort(sortFn)
-  }, [filtered, groupBy, lockedDimensions, searchQuery, sortBy])
+  // Grouped summary — explicit, predictable hierarchy (L1 = groupBy,
+  // L2 = thenBy or none, leaf = item rows). The active sort cascades into
+  // every layer; search already pruned `filtered` to matches.
+  const summary = useMemo(
+    () => buildSummary({ records: filtered, groupBy, thenBy, sortBy }),
+    [filtered, groupBy, thenBy, sortBy],
+  )
 
   const toggle = (k: string) => setExpanded(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n })
+
+  // Every expandable key in the current tree (L1, L2, and item rows).
+  const allKeys = useMemo(() => {
+    const keys = new Set<string>()
+    summary.forEach(l1 => {
+      keys.add(l1.label)
+      if (l1.children) {
+        l1.children.forEach(l2 => {
+          const k2 = l1.label + "|||" + l2.label
+          keys.add(k2)
+          l2.items?.forEach(it => keys.add(k2 + "|||" + it.item_description))
+        })
+      } else {
+        l1.items?.forEach(it => keys.add(l1.label + "|||" + it.item_description))
+      }
+    })
+    return keys
+  }, [summary])
+
+  // While searching, auto-expand everything so matches are revealed inline; the
+  // user's manual expansion is preserved for when the search is cleared.
+  const effExpanded = isSearching ? allKeys : expanded
+
   const toggleAll = () => {
     if (allExpanded) { setExpanded(new Set()); setAllExpanded(false); return }
-    const keys = new Set<string>()
-    summary.forEach(l1 => { keys.add(l1.group_label); l1.children.forEach(l2 => keys.add(l1.group_label + "|||" + l2.sub_label)) })
-    setExpanded(keys); setAllExpanded(true)
+    setExpanded(new Set(allKeys)); setAllExpanded(true)
   }
 
   const clearFilters = () => { setDateFrom(""); setDateTo(""); setSelFrom(new Set()); setSelTo(new Set()); setSelCategory(new Set()); setSelMaterial(new Set()); setSelStatus(new Set()); setShowIssuesOnly(false) }
@@ -402,7 +334,7 @@ export default function TransferDashboard({ params }: Props) {
       `Total: ${kpis.total_transfers} transfers | ${fmtWt(kpis.total_net_weight, kpis.total_gross_weight)}`,
       "",
     ]
-    summary.forEach(l1 => lines.push(`${l1.group_label}  ${l1.tx_count} TRs  ${fmtWt(l1.total_net_weight, l1.total_gross_weight)}  ${fmtN(l1.total_boxes)} Boxes`))
+    summary.forEach(l1 => lines.push(`${l1.label}  ${l1.tx_count} TRs  ${fmtWt(l1.total_net_weight, l1.total_gross_weight)}  ${fmtN(l1.total_boxes)} Boxes`))
     try { await navigator.clipboard.writeText(lines.join("\n")); setCopied(true); setTimeout(() => setCopied(false), 2000) } catch {}
   }
 
@@ -434,13 +366,16 @@ export default function TransferDashboard({ params }: Props) {
             <div>
               <h1 className="text-xl md:text-2xl font-bold tracking-tight">Transfer Summary</h1>
               <p className="text-xs text-muted-foreground">As of {format(new Date(), "dd-MMM-yyyy")}
+                {lastUpdated && <span className="ml-2">&middot; Updated {format(new Date(lastUpdated), "HH:mm")}</span>}
+                {refreshing && <span className="ml-2 text-teal-600">&middot; refreshing&hellip;</span>}
+                {refreshError && !refreshing && <span className="ml-2 text-amber-600">&middot; refresh failed</span>}
                 {activeFilterCount > 0 && <span className="ml-2 text-teal-600">&middot; {activeFilterCount} filter{activeFilterCount > 1 ? "s" : ""}</span>}
               </p>
             </div>
           </div>
           <div className="flex items-center gap-1.5 flex-wrap">
-            <Button variant="outline" size="sm" className="h-8 gap-1 text-xs" onClick={() => fetchData()}>
-              <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} /><span className="hidden sm:inline">Refresh</span>
+            <Button variant="outline" size="sm" className="h-8 gap-1 text-xs" onClick={() => fetchData({ silent: true })}>
+              <RefreshCw className={cn("h-3.5 w-3.5", (loading || refreshing) && "animate-spin")} /><span className="hidden sm:inline">Refresh</span>
             </Button>
             <Button variant="outline" size="sm" className="h-8 gap-1 text-xs" onClick={handleCopy}>
               <Copy className="h-3.5 w-3.5" /><span className="hidden sm:inline">{copied ? "Copied!" : "Copy"}</span>
@@ -683,10 +618,21 @@ export default function TransferDashboard({ params }: Props) {
                   <span className="text-xs text-muted-foreground">Group:</span>
                   <div className="flex rounded-lg border overflow-hidden text-xs">
                     {availableGroupOptions.map(g => (
-                      <button key={g.value} onClick={() => { setGroupBy(g.value); setExpanded(new Set()); setAllExpanded(false) }}
+                      <button key={g.value} onClick={() => { setGroupBy(g.value); setThenBy(DEFAULT_THEN_BY[g.value]); setExpanded(new Set()); setAllExpanded(false) }}
                         className={cn("px-2 py-1.5 transition-colors whitespace-nowrap", groupBy === g.value ? "bg-[#0f172a] text-white" : "hover:bg-slate-100")}>{g.label}</button>
                     ))}
                   </div>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-muted-foreground">then by:</span>
+                  <select
+                    value={thenBy}
+                    onChange={e => { setThenBy(e.target.value as GroupByKey | "none"); setExpanded(new Set()); setAllExpanded(false) }}
+                    className="h-7 rounded-lg border bg-white dark:bg-slate-800 text-xs px-2"
+                  >
+                    {thenByOptions.map(g => <option key={g.value} value={g.value}>{g.label}</option>)}
+                    <option value="none">None (items only)</option>
+                  </select>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="text-xs text-muted-foreground">View:</span>
@@ -750,21 +696,12 @@ export default function TransferDashboard({ params }: Props) {
                 </thead>
                 <tbody>
                   {summary.map(l1 => {
-                    const k1 = l1.group_label; const o1 = expanded.has(k1)
-                    // Items to render — if skipL2, flatten through whichever path each L2 used
-                    const itemsForL1 = l1.skipL2
-                      ? l1.children.flatMap(l2 =>
-                          l2.skipCategory
-                            ? l2.children
-                            : l2.categories.flatMap(cat => cat.children)
-                        )
-                      : null
+                    const k1 = l1.label; const o1 = effExpanded.has(k1)
                     return (<React.Fragment key={k1}>
                       <tr className="border-b cursor-pointer hover:opacity-90 transition-colors bg-[#0f172a] text-white font-semibold" onClick={() => toggle(k1)}>
                         <td className="px-3 py-2.5 pl-3">
                           <span className="inline-flex items-center gap-1.5">
-                            {o1 ? <ChevronDown className="h-4 w-4 text-teal-400" /> : <ChevronRight className="h-4 w-4 text-teal-400" />}{l1.group_label}
-                            {l1.skipL2 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-teal-500/20 text-teal-300">direct</span>}
+                            {o1 ? <ChevronDown className="h-4 w-4 text-teal-400" /> : <ChevronRight className="h-4 w-4 text-teal-400" />}{l1.label}
                             {l1.pending_count > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">{l1.pending_count} pending</span>}
                           </span>
                         </td>
@@ -773,54 +710,32 @@ export default function TransferDashboard({ params }: Props) {
                         <td className="text-right px-3 py-2.5 tabular-nums">{l1.pending_count || ""}</td>
                       </tr>
 
-                      {/* If skipL2 — show items directly under L1 (skip L2 layer) */}
-                      {o1 && l1.skipL2 && itemsForL1?.map(l3 => {
-                        const k3 = k1 + "|||" + l3.item_description; const o3 = expanded.has(k3)
-                        return (<React.Fragment key={k3}>
-                          <ItemRow k={k3} o={o3} l3={l3} indent="pl-8" toggle={toggle} showVal={showVal} />
-                          {o3 && <TransferRows records={l3.records} showVal={showVal} indent="pl-14" onClickTransfer={setSelectedTransfer} />}
-                        </React.Fragment>)
-                      })}
-
-                      {/* Normal L2 → (L3 Category) → L4 Item → L5 Records flow */}
-                      {o1 && !l1.skipL2 && l1.children.map(l2 => {
-                        const k2 = k1 + "|||" + l2.sub_label; const o2 = expanded.has(k2)
+                      {/* L2 groups (then-by) → item rows → transfer detail */}
+                      {o1 && l1.children && l1.children.map(l2 => {
+                        const k2 = k1 + "|||" + l2.label; const o2 = effExpanded.has(k2)
                         return (<React.Fragment key={k2}>
                           <tr className="border-b cursor-pointer hover:bg-slate-200/50 transition-colors bg-slate-100 dark:bg-slate-800 font-medium border-l-[3px] border-l-teal-500" onClick={() => toggle(k2)}>
-                            <td className="px-3 py-2 pl-8"><span className="inline-flex items-center gap-1.5">{o2 ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}{l2.sub_label}</span></td>
+                            <td className="px-3 py-2 pl-8"><span className="inline-flex items-center gap-1.5">{o2 ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}{l2.label}</span></td>
                             <td className="text-right px-3 py-2 tabular-nums">{l2.tx_count}</td>
                             <td className="text-right px-3 py-2">{showVal(l2.total_weight, l2.total_boxes, l2.total_net_weight, l2.total_gross_weight)}</td>
                             <td />
                           </tr>
-
-                          {/* Skip-Category fallback — render items directly under L2 */}
-                          {o2 && l2.skipCategory && l2.children.map(l3 => {
-                            const k3 = k2 + "|||" + l3.item_description; const o3 = expanded.has(k3)
+                          {o2 && l2.items && l2.items.map(it => {
+                            const k3 = k2 + "|||" + it.item_description; const o3 = effExpanded.has(k3)
                             return (<React.Fragment key={k3}>
-                              <ItemRow k={k3} o={o3} l3={l3} indent="pl-14" toggle={toggle} showVal={showVal} />
-                              {o3 && <TransferRows records={l3.records} showVal={showVal} indent="pl-20" onClickTransfer={setSelectedTransfer} />}
+                              <ItemRow k={k3} o={o3} l3={it} indent="pl-14" toggle={toggle} showVal={showVal} />
+                              {o3 && <TransferRows records={it.records} showVal={showVal} indent="pl-20" onClickTransfer={setSelectedTransfer} />}
                             </React.Fragment>)
                           })}
+                        </React.Fragment>)
+                      })}
 
-                          {/* Category layer — L3 Category → L4 Item → L5 Records */}
-                          {o2 && !l2.skipCategory && l2.categories.map(cat => {
-                            const k3 = k2 + "|||" + cat.category_label; const o3 = expanded.has(k3)
-                            return (<React.Fragment key={k3}>
-                              <tr className="border-b cursor-pointer hover:bg-slate-100/50 transition-colors bg-slate-50/70 dark:bg-slate-800/40 text-sm border-l-[2px] border-l-teal-300" onClick={() => toggle(k3)}>
-                                <td className="px-3 py-1.5 pl-14"><span className="inline-flex items-center gap-1.5">{o3 ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}<span className="text-xs uppercase tracking-wide text-muted-foreground">Cat:</span> {cat.category_label}</span></td>
-                                <td className="text-right px-3 py-1.5 tabular-nums text-xs">{cat.tx_count}</td>
-                                <td className="text-right px-3 py-1.5 text-xs">{showVal(cat.total_weight, cat.total_boxes, cat.total_net_weight, cat.total_gross_weight)}</td>
-                                <td />
-                              </tr>
-                              {o3 && cat.children.map(l4 => {
-                                const k4 = k3 + "|||" + l4.item_description; const o4 = expanded.has(k4)
-                                return (<React.Fragment key={k4}>
-                                  <ItemRow k={k4} o={o4} l3={l4} indent="pl-20" toggle={toggle} showVal={showVal} />
-                                  {o4 && <TransferRows records={l4.records} showVal={showVal} indent="pl-24" onClickTransfer={setSelectedTransfer} />}
-                                </React.Fragment>)
-                              })}
-                            </React.Fragment>)
-                          })}
+                      {/* No L2 (then by = none) — item rows directly under L1 */}
+                      {o1 && !l1.children && l1.items && l1.items.map(it => {
+                        const k3 = k1 + "|||" + it.item_description; const o3 = effExpanded.has(k3)
+                        return (<React.Fragment key={k3}>
+                          <ItemRow k={k3} o={o3} l3={it} indent="pl-8" toggle={toggle} showVal={showVal} />
+                          {o3 && <TransferRows records={it.records} showVal={showVal} indent="pl-14" onClickTransfer={setSelectedTransfer} />}
                         </React.Fragment>)
                       })}
                     </React.Fragment>)

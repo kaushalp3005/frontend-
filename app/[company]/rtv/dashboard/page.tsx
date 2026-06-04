@@ -15,6 +15,8 @@ import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { rtvApi } from "@/lib/api/rtvApiService"
 import type { RTVListItem, RTVWithDetails, RTVLine } from "@/types/rtv"
+import { makeRecordSearch, parseSearchTerms } from "@/lib/search/recordSearch"
+import { readDashboardCache, writeDashboardCache } from "@/lib/cache/dashboardCache"
 import { canonicalize, groupByCanonical } from "@/lib/customers/canonicalize"
 import { CUSTOMER_ALIASES } from "@/lib/constants/customerAliases"
 import { Switch } from "@/components/ui/switch"
@@ -79,6 +81,12 @@ interface RTVRow {
   uom: string; qty: number; rate: number; value: number; net_weight: number
 }
 
+// Fields matched by the smart search box (record-level, multi-term, AND).
+const RTV_SEARCH_FIELDS: (keyof RTVRow & string)[] = [
+  "rtv_id", "customer", "factory_unit", "status", "material_type",
+  "item_category", "sub_category", "item_description", "uom", "rtv_date",
+]
+
 function seedRow(h: RTVListItem): RTVRow {
   return {
     id: h.id, rtv_id: h.rtv_id, rtv_date: h.rtv_date,
@@ -111,6 +119,7 @@ export default function RTVDashboard({ params }: Props) {
   const [rows, setRows] = useState<RTVRow[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingDetails, setLoadingDetails] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const [dateFrom, setDateFrom] = useState("")
@@ -132,8 +141,12 @@ export default function RTVDashboard({ params }: Props) {
   const [customerPopup, setCustomerPopup] = useState<string | null>(null)
 
   // ── Fetch: list all RTVs, then hydrate with line details ──
-  const fetchData = useCallback(async () => {
-    setLoading(true); setError(null)
+  // Stale-while-revalidate: a silent run keeps the cached rows on screen (no
+  // skeleton, no mid-load seed flicker) and swaps in fresh rows at the end.
+  const fetchData = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent ?? false
+    if (silent) setRefreshing(true)
+    else { setLoading(true); setError(null) }
     try {
       const headers: RTVListItem[] = []
       let page = 1
@@ -143,11 +156,13 @@ export default function RTVDashboard({ params }: Props) {
         if (resp.records.length < 100 || page >= resp.total_pages) break
         page++
       }
-      setRows(headers.map(seedRow))
-      setLoading(false)
+      if (!silent) {
+        setRows(headers.map(seedRow))
+        setLoading(false)
+        setLoadingDetails(true)
+      }
 
       // Hydrate with line details in parallel with bounded concurrency
-      setLoadingDetails(true)
       const enriched: RTVRow[] = []
       let idx = 0
       const worker = async () => {
@@ -162,12 +177,27 @@ export default function RTVDashboard({ params }: Props) {
       }
       await Promise.all(Array.from({ length: 6 }, () => worker()))
       setRows(enriched)
+      writeDashboardCache(`rtv-dashboard:cache:v1:${company}`, { rows: enriched })
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load RTV data")
-    } finally { setLoading(false); setLoadingDetails(false) }
+      if (!silent) setError(err instanceof Error ? err.message : "Failed to load RTV data")
+    } finally {
+      if (silent) setRefreshing(false)
+      else { setLoading(false); setLoadingDetails(false) }
+    }
   }, [company])
 
-  useEffect(() => { fetchData() }, [fetchData])
+  // On mount: paint instantly from cache (if any), then revalidate in background.
+  useEffect(() => {
+    const cached = readDashboardCache<{ rows: RTVRow[] }>(`rtv-dashboard:cache:v1:${company}`)
+    if (cached?.payload?.rows?.length) {
+      setRows(cached.payload.rows)
+      setLoading(false)
+      fetchData({ silent: true })
+    } else {
+      fetchData({ silent: false })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [company])
 
   const activeFilterCount = [dateFrom, dateTo].filter(Boolean).length +
     [selFactory, selMaterial, selStatus].filter(s => s.size > 0).length +
@@ -182,6 +212,13 @@ export default function RTVDashboard({ params }: Props) {
     if (dateTo && x > dateTo) return false
     return true
   }, [dateFrom, dateTo])
+
+  // Smart search: record-level, multi-term (every word must match somewhere),
+  // across all fields — drives the whole screen (KPIs, tree, totals) and prunes
+  // the tree to matches.
+  const searchTerms = useMemo(() => parseSearchTerms(searchQuery), [searchQuery])
+  const isSearching = searchTerms.length > 0
+  const searchMatch = useMemo(() => makeRecordSearch<RTVRow>(searchQuery, RTV_SEARCH_FIELDS), [searchQuery])
 
   // ── Filter ──
   const filtered = useMemo(() => rows.filter(r => {
@@ -198,8 +235,9 @@ export default function RTVDashboard({ params }: Props) {
     }
     if (selMaterial.size > 0 && !selMaterial.has(r.material_type || "")) return false
     if (selStatus.size > 0 && !selStatus.has(r.status)) return false
+    if (!searchMatch(r)) return false
     return true
-  }), [rows, inDateRange, selFactory, selCustomer, selCanonicalCustomer, groupSimilarCustomers, selMaterial, selStatus])
+  }), [rows, inDateRange, selFactory, selCustomer, selCanonicalCustomer, groupSimilarCustomers, selMaterial, selStatus, searchMatch])
 
   // ── Cascaded dropdown options ──
   const cascadedOpts = useMemo(() => {
@@ -323,13 +361,8 @@ export default function RTVDashboard({ params }: Props) {
       }
     })
 
-    const sq = searchQuery.toLowerCase().trim()
-    const searched = sq ? data.filter(l1 =>
-      l1.group_label.toLowerCase().includes(sq) ||
-      l1.children.some(l2 => l2.sub_label.toLowerCase().includes(sq) ||
-        l2.children.some(l3 => l3.item_description.toLowerCase().includes(sq)))
-    ) : data
-
+    // Search is applied at the record level (it already pruned `filtered`, so it
+    // drives KPIs + the tree); here we only sort the L1 groups.
     const sortFn = (a: typeof data[0], b: typeof data[0]) => {
       switch (sortBy) {
         case "value": return b.total_value - a.total_value
@@ -338,8 +371,8 @@ export default function RTVDashboard({ params }: Props) {
         case "name": return a.group_label.localeCompare(b.group_label)
       }
     }
-    return [...searched].sort(sortFn)
-  }, [filtered, groupBy, searchQuery, sortBy])
+    return [...data].sort(sortFn)
+  }, [filtered, groupBy, sortBy])
 
   // ── Actions ──
   const toggle = (k: string) => setExpanded(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n })
@@ -356,6 +389,24 @@ export default function RTVDashboard({ params }: Props) {
     })
     setExpanded(keys); setAllExpanded(true)
   }
+
+  // While searching, auto-expand down to item rows so matches are revealed
+  // inline; the user's manual expansion is preserved for when search clears.
+  const searchExpandKeys = useMemo(() => {
+    if (!isSearching) return null
+    const keys = new Set<string>()
+    summary.forEach(l1 => {
+      keys.add(l1.group_label)
+      l1.children.forEach(l2 => {
+        const k2 = l1.group_label + "|||" + l2.sub_label
+        keys.add(k2)
+        l2.children.forEach(l3 => keys.add(k2 + "|||" + l3.item_description))
+      })
+    })
+    return keys
+  }, [isSearching, summary])
+  const effExpanded = searchExpandKeys ?? expanded
+
   const clearFilters = () => {
     setDateFrom(""); setDateTo(""); setSelFactory(new Set()); setSelCustomer(new Set())
     setSelCanonicalCustomer(new Set()); setSelMaterial(new Set()); setSelStatus(new Set())
@@ -425,8 +476,8 @@ export default function RTVDashboard({ params }: Props) {
           </div>
         </div>
         <div className="flex items-center gap-1.5 flex-wrap">
-          <Button variant="outline" size="sm" className="h-8 gap-1 text-xs" onClick={() => fetchData()}>
-            <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} /><span className="hidden sm:inline">Refresh</span>
+          <Button variant="outline" size="sm" className="h-8 gap-1 text-xs" onClick={() => fetchData({ silent: true })}>
+            <RefreshCw className={cn("h-3.5 w-3.5", (loading || refreshing || loadingDetails) && "animate-spin")} /><span className="hidden sm:inline">Refresh</span>
           </Button>
           <Button variant="outline" size="sm" className="h-8 gap-1 text-xs" onClick={handleCopy}>
             <Copy className="h-3.5 w-3.5" /><span className="hidden sm:inline">{copied ? "Copied!" : "Copy"}</span>
@@ -694,7 +745,7 @@ export default function RTVDashboard({ params }: Props) {
               </thead>
               <tbody>
                 {summary.map(l1 => {
-                  const k1 = l1.group_label; const open1 = expanded.has(k1)
+                  const k1 = l1.group_label; const open1 = effExpanded.has(k1)
                   return (<React.Fragment key={k1}>
                     <tr className="border-b cursor-pointer hover:opacity-90 transition-colors bg-[#0f172a] text-white font-semibold" onClick={() => toggle(k1)}>
                       <td className="px-3 py-2.5">
@@ -713,7 +764,7 @@ export default function RTVDashboard({ params }: Props) {
                       <td className="text-right px-3 py-2.5 tabular-nums hidden lg:table-cell">{l1.children.reduce((s, c) => s + c.item_count, 0) || l1.children.length}</td>
                     </tr>
                     {open1 && l1.children.map(l2 => {
-                      const k2 = k1 + "|||" + l2.sub_label; const open2 = expanded.has(k2)
+                      const k2 = k1 + "|||" + l2.sub_label; const open2 = effExpanded.has(k2)
                       return (<React.Fragment key={k2}>
                         <tr className="border-b cursor-pointer hover:bg-slate-200/50 transition-colors bg-slate-100 dark:bg-slate-800 font-medium border-l-[3px] border-l-teal-500" onClick={() => toggle(k2)}>
                           <td className="px-3 py-2 pl-8">
@@ -727,7 +778,7 @@ export default function RTVDashboard({ params }: Props) {
                         </tr>
                         {open2 && l2.children.map(l3 => {
                           const k3 = k2 + "|||" + l3.item_description
-                          const open3 = expanded.has(k3)
+                          const open3 = effExpanded.has(k3)
                           const rtvMap = new Map<string, { id: number; rtv_id: string; rtv_date: string | null; customer: string; factory_unit: string; status: string; qty: number; value: number; rate: number; uom: string }>()
                           for (const r of l3.records) {
                             if (rtvMap.has(r.rtv_id)) {
