@@ -245,7 +245,8 @@ export default function TransferInViewPage({ params }: TransferInViewPageProps) 
                       <th className="text-left py-2 px-3 w-[50px]">#</th>
                       <th className="text-left py-2 px-3">Box ID</th>
                       <th className="text-left py-2 px-3">Transaction No</th>
-                      <th className="text-left py-2 px-3">Batch / Lot</th>
+                      <th className="text-left py-2 px-3">Lot No</th>
+                      <th className="text-left py-2 px-3">Batch</th>
                       <th className="text-right py-2 px-3">Net Wt</th>
                       <th className="text-right py-2 px-3">Gross Wt</th>
                       <th className="text-center py-2 px-3 w-[90px]">Status</th>
@@ -264,7 +265,8 @@ export default function TransferInViewPage({ params }: TransferInViewPageProps) 
                           </td>
                           <td className="py-2 px-3 font-mono text-xs text-gray-700">{b.box_id || "-"}</td>
                           <td className="py-2 px-3 font-mono text-xs text-gray-600">{b.transaction_no || "-"}</td>
-                          <td className="py-2 px-3 font-mono text-xs text-gray-600">{b.batch_number || b.lot_number || "-"}</td>
+                          <td className="py-2 px-3 font-mono text-xs font-medium text-gray-800">{b.lot_number || "-"}</td>
+                          <td className="py-2 px-3 font-mono text-xs text-gray-600">{b.batch_number || "-"}</td>
                           <td className="py-2 px-3 text-right text-gray-700">{b.net_weight != null ? `${b.net_weight} kg` : "-"}</td>
                           <td className="py-2 px-3 text-right text-gray-700">{b.gross_weight != null ? `${b.gross_weight} kg` : "-"}</td>
                           <td className="py-2 px-3 text-center">

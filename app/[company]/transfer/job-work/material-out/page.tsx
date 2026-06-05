@@ -1257,8 +1257,8 @@ export default function MaterialOutPage({ params }: MaterialOutPageProps) {
         const message = sections.join("\n\n")
         setColdTransferPopup({ open: true, message })
       } else {
-        // No cold storage — navigate to DC print page
-        router.push(`/${company}/transfer/job-work/dc/${encodeURIComponent(challanNo)}`)
+        // After submit, return to the Job Work page (not the DC print page).
+        router.push(`/${company}/transfer/job-work`)
       }
     } catch (error: any) {
       toast({ title: "Submission Failed", description: error.message || "Failed to submit job work.", variant: "destructive" })
@@ -1969,7 +1969,7 @@ export default function MaterialOutPage({ params }: MaterialOutPageProps) {
               type="button"
               onClick={() => {
                 setColdTransferPopup({ open: false, message: "" })
-                router.push(`/${company}/transfer/job-work/dc/${encodeURIComponent(challanNo)}`)
+                router.push(`/${company}/transfer/job-work`)
               }}
             >
               OK

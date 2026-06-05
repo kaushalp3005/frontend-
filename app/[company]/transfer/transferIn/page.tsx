@@ -483,7 +483,15 @@ export default function TransferInPage({ params }: TransferInPageProps) {
             setInwardTransactionNo(pendingResult.header.inward_transaction_no)
           }
 
-          // Restore acknowledged/issue state from saved boxes
+          // Restore acknowledged/issue state from saved boxes.
+          //
+          // IMPORTANT: a saved box's `line_index` is the array POSITION at the time
+          // it was originally acknowledged — that position is NOT stable across a
+          // reopen/resume, so restoring by it lands flags on the WRONG box. For
+          // cold/box-derived transfers the displayed "lines" ARE response.boxes (same
+          // order), so remap each saved box to its CURRENT index by the stable
+          // identity (box_id + transaction_no). Falls back to positional line_index
+          // only for true line-based transfers with no box_id.
           const savedBoxes = pendingResult.header.boxes || []
           const restoredLineMap: Record<number, boolean> = {}
           const restoredIssueMap: Record<number, { remarks: string; net_weight?: string; total_weight?: string; case_pack?: string }> = {}
@@ -491,13 +499,29 @@ export default function TransferInPage({ params }: TransferInPageProps) {
 
           const restoredWeights: Record<number, { net_weight: string; total_weight: string }> = {}
 
+          const _coldLines = (_isColdFrom && (response.boxes || []).length > 0) ? (response.boxes || []) : null
+          const idxByBoxKey: Record<string, number> = {}
+          if (_coldLines) {
+            _coldLines.forEach((b: any, i: number) => {
+              if (b.box_id) idxByBoxKey[`${b.box_id}|${b.transaction_no || ""}`] = i
+            })
+          }
+
           savedBoxes.forEach((sb: any) => {
-            if (sb.line_index !== null && sb.line_index !== undefined) {
+            let idx: number | undefined = undefined
+            if (_coldLines && sb.box_id) {
+              idx = idxByBoxKey[`${sb.box_id}|${sb.transaction_no || ""}`]
+            }
+            if ((idx === undefined || idx === null) && sb.line_index !== null && sb.line_index !== undefined) {
+              idx = sb.line_index
+            }
+
+            if (idx !== undefined && idx !== null) {
               if (sb.is_matched) {
-                restoredLineMap[sb.line_index] = true
+                restoredLineMap[idx] = true
               } else if (sb.issue) {
                 const issueData = typeof sb.issue === "string" ? JSON.parse(sb.issue) : sb.issue
-                restoredIssueMap[sb.line_index] = {
+                restoredIssueMap[idx] = {
                   remarks: issueData.remarks || "",
                   net_weight: issueData.net_weight || undefined,
                   total_weight: issueData.total_weight || undefined,
@@ -506,9 +530,9 @@ export default function TransferInPage({ params }: TransferInPageProps) {
               }
               // Restore weights from acknowledged box data (prevents reversion)
               if (sb.net_weight != null || sb.gross_weight != null) {
-                restoredWeights[sb.line_index] = {
-                  net_weight: sb.net_weight != null ? String(sb.net_weight) : (weightsMap[sb.line_index]?.net_weight || ""),
-                  total_weight: sb.gross_weight != null ? String(sb.gross_weight) : (weightsMap[sb.line_index]?.total_weight || ""),
+                restoredWeights[idx] = {
+                  net_weight: sb.net_weight != null ? String(sb.net_weight) : (weightsMap[idx]?.net_weight || ""),
+                  total_weight: sb.gross_weight != null ? String(sb.gross_weight) : (weightsMap[idx]?.total_weight || ""),
                 }
               }
             } else if (sb.transfer_out_box_id) {

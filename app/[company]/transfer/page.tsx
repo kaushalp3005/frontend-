@@ -267,7 +267,7 @@ export default function TransferPage({ params }: TransferPageProps) {
   })
   const filteredTransferIns = transferIns.filter(t => {
     if (!warehouseMatches(t.from_warehouse, t.receiving_warehouse, t.from_cold_unit)) return false
-    return searchMatch(t, transferInSearch, ["grn_number", "transfer_out_no", "receiving_warehouse", "from_warehouse", "received_by", "status", "grn_date"])
+    return searchMatch(t, transferInSearch, ["grn_number", "transfer_out_no", "receiving_warehouse", "from_warehouse", "received_by", "status", "grn_date", "lot_numbers"])
   })
 
   const handleApproveRequest = (requestId: number) => {
@@ -1004,7 +1004,7 @@ export default function TransferPage({ params }: TransferPageProps) {
                   <Input
                     value={transferInSearch}
                     onChange={(e) => setTransferInSearch(e.target.value)}
-                    placeholder="Search GRN, transfer no, warehouse, status..."
+                    placeholder="Search GRN, transfer no, lot, warehouse, status..."
                     className="h-8 pl-8 pr-8 text-xs bg-white"
                   />
                   {transferInSearch && (
