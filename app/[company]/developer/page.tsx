@@ -76,10 +76,14 @@ const mockUsers: User[] = [
           inward: { access: true, view: true, create: true, edit: true, delete: true, approve: true },
           "inventory-ledger": { access: true, view: true, create: false, edit: false, delete: false, approve: false },
           transfer: { access: true, view: true, create: true, edit: true, delete: true, approve: true },
+          consumption: { access: false, view: false, create: false, edit: false, delete: false, approve: false },
+          reordering: { access: false, view: false, create: false, edit: false, delete: false, approve: false },
+          "cold-storage": { access: false, view: false, create: false, edit: false, delete: false, approve: false },
           outward: { access: false, view: false, create: false, edit: false, delete: false, approve: false },
           reports: { access: true, view: true, create: false, edit: false, delete: false, approve: false },
           settings: { access: true, view: true, create: true, edit: true, delete: true, approve: true },
-          developer: { access: false, view: false, create: false, edit: false, delete: false, approve: false }
+          developer: { access: false, view: false, create: false, edit: false, delete: false, approve: false },
+          "lot-search": { access: false, view: false, create: false, edit: false, delete: false, approve: false }
         }
       }
     ]

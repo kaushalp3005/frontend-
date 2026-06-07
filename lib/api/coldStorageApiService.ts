@@ -68,6 +68,9 @@ export interface ColdStorageStockRecord {
   value: number | null
   box_id: string | null
   transaction_no: string | null
+  // Real source company of this row ("cfpl"/"cdpl"), set by the backend search.
+  // The UI uses this instead of a company selector so the right cold table is hit.
+  company?: string | null
 }
 
 export const ColdStorageApiService = {

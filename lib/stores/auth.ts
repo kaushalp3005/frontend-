@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware'
 
 export type Company = "CDPL" | "CFPL" | "JTC" | "HOH"
 export type Role = "admin" | "ops" | "approver" | "viewer" | "developer"
-export type Module = "dashboard" | "inward" | "inventory-ledger" | "transfer" | "consumption" | "reordering" | "cold-storage" | "outward" | "reports" | "settings" | "developer"
+export type Module = "dashboard" | "inward" | "inventory-ledger" | "transfer" | "consumption" | "reordering" | "cold-storage" | "outward" | "reports" | "settings" | "developer" | "lot-search"
 export type Action = "access" | "view" | "create" | "edit" | "delete" | "approve"
 
 export interface User {
@@ -67,6 +67,13 @@ const STATIC_COMPANIES: Array<{code: Company, name: string}> = [
   { code: "CFPL", name: "CFPL Operations" },
   { code: "CDPL", name: "Candor Dates Pvt Ltd" }
 ]
+
+// Emails allowed to use the Lot Search lookup (cross-table, cross-company).
+// Must mirror backend allowlist in services/lot_search_service/server.py.
+export const LOT_SEARCH_ALLOWED_EMAILS = new Set<string>([
+  "yash@candorfoods.in",
+  "b.hrithik@candorfoods.in",
+])
 
 export const useAuthStore = create<AuthState>()(
   persist(
@@ -289,7 +296,12 @@ export const useAuthStore = create<AuthState>()(
           return false
         }
 
-        // All modules except settings are open to everyone with a company role
+        // Lot Search: strict email allowlist (mirrors backend)
+        if (module === 'lot-search') {
+          return LOT_SEARCH_ALLOWED_EMAILS.has((user.email || '').toLowerCase())
+        }
+
+        // All other modules except settings are open to everyone with a company role
         if (module !== 'settings') {
           return true
         }

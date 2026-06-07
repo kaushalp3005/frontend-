@@ -1,7 +1,6 @@
 "use client"
 
 import { useState, useEffect, useRef, useCallback } from "react"
-import { createPortal } from "react-dom"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useItemCategories, useSubCategories, useItemDescriptions, useCategorialItemDescriptions } from "@/lib/hooks/useDropdownData"
 import { SearchableSelect } from "@/components/ui/searchable-select"
@@ -13,7 +12,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { ArrowLeft, Send, Package, X, Clock, Plus, Trash2, Camera, Search, Loader2, ArrowLeftRight, Copy, Check } from "lucide-react"
+import { ArrowLeft, Send, Package, X, Clock, Plus, Trash2, Camera, Search, Loader2, Copy, Check } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import type { Company } from "@/types/auth"
 import { useAuthStore } from "@/lib/stores/auth"
@@ -21,7 +20,6 @@ import { InterunitApiService } from "@/lib/interunitApiService"
 import { useToast } from "@/hooks/use-toast"
 import { useFormPersistence } from "@/hooks/useFormPersistence"
 import HighPerformanceQRScanner from "@/components/transfer/high-performance-qr-scanner"
-import { ColdStorageApiService, type ColdStorageStockRecord } from "@/lib/api/coldStorageApiService"
 import { BoxScrollContainer } from "@/components/modules/inward/BoxScrollContainer"
 
 interface NewTransferRequestPageProps {
@@ -264,553 +262,8 @@ function ItemDescriptionDropdown({
   )
 }
 
-// Cold storage warehouse values that trigger the stock search UI
+// Cold storage warehouse values that trigger the cold-destination summary popup on submit
 const COLD_STORAGE_WAREHOUSES = ["Cold Storage", "Rishi", "Savla D-39", "Savla D-514", "Supreme"]
-
-// Pending stock info for a result row (cartons reserved by Transfer Out, not yet received).
-// `transfers` is aggregated per challan; `boxes` is the deprecated box-level list.
-type PendingTransferEntry = {
-  challan_no: string
-  dispatched_at: string | null
-  from_site: string
-  to_site: string
-  cartons: number
-  weight_kg: number
-  box_count: number
-  dispatched_by: string
-  vehicle_no?: string
-  driver_name?: string
-  approved_by?: string
-  remark?: string
-  reason_code?: string
-  transfer_status?: string
-  has_variance?: boolean
-  updated_ts?: string | null  // set when this transfer was edited after initial entry
-}
-type PendingInfo = {
-  pending_cartons: number
-  pending_kg: number
-  box_count: number
-  transfers?: PendingTransferEntry[]
-  // legacy — kept so older API responses still render
-  boxes?: Array<{
-    challan_no: string
-    dispatched_at: string | null
-    from_site: string
-    to_site: string
-    weight_kg: number
-    cartons: number
-  }>
-}
-
-const buildPendingKey = (lotNo?: string | null, itemDesc?: string | null) =>
-  `${(lotNo || "").trim().toLowerCase()}|${(itemDesc || "").trim().toLowerCase()}`
-
-// Cell renderer: shows physically-available cartons, with a hover/click tooltip listing
-// any in-transit (pending) transfers of the same lot for context.
-//
-// IMPORTANT — do NOT subtract `pending_cartons` from `net_qty_on_cartons` here.
-// `net_qty_on_cartons` comes from cfpl/cdpl_cold_stocks (see cold_storage_server search),
-// and park_in_pending() already DELETEs every dispatched box from cold_stocks the moment it
-// goes 'In Transit'. So in-transit cartons are already excluded from net_qty_on_cartons.
-// Subtracting pending again double-counts them — it understated availability and clamped to 0
-// whenever pending ≥ net (e.g. lot 125860: net 9, pending 26 → showed 0). The "in transit"
-// figure below is informational only.
-// Tooltip renders via portal to document.body so it escapes the table's overflow:auto and
-// any z-index parents.
-function CartonCellWithPending({ record, pending }: { record: ColdStorageStockRecord; pending?: PendingInfo }) {
-  const [open, setOpen] = useState(false)
-  const triggerRef = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number; maxHeight: number }>({
-    left: 0, maxHeight: 300,
-  })
-  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const total = Number(record.net_qty_on_cartons ?? 0)
-  const reserved = Number(pending?.pending_cartons ?? 0)
-  // Available == net stock. In-transit boxes are already removed from cold_stocks (see note above),
-  // so they are NOT subtracted. `reserved` is shown only as an "in transit" context badge.
-  const available = total
-
-  // Prefer the backend-aggregated `transfers` list (one row per challan with full
-  // totals). Fall back to client-side consolidation only if older API returns boxes.
-  const consolidatedTransfers: PendingTransferEntry[] = (() => {
-    if (!pending) return []
-    if (pending.transfers && pending.transfers.length > 0) return pending.transfers
-    const map = new Map<string, PendingTransferEntry>()
-    for (const b of pending.boxes || []) {
-      const key = b.challan_no || "(unknown)"
-      const e = map.get(key) || {
-        challan_no: key,
-        dispatched_at: b.dispatched_at,
-        from_site: b.from_site,
-        to_site: b.to_site,
-        cartons: 0,
-        weight_kg: 0,
-        box_count: 0,
-        dispatched_by: "",
-      }
-      e.cartons += Number(b.cartons || 1)
-      e.weight_kg += Number(b.weight_kg || 0)
-      e.box_count += 1
-      map.set(key, e)
-    }
-    return Array.from(map.values()).sort((a, b) => {
-      const ad = a.dispatched_at ? Date.parse(a.dispatched_at) : 0
-      const bd = b.dispatched_at ? Date.parse(b.dispatched_at) : 0
-      return bd - ad
-    })
-  })()
-
-  const computePosition = useCallback(() => {
-    if (!triggerRef.current) return
-    const rect = triggerRef.current.getBoundingClientRect()
-    const CARD_WIDTH = 320
-    const CARD_MAX_HEIGHT = 340
-    const MARGIN = 8
-    const GAP = 6
-    const vw = window.innerWidth
-    const vh = window.innerHeight
-
-    let left = rect.right - CARD_WIDTH  // right-align under trigger
-    if (left < MARGIN) left = MARGIN
-    if (left + CARD_WIDTH > vw - MARGIN) left = Math.max(MARGIN, vw - CARD_WIDTH - MARGIN)
-
-    const spaceBelow = vh - rect.bottom - MARGIN
-    const spaceAbove = rect.top - MARGIN
-
-    if (spaceBelow >= 160 || spaceBelow >= spaceAbove) {
-      setPos({ top: rect.bottom + GAP, left, maxHeight: Math.min(CARD_MAX_HEIGHT, spaceBelow - GAP) })
-    } else {
-      setPos({ bottom: vh - rect.top + GAP, left, maxHeight: Math.min(CARD_MAX_HEIGHT, spaceAbove - GAP) })
-    }
-  }, [])
-
-  const handleOpen = useCallback(() => {
-    if (hideTimer.current) clearTimeout(hideTimer.current)
-    computePosition()
-    setOpen(true)
-  }, [computePosition])
-
-  const handleClose = useCallback(() => {
-    hideTimer.current = setTimeout(() => setOpen(false), 150)
-  }, [])
-
-  const cancelClose = useCallback(() => {
-    if (hideTimer.current) clearTimeout(hideTimer.current)
-  }, [])
-
-  if (!pending || reserved === 0) {
-    return <span>{total || "-"}</span>
-  }
-
-  return (
-    <>
-      <div
-        ref={triggerRef}
-        className="inline-block cursor-pointer"
-        onMouseEnter={handleOpen}
-        onMouseLeave={handleClose}
-        onClick={(e) => {
-          e.stopPropagation()
-          if (open) setOpen(false)
-          else handleOpen()
-        }}
-      >
-        <div className="font-semibold tabular-nums">{available}</div>
-        <div className="text-[10px] text-amber-700 mt-0.5 font-medium">
-          +{reserved} in transit
-        </div>
-      </div>
-      {open && typeof document !== "undefined" && createPortal(
-        <div
-          onMouseEnter={cancelClose}
-          onMouseLeave={handleClose}
-          onClick={(e) => e.stopPropagation()}
-          style={{
-            position: "fixed",
-            ...(pos.bottom !== undefined ? { bottom: pos.bottom } : { top: pos.top }),
-            left: pos.left,
-            width: 320,
-            maxHeight: pos.maxHeight,
-          }}
-          className="z-[9999] bg-white border border-amber-200 rounded-lg shadow-2xl p-2.5 text-left overflow-y-auto"
-        >
-          <div className="flex items-center justify-between mb-1.5 pb-1.5 border-b border-amber-100">
-            <div>
-              <div className="text-[11px] font-semibold text-amber-700">Pending Transfers</div>
-              <div className="text-[9.5px] text-gray-400">
-                {consolidatedTransfers.length} transfer{consolidatedTransfers.length !== 1 ? "s" : ""} in transit
-              </div>
-            </div>
-            <div className="text-right">
-              <div className="text-[11px] font-bold text-amber-700 tabular-nums">
-                {reserved} ctns
-              </div>
-              <div className="text-[10px] text-gray-500 tabular-nums">
-                {Number(pending.pending_kg || 0).toFixed(2)} kg
-              </div>
-            </div>
-          </div>
-          <div className="space-y-2">
-            {consolidatedTransfers.length === 0 && (
-              <div className="text-[11px] text-gray-400 italic">No transactions found</div>
-            )}
-            {consolidatedTransfers.map((t, i) => (
-              <div key={i} className="text-[11px] text-gray-700 leading-tight bg-amber-50/40 rounded px-2 py-1.5 border border-amber-100">
-                {/* Header line: challan + date + status */}
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-mono text-[10.5px] font-semibold text-gray-800 truncate">{t.challan_no}</span>
-                  <div className="flex items-center gap-1 shrink-0">
-                    {t.transfer_status && (
-                      <span className={`text-[9px] font-medium px-1 py-0.5 rounded ${
-                        t.transfer_status.toLowerCase() === "partial"
-                          ? "bg-orange-100 text-orange-700"
-                          : "bg-sky-100 text-sky-700"
-                      }`}>
-                        {t.transfer_status}
-                      </span>
-                    )}
-                    {t.has_variance && (
-                      <span className="text-[9px] font-medium px-1 py-0.5 rounded bg-red-100 text-red-700">
-                        Variance
-                      </span>
-                    )}
-                    {t.updated_ts && (
-                      <span
-                        title={`Edited ${new Date(t.updated_ts).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "2-digit" })} — changed after initial entry`}
-                        className="text-[9px] font-medium px-1 py-0.5 rounded bg-violet-100 text-violet-700"
-                      >
-                        Edited
-                      </span>
-                    )}
-                    {t.dispatched_at && (
-                      <span className="text-[10px] text-gray-500">
-                        {new Date(t.dispatched_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "2-digit" })}
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Route */}
-                <div className="text-[10px] text-gray-600 mt-0.5">
-                  {t.from_site} <span className="text-gray-400">→</span> {t.to_site}
-                </div>
-
-                {/* Totals chips */}
-                <div className="flex items-center gap-1.5 flex-wrap mt-1 text-[10px]">
-                  <span className="bg-white border border-amber-200 rounded px-1.5 py-0.5 tabular-nums">
-                    <span className="text-gray-500">Cartons:</span>{" "}
-                    <span className="font-semibold text-amber-700">{Number(t.cartons).toLocaleString("en-IN")}</span>
-                  </span>
-                  <span className="bg-white border border-amber-200 rounded px-1.5 py-0.5 tabular-nums">
-                    <span className="text-gray-500">Weight:</span>{" "}
-                    <span className="font-semibold text-amber-700">{Number(t.weight_kg).toFixed(2)} kg</span>
-                  </span>
-                  {t.box_count > 0 && t.box_count !== Number(t.cartons) && (
-                    <span className="bg-white border border-amber-200 rounded px-1.5 py-0.5 tabular-nums">
-                      <span className="text-gray-500">Boxes:</span>{" "}
-                      <span className="font-semibold text-gray-700">{t.box_count}</span>
-                    </span>
-                  )}
-                </div>
-
-                {/* People */}
-                {(t.dispatched_by || t.approved_by) && (
-                  <div className="flex items-center gap-x-3 gap-y-0.5 flex-wrap mt-1 text-[10px] text-gray-600">
-                    {t.dispatched_by && (
-                      <span>
-                        <span className="text-gray-400">Dispatched by:</span>{" "}
-                        <span className="font-medium text-gray-800">{t.dispatched_by}</span>
-                      </span>
-                    )}
-                    {t.approved_by && t.approved_by !== t.dispatched_by && (
-                      <span>
-                        <span className="text-gray-400">Approved by:</span>{" "}
-                        <span className="font-medium text-gray-800">{t.approved_by}</span>
-                      </span>
-                    )}
-                  </div>
-                )}
-
-                {/* Logistics */}
-                {(t.vehicle_no || t.driver_name) && (
-                  <div className="flex items-center gap-x-3 gap-y-0.5 flex-wrap mt-0.5 text-[10px] text-gray-600">
-                    {t.vehicle_no && (
-                      <span>
-                        <span className="text-gray-400">Vehicle:</span>{" "}
-                        <span className="font-mono text-gray-800">{t.vehicle_no}</span>
-                      </span>
-                    )}
-                    {t.driver_name && (
-                      <span>
-                        <span className="text-gray-400">Driver:</span>{" "}
-                        <span className="font-medium text-gray-800">{t.driver_name}</span>
-                      </span>
-                    )}
-                  </div>
-                )}
-
-                {/* Reason / Remark */}
-                {t.reason_code && (
-                  <div className="mt-0.5 text-[10px] text-gray-600">
-                    <span className="text-gray-400">Reason:</span>{" "}
-                    <span className="font-medium text-gray-800">{t.reason_code}</span>
-                  </div>
-                )}
-                {t.remark && (
-                  <div className="mt-0.5 text-[10px] text-gray-600">
-                    <span className="text-gray-400">Remark:</span>{" "}
-                    <span className="italic text-gray-700">{t.remark}</span>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>,
-        document.body,
-      )}
-    </>
-  )
-}
-
-// Cold Storage Stock Search Component (same as cold-storage/transfer-out)
-function ColdStorageStockSearch({
-  onSelect,
-  company,
-}: {
-  onSelect: (record: ColdStorageStockRecord, sourceCompany: string) => void
-  company: string
-}) {
-  const [coldCompany, setColdCompany] = useState(company.toLowerCase())
-  const [lotNoSearch, setLotNoSearch] = useState("")
-  const [descSearch, setDescSearch] = useState("")
-  const [results, setResults] = useState<ColdStorageStockRecord[]>([])
-  const [loading, setLoading] = useState(false)
-  const [showResults, setShowResults] = useState(false)
-  const [pendingMap, setPendingMap] = useState<Map<string, PendingInfo>>(new Map())
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const doSearch = useCallback(async (lotNo: string, desc: string) => {
-    if (!lotNo && !desc) {
-      setResults([])
-      setShowResults(false)
-      return
-    }
-    setLoading(true)
-    try {
-      const params: Record<string, string> = { company: coldCompany }
-      if (lotNo.trim()) params.lot_no = lotNo.trim()
-      if (desc.trim()) params.q = desc.trim()
-      const data = await ColdStorageApiService.searchColdStorageStocks(params)
-      setResults(data.results)
-      setShowResults(true)
-    } catch {
-      setResults([])
-    } finally {
-      setLoading(false)
-    }
-  }, [coldCompany])
-
-  const handleSearch = useCallback(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => {
-      doSearch(lotNoSearch, descSearch)
-    }, 400)
-  }, [lotNoSearch, descSearch, doSearch])
-
-  useEffect(() => {
-    handleSearch()
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current)
-    }
-  }, [handleSearch])
-
-  const handleSelect = (record: ColdStorageStockRecord) => {
-    onSelect(record, coldCompany)
-    setShowResults(false)
-    setLotNoSearch("")
-    setDescSearch("")
-    setResults([])
-  }
-
-  // Fetch pending qty (in-transit stock) for each unique (lot_no, item_description) pair
-  useEffect(() => {
-    if (!showResults || results.length === 0) {
-      setPendingMap(new Map())
-      return
-    }
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-    const uniqueKeys = new Map<string, { lot_no: string; item_description: string }>()
-    results.forEach((r) => {
-      const key = buildPendingKey(r.lot_no, r.item_description)
-      if (!uniqueKeys.has(key) && r.lot_no && r.item_description) {
-        uniqueKeys.set(key, { lot_no: r.lot_no, item_description: r.item_description })
-      }
-    })
-
-    let cancelled = false
-    ;(async () => {
-      const next = new Map<string, PendingInfo>()
-      await Promise.all(
-        Array.from(uniqueKeys.entries()).map(async ([key, { lot_no, item_description }]) => {
-          try {
-            const params = new URLSearchParams({
-              lot_no,
-              item_description,
-              from_company: coldCompany,
-            })
-            const res = await fetch(`${apiUrl}/interunit/pending-stock/by-lot?${params.toString()}`)
-            if (!res.ok) return
-            const data: PendingInfo = await res.json()
-            if (data && Number(data.pending_cartons) > 0) {
-              next.set(key, data)
-            }
-          } catch {
-            /* swallow — show 0 pending on failure */
-          }
-        })
-      )
-      if (!cancelled) setPendingMap(next)
-    })()
-
-    return () => {
-      cancelled = true
-    }
-  }, [results, showResults, coldCompany])
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between mb-1">
-        <div className="flex items-center gap-2">
-          <Search className="h-4 w-4 text-blue-600" />
-          <span className="text-sm font-medium text-blue-600">Search Cold Storage Stock</span>
-        </div>
-        <Select value={coldCompany} onValueChange={(val) => { setColdCompany(val); setResults([]); setShowResults(false) }}>
-          <SelectTrigger className="h-8 w-[110px] text-xs bg-white border-gray-200">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="cfpl">CFPL</SelectItem>
-            <SelectItem value="cdpl">CDPL</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <div>
-          <Label className="text-xs">Search by Lot Number</Label>
-          <div className="relative">
-            <Input
-              value={lotNoSearch}
-              onChange={(e) => setLotNoSearch(e.target.value)}
-              placeholder="Type lot number..."
-              className="pr-8"
-            />
-            {lotNoSearch && (
-              <button
-                type="button"
-                onClick={() => { setLotNoSearch(""); setResults([]); setShowResults(false) }}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            )}
-          </div>
-        </div>
-        <div>
-          <Label className="text-xs">Search by Group Name / Item Description</Label>
-          <div className="relative">
-            <Input
-              value={descSearch}
-              onChange={(e) => setDescSearch(e.target.value)}
-              placeholder="Type group name or item description..."
-              className="pr-8"
-            />
-            {descSearch && (
-              <button
-                type="button"
-                onClick={() => { setDescSearch(""); setResults([]); setShowResults(false) }}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {loading && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Searching...
-        </div>
-      )}
-
-      {showResults && !loading && results.length === 0 && (
-        <div className="text-sm text-muted-foreground py-2">No results found.</div>
-      )}
-
-      {showResults && results.length > 0 && (
-        <div className="border rounded-lg overflow-hidden">
-          <div className="overflow-x-auto max-h-[300px] overflow-y-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-sky-100 sticky top-0">
-                <tr>
-                  <th className="px-3 py-2 text-left font-medium text-gray-700">#</th>
-                  <th className="px-3 py-2 text-left font-medium text-gray-700">Inward Dt</th>
-                  <th className="px-3 py-2 text-left font-medium text-gray-700">Unit</th>
-                  <th className="px-3 py-2 text-left font-medium text-gray-700">Item Description</th>
-                  <th className="px-3 py-2 text-left font-medium text-gray-700">Item Mark</th>
-                  <th className="px-3 py-2 text-left font-medium text-gray-700">Lot No</th>
-                  <th className="px-3 py-2 text-right font-medium text-gray-700">Qty of Cartons</th>
-                  <th className="px-3 py-2 text-right font-medium text-gray-700">Weight (kg)</th>
-                  <th className="px-3 py-2 text-right font-medium text-gray-700">Total Inv (kgs)</th>
-                  <th className="px-3 py-2 text-center font-medium text-gray-700">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {results.map((record, idx) => (
-                  <tr
-                    key={record.id}
-                    className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}
-                  >
-                    <td className="px-3 py-2 text-gray-600">{idx + 1}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{record.inward_dt || "-"}</td>
-                    <td className="px-3 py-2">{record.unit || "-"}</td>
-                    <td className="px-3 py-2 font-medium">{record.item_description || "-"}</td>
-                    <td className="px-3 py-2">{record.item_mark || "-"}</td>
-                    <td className="px-3 py-2 font-mono">{record.lot_no || "-"}</td>
-                    <td className="px-3 py-2 text-right">
-                      <CartonCellWithPending
-                        record={record}
-                        pending={pendingMap.get(buildPendingKey(record.lot_no, record.item_description))}
-                      />
-                    </td>
-                    <td className="px-3 py-2 text-right">{record.weight_kg ?? "-"}</td>
-                    <td className="px-3 py-2 text-right">{(record.net_qty_on_cartons != null && record.weight_kg != null) ? (record.net_qty_on_cartons * record.weight_kg).toFixed(2) : "-"}</td>
-                    <td className="px-3 py-2 text-center">
-                      <Button
-                        size="sm"
-                        variant="default"
-                        className="h-7 px-3 text-xs"
-                        onClick={() => handleSelect(record)}
-                      >
-                        Select
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="bg-gray-50 px-3 py-1.5 text-xs text-muted-foreground border-t">
-            Showing {results.length} result{results.length !== 1 ? "s" : ""}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
 
 export default function NewTransferRequestPage({ params }: NewTransferRequestPageProps) {
   const { company } = params
@@ -1301,7 +754,52 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
               rawData: box,
             }
           })
-          setScannedBoxes(qrBoxes)
+          // Mixed transfers can ALSO carry manually-typed Article Entries (DIRECT) that
+          // have no scanned box. They live in transfer.lines but aren't represented by any
+          // box, so without this the direct-add articles silently vanish on edit. Match
+          // "covered by a box" on BOTH transfer_line_id AND (article|lot) — conservative so
+          // we never duplicate a line a box already represents.
+          const _norm = (s: any) => String(s ?? "").trim().toUpperCase()
+          const boxedLineIds = new Set(
+            (transfer.boxes || []).map((b: any) => b.transfer_line_id).filter((x: any) => x != null)
+          )
+          const boxedArticleLot = new Set(
+            (transfer.boxes || []).map((b: any) => `${_norm(b.article)}|${_norm(b.lot_number)}`)
+          )
+          const manualLines = (transfer.lines || []).filter(
+            (l: any) =>
+              !boxedLineIds.has(l.id) &&
+              !boxedArticleLot.has(`${_norm(l.item_description)}|${_norm(l.lot_number)}`)
+          )
+          const directEntries = manualLines.map((line: any, index: number) => {
+            const uniqueId = boxIdCounterRef.current
+            boxIdCounterRef.current += 1
+            return {
+              id: uniqueId,
+              boxNumber: uniqueId,
+              boxId: "",
+              itemDescription: line.item_description || "",
+              skuId: null,
+              transactionNo: "DIRECT",
+              boxNumberInArray: qrBoxes.length + index + 1,
+              materialType: line.material_type || "",
+              itemCategory: line.item_category || "",
+              subCategory: line.sub_category || "",
+              netWeight: line.net_weight || "0",
+              totalWeight: line.total_weight || "0",
+              batchNumber: line.batch_number || "",
+              lotNumber: line.lot_number || "",
+              manufacturingDate: "",
+              expiryDate: "",
+              packagingType: line.pack_size || "0",
+              packageSize: line.unit_pack_size || "0",
+              quantityUnits: line.quantity || "1",
+              uom: line.uom || "",
+              scannedAt: new Date().toLocaleTimeString(),
+              rawData: line,
+            }
+          })
+          setScannedBoxes([...qrBoxes, ...directEntries])
         } else if (transfer.lines && transfer.lines.length > 0) {
           // No QR boxes — load lines as manual entries (DIRECT)
           const loadedBoxes = transfer.lines.map((line: any, index: number) => {
@@ -1390,23 +888,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
   }, [articles[0]?.material_type, articles[0]?.item_category, articles[0]?.sub_category, articles[0]?.item_description, articles[0]?.sku_id, requestIdFromUrl])
 
   const handleInputChange = (field: string, value: string) => {
-    setFormData(prev => {
-      // When fromWarehouse changes away from cold storage, reset cs fields on all articles
-      if (field === "fromWarehouse" && COLD_STORAGE_WAREHOUSES.includes(prev.fromWarehouse) && !COLD_STORAGE_WAREHOUSES.includes(value)) {
-        setArticles(prevArts => prevArts.map(a => ({
-          ...a,
-          cs_max_boxes: null,
-          cs_box_id: null,
-          cs_transaction_no: null,
-          cs_inward_no: null,
-          cs_company: null,
-          cs_total_inventory_kgs: null,
-          cs_item_mark: null,
-        })))
-        setArticleEntryMode({})
-      }
-      return { ...prev, [field]: value }
-    })
+    setFormData(prev => ({ ...prev, [field]: value }))
   }
 
   // ============= ARTICLE MANAGEMENT (matching inward form) =============
@@ -1462,62 +944,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     }
   }
 
-  // Check if from warehouse is a cold storage
-  const isColdStorageFrom = COLD_STORAGE_WAREHOUSES.includes(formData.fromWarehouse)
-
-  // Auto-fill article fields from cold storage stock record.
-  // sourceCompany is the company-switcher value from ColdStorageStockSearch — needed
-  // because users on /cfpl/ can search /cdpl/ stocks (and vice versa); pickBoxes must
-  // be called against the same table the record came from.
-  const handleSelectColdStorageStock = (articleId: string, record: ColdStorageStockRecord, sourceCompany: string) => {
-    console.log('🔍 [DEBUG] Cold Storage Stock Selected:', {
-      box_id: record.box_id,
-      transaction_no: record.transaction_no,
-      inward_no: record.inward_no,
-      item_description: record.item_description,
-      lot_no: record.lot_no,
-      fullRecord: record
-    })
-
-    setArticles(prev =>
-      prev.map(article => {
-        if (article.id !== articleId) return article
-        const availableBoxes = record.net_qty_on_cartons ? Math.ceil(record.net_qty_on_cartons) : 0
-        const updatedArticle = {
-          ...article,
-          item_category: record.group_name || article.item_category,
-          item_description: record.item_description || article.item_description,
-          lot_number: record.lot_no ? String(record.lot_no) : article.lot_number,
-          quantity_units: 0,
-          unit_pack_size: 0,
-          net_weight: record.weight_kg ?? 0,
-          total_weight: 0,
-          packaging_type: availableBoxes,
-          cs_max_boxes: availableBoxes,
-          cs_box_id: record.box_id || null,
-          cs_transaction_no: record.transaction_no || null,
-          cs_inward_no: record.inward_no || null,
-          cs_company: sourceCompany,
-          cs_total_inventory_kgs: (record.net_qty_on_cartons != null && record.weight_kg != null) ? record.net_qty_on_cartons * record.weight_kg : null,
-          cs_item_mark: record.item_mark || null,
-        }
-
-        console.log('✅ [DEBUG] Article Updated with CS Data:', {
-          cs_box_id: updatedArticle.cs_box_id,
-          cs_transaction_no: updatedArticle.cs_transaction_no,
-          cs_inward_no: updatedArticle.cs_inward_no,
-          cs_total_inventory_kgs: updatedArticle.cs_total_inventory_kgs,
-        })
-
-        return updatedArticle
-      })
-    )
-    toast({
-      title: "Stock Selected",
-      description: `Filled from stock: ${record.item_description || "N/A"} - Lot ${record.lot_no || "N/A"}`,
-    })
-  }
-
   // Auto-calculate net weight — always returns value in Kg
   const calculateNetWeight = (article: Article): number => {
     const quantity = Number(article.quantity_units) || 1
@@ -1565,13 +991,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         // For PM items, skip recalc when unit_pack_size changes (it doesn't affect net weight)
         const skipRecalc = field === "unit_pack_size" && updatedArticle.material_type === "PM"
         if (!skipRecalc && ["quantity_units", "packaging_type", "unit_pack_size", "material_type"].includes(field)) {
-          // For cold storage articles (cs_max_boxes set), only recalc total_weight display — keep net_weight as per-box weight
-          if (updatedArticle.cs_max_boxes != null) {
-            // net_weight stays as per-box weight from cold storage selection
-            // total_weight = quantity_units * net_weight (calculated inline in JSX)
-          } else {
-            updatedArticle.net_weight = calculateNetWeight(updatedArticle)
-          }
+          updatedArticle.net_weight = calculateNetWeight(updatedArticle)
         }
 
         return updatedArticle
@@ -1588,9 +1008,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
   }
 
   // Item search state per article
-  // Track article entry mode per article: "cold-storage" or "regular"
-  const [articleEntryMode, setArticleEntryMode] = useState<Record<string, "cold-storage" | "regular">>({})
-
   const [itemSearchQuery, setItemSearchQuery] = useState<Record<string, string>>({})
   const [itemSearchResults, setItemSearchResults] = useState<Record<string, Array<{ id: number; item_description: string; material_type?: string; group?: string; sub_group?: string; uom?: number | null }>>>({})
   const [itemSearchLoading, setItemSearchLoading] = useState<Record<string, boolean>>({})
@@ -1684,19 +1101,8 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     }
     const qty = article.quantity_units || 1
 
-    // Cold storage stock limit validation
-    if (article.cs_max_boxes !== null && qty > article.cs_max_boxes) {
-      toast({
-        title: "Limit Exceeded",
-        description: `No. of boxes (${qty}) exceeds available stock (${article.cs_max_boxes})`,
-        variant: "destructive",
-      })
-      return
-    }
-
     // FG/RM without unit pack size silently calculates wrong net weight — block here
     if ((article.material_type === 'FG' || article.material_type === 'RM') &&
-        article.cs_max_boxes === null &&
         (!article.unit_pack_size || article.unit_pack_size <= 0)) {
       toast({
         title: "Unit Pack Size Required",
@@ -1713,72 +1119,9 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     const netWeightKg = article.net_weight || 0
     const totalWeightKg = article.total_weight || 0
 
-    // For cold storage articles, weight_kg from cold_stocks is per-box — use it directly
-    // For non-cold-storage articles, divide total weights equally per box
-    const isColdStorageArticle = article.cs_max_boxes !== null
-    const netWeightPerBox = isColdStorageArticle ? netWeightKg : (qty > 0 ? netWeightKg / qty : 0)
-    const totalWeightPerBox = isColdStorageArticle ? netWeightKg : (qty > 0 ? (totalWeightKg > 0 ? totalWeightKg / qty : netWeightKg / qty) : 0)
-
-    // For cold storage articles, pick individual box_ids in FIFO order from backend.
-    // Each physical box MUST get a unique box_id — duplicating cs_box_id across the qty
-    // loop caused TRANS202605131331-style inventory loss (700 boxes collapsed to 1 on receive).
-    let pickedBoxes: { id: number; box_id: string; transaction_no: string; weight_kg: number }[] = []
-    if (isColdStorageArticle) {
-      if (!article.item_description || !article.lot_number || !article.cs_inward_no) {
-        toast({
-          title: "Cannot Add Cold Storage Item",
-          description: "Re-select the stock record from the search — inward/lot details are missing, so per-box IDs cannot be fetched.",
-          variant: "destructive",
-        })
-        return
-      }
-      // Use the company from the in-article cold-storage search switcher — NEVER
-      // the URL/navbar company. The user can search cdpl stocks from a cfpl URL
-      // (and vice versa); pickBoxes must query the same table the record came from.
-      if (!article.cs_company) {
-        toast({
-          title: "Cannot Add Cold Storage Item",
-          description: "Re-select the stock record from the search — the source company is unknown.",
-          variant: "destructive",
-        })
-        return
-      }
-      try {
-        const pickResult = await ColdStorageApiService.pickBoxes({
-          company: article.cs_company,
-          item_description: article.item_description,
-          lot_no: article.lot_number,
-          inward_no: article.cs_inward_no,
-          qty,
-        })
-        pickedBoxes = pickResult.boxes
-      } catch (err) {
-        console.error("pickBoxes API failed:", err)
-        toast({
-          title: "Could Not Pick Boxes",
-          description: `FIFO box-pick failed for ${article.item_description}. Each box needs a unique ID — refusing to add. (${(err as Error)?.message || 'network/server error'})`,
-          variant: "destructive",
-        })
-        return
-      }
-      if (pickedBoxes.length < qty) {
-        toast({
-          title: "Insufficient Boxes Available",
-          description: `Requested ${qty} boxes of ${article.item_description}, but only ${pickedBoxes.length} unique boxes exist in cold storage for lot ${article.lot_number} / inward ${article.cs_inward_no}.`,
-          variant: "destructive",
-        })
-        return
-      }
-      const uniqueIds = new Set(pickedBoxes.map(b => b.box_id))
-      if (uniqueIds.size !== pickedBoxes.length) {
-        toast({
-          title: "Duplicate Box IDs From Source",
-          description: `Cold storage returned duplicate box_id values for ${article.item_description}. Aborting — please report this to support.`,
-          variant: "destructive",
-        })
-        return
-      }
-    }
+    // Divide total weights equally per box
+    const netWeightPerBox = qty > 0 ? netWeightKg / qty : 0
+    const totalWeightPerBox = qty > 0 ? (totalWeightKg > 0 ? totalWeightKg / qty : netWeightKg / qty) : 0
 
     const newEntries: any[] = []
     const timeStamp = new Date().toLocaleTimeString()
@@ -1787,17 +1130,10 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       const uniqueId = boxIdCounterRef.current
       boxIdCounterRef.current += 1
 
-      // For cold storage: pickedBox is guaranteed unique by the guards above.
-      // For non-cold-storage: there is no per-box source ID, so sku_id is used as a label.
-      const pickedBox = pickedBoxes[i]
-      const boxId = isColdStorageArticle
-        ? pickedBox.box_id
-        : (article.sku_id ? String(article.sku_id) : 'N/A')
-      const transactionNo = isColdStorageArticle
-        ? pickedBox.transaction_no
-        : 'DIRECT'
-      const boxNetWeight = isColdStorageArticle ? pickedBox.weight_kg : netWeightPerBox
-      const boxGrossWeight = isColdStorageArticle ? pickedBox.weight_kg : totalWeightPerBox
+      const boxId = article.sku_id ? String(article.sku_id) : 'N/A'
+      const transactionNo = 'DIRECT'
+      const boxNetWeight = netWeightPerBox
+      const boxGrossWeight = totalWeightPerBox
 
       newEntries.push({
         id: uniqueId,
@@ -1816,8 +1152,8 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         lotNumber: article.lot_number || 'N/A',
         manufacturingDate: article.manufacturing_date || 'N/A',
         expiryDate: article.expiry_date || 'N/A',
-        packagingType: isColdStorageArticle ? '' : (String(article.packaging_type) || 'N/A'),
-        packageSize: isColdStorageArticle ? '' : String(casePack),
+        packagingType: String(article.packaging_type) || 'N/A',
+        packageSize: String(casePack),
         quantityUnits: '1',
         uom: article.uom || 'N/A',
         itemCode: 'N/A',
@@ -2827,7 +2163,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                   <SelectItem value="A101">A101</SelectItem>
                   <SelectItem value="A68">A68</SelectItem>
                   <SelectItem value="F53">F53</SelectItem>
-                  <SelectItem value="Cold Storage">Cold Storage</SelectItem>
 
                 </SelectContent>
 
@@ -3154,42 +2489,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
               <div className="flex items-center justify-between">
                 <h4 className="font-medium">Article Entry</h4>
                 <div className="flex items-center gap-2">
-                  {isColdStorageFrom && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        const currentMode = articleEntryMode[article.id] || "cold-storage"
-                        const newMode = currentMode === "cold-storage" ? "regular" : "cold-storage"
-                        setArticleEntryMode(prev => ({
-                          ...prev,
-                          [article.id]: newMode
-                        }))
-                        // Reset cold storage fields when switching to regular mode so auto-calc works
-                        if (newMode === "regular") {
-                          setArticles(prev => prev.map(a => a.id === article.id ? {
-                            ...a,
-                            cs_max_boxes: null,
-                            cs_box_id: null,
-                            cs_transaction_no: null,
-                            cs_inward_no: null,
-                            cs_company: null,
-                            cs_total_inventory_kgs: null,
-                            cs_item_mark: null,
-                            packaging_type: 0,
-                            net_weight: 0,
-                          } : a))
-                        }
-                      }}
-                      className="text-xs gap-1.5 h-7 px-2.5 border-blue-200 text-blue-700 hover:bg-blue-50"
-                    >
-                      <ArrowLeftRight className="h-3.5 w-3.5" />
-                      {(articleEntryMode[article.id] || "cold-storage") === "cold-storage"
-                        ? "Switch to Manual Entry"
-                        : "Switch to Cold Storage"}
-                    </Button>
-                  )}
                   {article.sku_id && (
                     <Badge variant="outline" className="text-xs">
                       SKU: {article.sku_id}
@@ -3208,129 +2507,8 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                 </div>
               </div>
 
-              {/* Conditional: Cold Storage Stock Search OR Regular Article Form */}
-              {isColdStorageFrom && (articleEntryMode[article.id] || "cold-storage") === "cold-storage" ? (
-                <>
-                  {/* Cold Storage Stock Search */}
-                  <div className="bg-blue-50/50 border border-blue-200 rounded-lg p-3">
-                    <ColdStorageStockSearch
-                      onSelect={(record, sourceCompany) => handleSelectColdStorageStock(article.id, record, sourceCompany)}
-                      company={company}
-                    />
-                  </div>
-
-                  {/* Auto-filled fields from cold storage stock selection */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-                    <div className="space-y-1">
-                      <Label className="text-xs">Item Category</Label>
-                      <Input
-                        value={article.item_category}
-                        readOnly
-                        placeholder="Auto-filled from stock selection"
-                        className="bg-muted"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Item Description</Label>
-                      <Input
-                        value={article.item_description}
-                        readOnly
-                        placeholder="Auto-filled from stock selection"
-                        className="bg-muted"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Weight (kg)</Label>
-                      <Input
-                        value={article.net_weight || ""}
-                        readOnly
-                        placeholder="Auto-filled"
-                        className="bg-muted"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Total Weight (kgs)</Label>
-                      <Input
-                        value={
-                          article.quantity_units && article.net_weight
-                            ? (article.quantity_units * article.net_weight).toFixed(2)
-                            : ""
-                        }
-                        readOnly
-                        placeholder="Auto-calculated"
-                        className="bg-muted"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Editable fields: No. of Boxes, UOM, Lot Number */}
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                    <div className="space-y-1">
-                      <Label className="text-xs">No. of Boxes/Cartons *</Label>
-                      <Input
-                        type="number"
-                        min="1"
-                        max={article.cs_max_boxes ?? undefined}
-                        value={article.quantity_units || ""}
-                        onChange={(e) => {
-                          const val = Number(e.target.value) || 0
-                          if (article.cs_max_boxes !== null && val > article.cs_max_boxes) {
-                            toast({ title: "Limit Exceeded", description: `Maximum available boxes: ${article.cs_max_boxes}`, variant: "destructive" })
-                            updateArticle(article.id, "quantity_units", article.cs_max_boxes)
-                          } else {
-                            updateArticle(article.id, "quantity_units", val)
-                          }
-                        }}
-                        placeholder="Enter count"
-                      />
-                      {article.cs_max_boxes !== null && (
-                        <p className="text-[10px] text-muted-foreground">Available: {article.cs_max_boxes} boxes</p>
-                      )}
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">UOM *</Label>
-                      <Select value={article.uom} onValueChange={(value) => updateArticle(article.id, "uom", value)}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select UOM" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="BOX">BOX</SelectItem>
-                          <SelectItem value="CARTON">CARTON</SelectItem>
-                          <SelectItem value="BAG">BAG</SelectItem>
-                          {(article.material_type === "PM" || articles[0]?.material_type === "PM") && (
-                            <>
-                              <SelectItem value="BUNDLES">BUNDLES</SelectItem>
-                              <SelectItem value="ROLLS">ROLLS</SelectItem>
-                              <SelectItem value="PCS">PCS</SelectItem>
-                            </>
-                          )}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Lot Number *</Label>
-                      <Input
-                        value={article.lot_number}
-                        onChange={(e) => updateArticle(article.id, "lot_number", e.target.value)}
-                        placeholder="Enter lot number"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Add to List Button */}
-                  <div className="flex justify-end pt-2 border-t border-gray-100">
-                    <Button
-                      type="button"
-                      onClick={() => handleAddArticleToList(article)}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white h-10 sm:h-9 px-5 text-xs sm:text-sm w-full sm:w-auto"
-                    >
-                      <Plus className="mr-2 h-3.5 w-3.5" />
-                      Add to Articles List
-                    </Button>
-                  </div>
-                </>
-              ) : (
-                <>
+              {/* Regular Article Form */}
+              <>
                   {/* Quick Item Search */}
                   <div className="relative">
                     <Label className="text-xs font-medium text-gray-600 mb-1 block">Quick Search Item</Label>
@@ -3622,7 +2800,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                     </Button>
                   </div>
                 </>
-              )}
             </div>
           )
           })}

@@ -644,7 +644,7 @@ export default function InwardListPage({ params }: InwardListPageProps) {
             <Button asChild size="sm" variant="outline" className="gap-1.5">
               <Link href={`/${company}/inward/bulk-sticker`}>
                 <Snowflake className="h-4 w-4" />
-                <span className="hidden xs:inline">Bulk Sticker</span>
+                <span>Cold Inward</span>
               </Link>
             </Button>
             <Button asChild variant="outline" size="sm" className="gap-1.5">

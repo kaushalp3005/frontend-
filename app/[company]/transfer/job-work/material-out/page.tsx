@@ -128,12 +128,9 @@ const COLD_STORAGE_WAREHOUSES = ["Cold storage"]
 // ─── Cold Storage Stock Search Component ───
 function ColdStorageStockSearch({
   onSelect,
-  company,
 }: {
   onSelect: (record: ColdStorageStockRecord, coldCompany: string) => void
-  company: string
 }) {
-  const [coldCompany, setColdCompany] = useState(company.toLowerCase())
   const [lotNoSearch, setLotNoSearch] = useState("")
   const [descSearch, setDescSearch] = useState("")
   const [results, setResults] = useState<ColdStorageStockRecord[]>([])
@@ -149,7 +146,9 @@ function ColdStorageStockSearch({
     }
     setLoading(true)
     try {
-      const params: Record<string, string> = { company: coldCompany }
+      // Company-independent: backend searches CFPL then CDPL and tags each row
+      // with its REAL source company. No CFPL/CDPL selector, no navbar dependency.
+      const params: Record<string, string> = {}
       if (lotNo.trim()) params.lot_no = lotNo.trim()
       if (desc.trim()) params.q = desc.trim()
       const data = await ColdStorageApiService.searchColdStorageStocks(params)
@@ -160,7 +159,7 @@ function ColdStorageStockSearch({
     } finally {
       setLoading(false)
     }
-  }, [coldCompany])
+  }, [])
 
   const handleSearch = useCallback(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
@@ -175,7 +174,8 @@ function ColdStorageStockSearch({
   }, [handleSearch])
 
   const handleSelect = (record: ColdStorageStockRecord) => {
-    onSelect(record, coldCompany)
+    // Use the row's REAL source company (from the search result), not a selector.
+    onSelect(record, (record.company || "").toLowerCase())
     setShowResults(false)
     setLotNoSearch("")
     setDescSearch("")
@@ -184,20 +184,9 @@ function ColdStorageStockSearch({
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between mb-1">
-        <div className="flex items-center gap-2">
-          <Search className="h-4 w-4 text-blue-600" />
-          <span className="text-sm font-medium text-blue-600">Search Cold Storage Stock</span>
-        </div>
-        <Select value={coldCompany} onValueChange={(val) => { setColdCompany(val); setResults([]); setShowResults(false) }}>
-          <SelectTrigger className="h-8 w-[110px] text-xs bg-white border-gray-200">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="cfpl">CFPL</SelectItem>
-            <SelectItem value="cdpl">CDPL</SelectItem>
-          </SelectContent>
-        </Select>
+      <div className="flex items-center gap-2 mb-1">
+        <Search className="h-4 w-4 text-blue-600" />
+        <span className="text-sm font-medium text-blue-600">Search Cold Storage Stock</span>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -959,8 +948,8 @@ export default function MaterialOutPage({ params }: MaterialOutPageProps) {
         return
       }
       try {
-        // Use cs_company (from the in-article cold-storage search switcher), NOT the
-        // URL/navbar company — users can search across companies from the dropdown.
+        // Use cs_company (the selected row's REAL source company from the company-
+        // independent search), NOT the URL/navbar company.
         const pickResult = await ColdStorageApiService.pickBoxes({
           company: article.cs_company,
           item_description: article.item_description,
@@ -1518,7 +1507,6 @@ export default function MaterialOutPage({ params }: MaterialOutPageProps) {
                   <div className="bg-blue-50/50 border border-blue-200 rounded-lg p-3">
                     <ColdStorageStockSearch
                       onSelect={(record, coldCo) => handleSelectColdStorageStock(article.id, record, coldCo)}
-                      company={company}
                     />
                   </div>
 

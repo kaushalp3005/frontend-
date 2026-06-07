@@ -501,8 +501,119 @@ export class InterunitApiService {
     return await fetchJSON(`${API_BASE_URL}/interunit/transfer-in?${queryParams.toString()}`)
   }
 
+  /**
+   * GET /interunit/cold-transfer-in/list — cold-only Transfer-In listing.
+   *
+   * Reads exclusively from the new `cold_transfer_in_headers` /
+   * `cold_transfer_inboxes` tables. Response shape mirrors getTransferIns()
+   * exactly (`records`, `total`, `page`, `per_page`, `total_pages` plus
+   * per-row `id`, `grn_number`, `transfer_out_no`, `from_warehouse`,
+   * `receiving_warehouse`, `from_cold_unit`, `status`, `grn_date`,
+   * `received_by`, `lot_numbers`) so the cold-transfer page can swap with
+   * one identifier change. Used by the cold-transfer page ONLY — the main
+   * /transfer page keeps calling getTransferIns().
+   */
+  static async getColdTransferIns(params?: {
+    page?: number
+    per_page?: number
+    receiving_warehouse?: string
+    from_date?: string
+    to_date?: string
+    sort_by?: string
+    sort_order?: string
+  }): Promise<any> {
+    const queryParams = new URLSearchParams()
+    if (params) {
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined) {
+          queryParams.append(key, value.toString())
+        }
+      })
+    }
+
+    return await fetchJSON(`${API_BASE_URL}/interunit/cold-transfer-in/list?${queryParams.toString()}`)
+  }
+
   static async getTransferInById(transferInId: number): Promise<any> {
     return await fetchJSON(`${API_BASE_URL}/interunit/transfer-in/${transferInId}`)
+  }
+
+  /**
+   * POST /interunit/cold-transfer-in/create — create a new cold transfer-in receipt.
+   *
+   * Cold destinations only (Savla D-39, Savla D-514, Rishi, Supreme). Writes
+   * to cold_transfer_in_headers + cold_transfer_inboxes + <company>_cold_stocks,
+   * and cleans up matched pending_transfer_stock rows. Does NOT touch
+   * interunit_transfer_in_*.
+   */
+  static async createColdTransferIn(payload: any): Promise<any> {
+    return await fetchJSON(`${API_BASE_URL}/interunit/cold-transfer-in/create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+  }
+
+  /**
+   * POST /interunit/cold-transfer-in/{header_id}/finalize — append more boxes to an
+   * existing cold receipt. Same per-box loop, scoped to an existing header.
+   */
+  static async finalizeColdTransferIn(headerId: number, payload: any): Promise<any> {
+    return await fetchJSON(`${API_BASE_URL}/interunit/cold-transfer-in/${headerId}/finalize`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+  }
+
+  /**
+   * GET /interunit/cold-transfer-in/{header_id} — fetch a single cold GRN by id.
+   * Reads from cold_transfer_in_headers + cold_transfer_inboxes only.
+   */
+  static async getColdTransferInById(headerId: number): Promise<any> {
+    return await fetchJSON(`${API_BASE_URL}/interunit/cold-transfer-in/${headerId}`)
+  }
+
+  /**
+   * DELETE /interunit/cold-transfer-in/{header_id} — delete a cold transfer-in receipt.
+   * Reverses <company>_cold_stocks, re-parks boxes to pending + reverts the transfer-out
+   * to 'Dispatch' if it still exists, then removes cold_transfer_in_headers +
+   * cold_transfer_inboxes. The legacy /interunit/transfer-in delete must NOT be used for
+   * cold receipts — it never touches the cold tables and leaves orphaned headers.
+   */
+  static async deleteColdTransferIn(headerId: number, userEmail: string): Promise<any> {
+    return await fetchJSON(
+      `${API_BASE_URL}/interunit/cold-transfer-in/${headerId}?user_email=${encodeURIComponent(userEmail)}`,
+      { method: "DELETE" },
+    )
+  }
+
+  // ── Cold Transfer OUT (cold-source dispatch) ──
+  // These hit the dedicated cold OUT handler in cold_transfer_out_tools.py.
+  // Writes go to the shared OUT tables (interunit_transfers_header + boxes
+  // + lines) and deduct source via park_in_pending. The legacy
+  // /interunit/transfers create endpoint rejects cold sources.
+
+  static async createColdTransferOut(payload: any): Promise<any> {
+    return await fetchJSON(`${API_BASE_URL}/interunit/cold-transfer-out/create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+  }
+
+  static async editColdTransferOut(headerId: number, payload: any): Promise<any> {
+    return await fetchJSON(`${API_BASE_URL}/interunit/cold-transfer-out/${headerId}/edit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+  }
+
+  static async deleteColdTransferOut(headerId: number): Promise<any> {
+    return await fetchJSON(`${API_BASE_URL}/interunit/cold-transfer-out/${headerId}`, {
+      method: "DELETE",
+    })
   }
 
   // ── Pending Transfer IN (real-time acknowledge) ──
@@ -594,6 +705,18 @@ export class InterunitApiService {
 
   static async getPendingByTransferOut(transferOutId: number): Promise<any> {
     return await fetchJSON(`${API_BASE_URL}/interunit/transfer-in/pending/by-transfer-out/${transferOutId}`)
+  }
+
+  /**
+   * GET in-transit pending_transfer_stock rows for a transfer-out, mapped to the box
+   * shape the cold receive form consumes. The cold transfer-in sources its boxes-to-receive
+   * from pending (the real in-transit stock), not the transfer-out boxes. Real boxes only
+   * (LINE-% box-less rows are excluded server-side).
+   */
+  static async getPendingBoxesByTransferOut(
+    transferOutId: number
+  ): Promise<{ transfer_out_id: number; total: number; boxes: any[] }> {
+    return await fetchJSON(`${API_BASE_URL}/interunit/pending-stock/boxes/by-transfer-out/${transferOutId}`)
   }
 
   /**

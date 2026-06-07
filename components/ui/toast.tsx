@@ -12,15 +12,17 @@ export const ToastProvider = ({ children }: { children: React.ReactNode }) => {
 export const ToastViewport = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement>
->(({ className, ...props }, ref) => (
+>(({ className, children, ...props }, ref) => (
   <div
     ref={ref}
     className={cn(
-      "fixed bottom-0 right-0 z-[100] flex max-h-screen flex-col p-4 sm:p-6 w-full max-w-[420px]",
+      "fixed top-0 right-0 z-[100] flex max-h-screen flex-col gap-2 p-4 sm:p-6 w-full max-w-[420px]",
       className
     )}
     {...props}
-  />
+  >
+    {children}
+  </div>
 ))
 ToastViewport.displayName = "ToastViewport"
 

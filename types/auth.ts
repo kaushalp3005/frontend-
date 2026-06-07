@@ -3,7 +3,7 @@ import type { Company } from '@/lib/api'
 
 export type { Company }
 
-export type Module = 
+export type Module =
   | "dashboard"
   | "inward"
   | "inventory-ledger"
@@ -15,6 +15,7 @@ export type Module =
   | "reports"
   | "settings"
   | "developer"
+  | "lot-search"
 
 export interface User {
   id: string

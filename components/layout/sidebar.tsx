@@ -24,6 +24,7 @@ import {
   Snowflake,
   Settings,
   ChevronDown,
+  Search,
 } from "lucide-react"
 
 interface SubNavItem {
@@ -38,6 +39,10 @@ interface NavItem {
   icon: React.ComponentType<{ className?: string }>
   module: Module
   children?: SubNavItem[]
+  // When true, item is hidden entirely (not greyed-out) if user lacks permission.
+  // Use for items restricted to a small allowlist where showing a locked icon to
+  // everyone else would be noisy.
+  hideWhenLocked?: boolean
 }
 
 const navItems: NavItem[] = [
@@ -53,6 +58,7 @@ const navItems: NavItem[] = [
       { title: "Job Work", href: "/transfer/job-work", icon: ArrowRight },
     ],
   },
+  { title: "Cold transfer", href: "/cold-transfer", icon: Snowflake, module: "transfer" },
   { title: "Consumption", href: "/consumption", icon: Utensils, module: "consumption" },
   { title: "Inventory", href: "/inventory-ledger", icon: Package, module: "inventory-ledger" },
   { title: "Cold Storage", href: "/cold-storage", icon: Snowflake, module: "cold-storage" },
@@ -60,6 +66,7 @@ const navItems: NavItem[] = [
   { title: "Outward", href: "/outward", icon: ArrowUpFromLine, module: "outward" },
   { title: "Reports", href: "/reports", icon: FileText, module: "reports" },
   { title: "Settings", href: "/settings", icon: Settings, module: "settings" },
+  { title: "Lot Search", href: "/lot-search", icon: Search, module: "lot-search", hideWhenLocked: true },
 ]
 
 interface SidebarProps {
@@ -141,6 +148,7 @@ export function Sidebar({ company, collapsed: isCollapsed, onCollapsedChange }: 
               const isActive = pathname === href || pathname.startsWith(href + "/")
               const hasAccess = user && currentCompany && hasPermission && hasPermission(item.module, "view")
               const isLocked = !hasAccess
+              if (isLocked && item.hideWhenLocked) return null
               const hasChildren = item.children && item.children.length > 0
               const isExpanded = expandedItems.includes(item.title)
 

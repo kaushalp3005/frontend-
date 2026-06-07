@@ -6,7 +6,7 @@ import * as React from 'react'
 import type { ToastActionElement, ToastProps } from '@/components/ui/toast'
 
 const TOAST_LIMIT = 1
-const TOAST_REMOVE_DELAY = 5000 // 5 seconds - reasonable duration for toast notifications
+const TOAST_REMOVE_DELAY = 6000 // 6 seconds - auto-dismiss for pop-up toasts
 
 type ToasterToast = ToastProps & {
   id: string
@@ -162,6 +162,10 @@ function toast({ ...props }: Toast) {
       },
     },
   })
+
+  // Auto-dismiss the pop-up after TOAST_REMOVE_DELAY (3s) — the custom Toast div has no
+  // built-in timer, so without this toasts would persist until manually closed.
+  addToRemoveQueue(id)
 
   return {
     id: id,

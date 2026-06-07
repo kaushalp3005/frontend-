@@ -12,18 +12,18 @@ import { Textarea } from "@/components/ui/textarea"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import {
   Loader2, Package, Search, Camera, ArrowLeft, ArrowRight, Inbox,
-  CheckCircle, ClipboardCheck, CheckCheck, Hash, FileText,
-  AlertTriangle, X, Building2, Snowflake, Printer, ChevronDown, Pencil
+  CheckCircle, ClipboardCheck, CheckCheck, FileText,
+  AlertTriangle, X, Building2, Printer, ChevronDown, Pencil
 } from "lucide-react"
 import { toast } from "sonner"
 import { InterunitApiService } from "@/lib/interunitApiService"
-import { ColdStorageApiService } from "@/lib/api/coldStorageApiService"
+import { normalizeWarehouseName, isColdWarehouse } from "@/lib/constants/warehouses"
 import { useAuthStore } from "@/lib/stores/auth"
 
 import QRCode from "qrcode"
 import HighPerformanceQRScanner from "@/components/transfer/high-performance-qr-scanner"
 import type { Company } from "@/types/auth"
-import { LotRangeDedicator, type LotRange } from "@/components/modules/inward/LotRangeDedicator"
+import { type LotRange } from "@/components/modules/inward/LotRangeDedicator"
 
 interface TransferInPageProps {
   params: {
@@ -50,12 +50,6 @@ export default function TransferInPage({ params }: TransferInPageProps) {
   const [conditionRemarks, setConditionRemarks] = useState("")
   const [showAckScanner, setShowAckScanner] = useState(false)
   const [scanResult, setScanResult] = useState<{ type: "match" | "no-match" | "already" | "error"; message: string } | null>(null)
-
-  // ── Cold storage per-item details (Savla / Rishi) — keyed by unique item name ──
-  const [coldStorageItems, setColdStorageItems] = useState<Record<string, {
-    inward_dt: string; vakkal: string; lot_no: string; rate: string; exporter: string;
-    storage_location: string; item_mark: string; group_name: string; item_subgroup: string; cold_company: string; spl_remarks: string;
-  }>>({})
 
   // ── Pending transfer-in state (real-time acknowledge) ──
   const [pendingHeaderId, setPendingHeaderId] = useState<number | null>(null)
@@ -104,12 +98,6 @@ export default function TransferInPage({ params }: TransferInPageProps) {
     }))
   }
 
-  // Helper: get cold storage lot_no for an article name (from Cold Storage Details form)
-  const getColdLotNo = (articleName: string) => {
-    const ci = coldStorageItems[articleName]
-    return ci?.lot_no?.trim() || null
-  }
-
   // Lot Dedicator: assign a lot number to a range of box numbers. The override
   // takes precedence over the per-item cold lot at the per-box acknowledge sites.
   const [boxLotRanges, setBoxLotRanges] = useState<LotRange[]>([])
@@ -127,16 +115,22 @@ export default function TransferInPage({ params }: TransferInPageProps) {
   // a lot number / raise a box issue). Enforced again server-side.
   const canReopenReceived = (user?.email?.toLowerCase() || "") === "b.hrithik@candorfoods.in"
 
-  // ── Cold storage check (moved above `lines` so cold-storage branch can swap source) ──
+  // ── Cold storage check — used to drive cold-FROM display logic (cold→warehouse IN) ──
   const COLD_STORAGE_WAREHOUSES = ["Cold Storage", "Rishi", "Savla D-39", "Savla D-514", "Supreme"]
   const fromWarehouse = transferData?.from_warehouse || transferData?.from_site || ""
   const toWarehouse = transferData?.to_warehouse || transferData?.to_site || ""
   const isColdStorageFrom = COLD_STORAGE_WAREHOUSES.some(w => w.toLowerCase() === fromWarehouse.toLowerCase())
-  const isColdStorageTransfer = COLD_STORAGE_WAREHOUSES.some(w => w.toLowerCase() === toWarehouse.toLowerCase())
 
   // ── Derived state ──
   const boxes = transferData?.boxes || []
   const rawLines = transferData?.lines || []
+
+  // `LINE-{line_id}-{n}` is a backend tracking placeholder written by
+  // pending_stock_tools.park_in_pending for box-less line transfers. It's not
+  // a real box_id — surfacing it here would (a) disable Generate QR's button
+  // and (b) print/QR-encode a sentinel value. Treat as "no id yet."
+  const isSyntheticLineBoxId = (id: any) =>
+    typeof id === "string" && id.startsWith("LINE-")
 
   // For cold-storage transfers, render Article Entries directly from the boxes table —
   // each box already has box_id + transaction_no populated, while transfer_lines does not.
@@ -144,30 +138,38 @@ export default function TransferInPage({ params }: TransferInPageProps) {
   const linesFromBoxes = useMemo(() => {
     const _boxes = transferData?.boxes || []
     if (!isColdStorageFrom || _boxes.length === 0) return null
-    return _boxes.map((b: any) => ({
-      id: b.id,
-      _source: "box",
-      _box_origin: b,
-      item_description: b.article || "",
-      item_desc_raw: b.article || "",
-      box_id: b.box_id || "",
-      box_number: b.box_number,
-      transaction_no: b.transaction_no || "",
-      lot_number: b.lot_number || "",
-      batch_number: b.batch_number || "",
-      net_weight: b.net_weight,
-      total_weight: b.gross_weight,
-      quantity: "1",
-      qty: 1,
-      uom: "BOX",
-      pack_size: "1",
-      unit_pack_size: "1",
-    }))
+    return _boxes.map((b: any) => {
+      const synthetic = isSyntheticLineBoxId(b.box_id)
+      return {
+        id: b.id,
+        _source: "box",
+        _box_origin: b,
+        item_description: b.article || "",
+        item_desc_raw: b.article || "",
+        box_id: synthetic ? "" : (b.box_id || ""),
+        box_number: b.box_number,
+        transaction_no: synthetic ? "" : (b.transaction_no || ""),
+        lot_number: b.lot_number || "",
+        batch_number: b.batch_number || "",
+        net_weight: b.net_weight,
+        total_weight: b.gross_weight,
+        quantity: "1",
+        qty: 1,
+        uom: "BOX",
+        pack_size: "1",
+        unit_pack_size: "1",
+      }
+    })
   }, [transferData, isColdStorageFrom])
 
-  // If boxes count covers all lines, show lines only (Article Entries has richer features: Print QR, editable weights)
-  // Otherwise, filter out lines that already have a matching box by transfer_line_id
-  const allLinesCoveredByBoxes = boxes.length > 0 && boxes.length >= rawLines.length
+  // True whenever scanned boxes exist on a non-cold transfer. Every entry (scanned OR
+  // manually typed) is shown as an Article Entry line and acknowledged via the line flow —
+  // scanned boxes are NEVER split into a separate section (Article Entries is the single
+  // source of truth, per product decision). Pure-scanned and mixed scan+manual both take
+  // this path; only truly box-less line transfers (boxes.length === 0) fall through to the
+  // line-only branch. Previously this required boxes>=lines, so MIXED transfers filtered the
+  // scanned lines out and — with no boxes section — they vanished from the receive screen.
+  const allLinesCoveredByBoxes = boxes.length > 0
   // Memoized so `lines` ref is stable — downstream effects with `lines` in deps must not re-fire every render.
   const lines = useMemo(() => {
     if (linesFromBoxes) return linesFromBoxes
@@ -177,6 +179,14 @@ export default function TransferInPage({ params }: TransferInPageProps) {
   }, [transferData, linesFromBoxes, allLinesCoveredByBoxes])
   const totalBoxes = boxes.length
   const totalLines = lines.length
+  const uniqueArticleCount = useMemo(() => {
+    const set = new Set<string>()
+    lines.forEach((l: any) => {
+      const name = (l.item_desc_raw || l.item_description || "").trim()
+      if (name) set.add(name)
+    })
+    return set.size
+  }, [lines])
   const hasBatchData = lines.some((l: any) => l.batch_number)
 
   // Group line indices by article name (for per-article box range reprint)
@@ -200,83 +210,42 @@ export default function TransferInPage({ params }: TransferInPageProps) {
   const totalMatched = (linesAreBoxes || allLinesCoveredByBoxes) ? resolvedLines : matchedBoxes + resolvedLines
   const allMatched = totalItems > 0 && totalMatched === totalItems
 
-  // ── Map line IDs to box data (for transaction_no / box_id from cold storage) ──
+  // ── Map each transfer LINE id → its scanned box's { box_id, transaction_no } ──
+  //
+  // The outward side keys interunit_transfer_boxes.transfer_line_id by ARTICLE (every box
+  // of the same article points at one line id), so that field can't distinguish multiple
+  // entries of the same article. Instead, assign boxes to lines greedily by (article, lot):
+  // the i-th line of a given (article, lot) gets the i-th scanned box of that (article, lot).
+  // This gives each scanned Article Entry its own box_id/transaction_no in mixed scan+manual
+  // transfers, while box-less (manual) lines simply get no mapping (they need "Generate QR").
   const lineBoxDataMap = useMemo(() => {
-    if (!transferData?.boxes) {
-      console.log('⚠️ [DEBUG-IN] No boxes in transferData')
-      return {}
-    }
-
-    console.log('📦 [DEBUG-IN] Building lineBoxDataMap from boxes:', {
-      totalBoxes: transferData.boxes.length,
-      boxes: transferData.boxes.map((b: any) => ({
-        id: b.id,
-        box_id: b.box_id,
-        transaction_no: b.transaction_no,
-        transfer_line_id: b.transfer_line_id,
-        article: b.article
-      }))
+    const _boxes = (transferData?.boxes as any[]) || []
+    const _lines = transferData?.lines || []
+    if (_boxes.length === 0) return {}
+    const keyOf = (article: any, lot: any) =>
+      `${String(article || "").trim().toUpperCase()}|${String(lot || "").trim()}`
+    const boxesByKey: Record<string, any[]> = {}
+    _boxes.forEach((b: any) => {
+      const k = keyOf(b.article, b.lot_number)
+      ;(boxesByKey[k] ||= []).push(b)
     })
-
+    const cursor: Record<string, number> = {}
     const map: Record<number, { box_id: string; transaction_no: string }> = {}
-    const lines = transferData.lines || []
-    const boxes = transferData.boxes as any[]
-
-    // Primary: map by transfer_line_id (works when each box points to a unique line)
-    boxes.forEach((b: any) => {
-      if (b.transfer_line_id && !map[b.transfer_line_id]) {
-        map[b.transfer_line_id] = {
-          box_id: b.box_id || "",
-          transaction_no: b.transaction_no || "",
+    _lines.forEach((l: any) => {
+      const k = keyOf(l.item_desc_raw || l.item_description, l.lot_number)
+      const arr = boxesByKey[k] || []
+      const i = cursor[k] || 0
+      if (i < arr.length) {
+        cursor[k] = i + 1
+        const b = arr[i]
+        const synthetic = isSyntheticLineBoxId(b.box_id)
+        map[l.id] = {
+          box_id: synthetic ? "" : (b.box_id || ""),
+          transaction_no: synthetic ? "" : (b.transaction_no || ""),
         }
       }
     })
-
-    // Fallback: if lines and boxes have 1:1 count but most lines have no mapping,
-    // map by index position (handles case where all boxes share same transfer_line_id)
-    if (lines.length > 0 && lines.length === boxes.length) {
-      const unmappedLines = lines.filter((l: any) => !map[l.id])
-      if (unmappedLines.length > lines.length / 2) {
-        lines.forEach((l: any, i: number) => {
-          if (!map[l.id] && boxes[i]) {
-            map[l.id] = {
-              box_id: boxes[i].box_id || "",
-              transaction_no: boxes[i].transaction_no || "",
-            }
-          }
-        })
-      }
-    }
-
-    console.log('🗺️ [DEBUG-IN] lineBoxDataMap created:', map)
     return map
-  }, [transferData])
-
-  // Helper: update a single cold storage item field (keyed by item name)
-  const updateColdItem = (itemKey: string, field: string, value: string) => {
-    setColdStorageItems(prev => ({
-      ...prev,
-      [itemKey]: { ...prev[itemKey], [field]: value },
-    }))
-  }
-
-  // All lines for cold storage (unfiltered - every transfer line)
-  const allLines = transferData?.lines || []
-
-  // Unique items for cold storage — group lines by item name, aggregate qty/weight
-  const uniqueColdItems = useMemo(() => {
-    if (!transferData?.lines) return []
-    const itemMap: Record<string, { name: string; totalQty: number; totalWeight: number; uom: string; packSize: string; lines: any[] }> = {}
-    ;(transferData.lines as any[]).forEach((line: any) => {
-      const name = line.item_desc_raw || line.item_description || "Unknown Item"
-      if (!itemMap[name]) {
-        itemMap[name] = { name, totalQty: 0, totalWeight: 0, uom: line.uom || "", packSize: line.pack_size || "", lines: [] }
-      }
-      itemMap[name].totalQty += parseFloat(line.qty || line.quantity || 0)
-      itemMap[name].totalWeight += parseFloat(line.net_weight || line.total_weight || 0)
-      itemMap[name].lines.push(line)
-    })
-    return Object.values(itemMap)
   }, [transferData])
 
   // ── Group boxes by article ──
@@ -301,6 +270,25 @@ export default function TransferInPage({ params }: TransferInPageProps) {
     setLoading(true)
     try {
       const response = await InterunitApiService.getTransferByNumber(company, transferNo)
+
+      // Destination-class gate at LOAD time. If the destination is a cold
+      // warehouse (Savla / Rishi / Supreme / Cold Storage), refuse to populate
+      // the form — cold-destination receipts must go through
+      // /cold-transfer/coldtransfer-in, regardless of whether the source is
+      // a warehouse or cold storage.
+      const _toWh = response.to_warehouse || response.to_site || ""
+      // Canonical cold-destination check (normalize first) so aliases like "Supreme Cold",
+      // "savla bond", "rishi cold storage" also route to the cold flow — not just the exact
+      // canonical spellings. Cold-destination receipts MUST go through coldtransfer-in.
+      const _isColdDest = isColdWarehouse(normalizeWarehouseName(_toWh))
+      if (_isColdDest) {
+        toast.error(
+          `Destination "${_toWh || "(unknown)"}" is a cold warehouse. ` +
+          `Use the Cold Transfer-In page (/cold-transfer/coldtransfer-in) for this receipt.`
+        )
+        setTransferData(null)
+        return
+      }
 
       // ── Comprehensive search result logging ──
       console.group(`🔍 [TRANSFER-IN] Loaded: ${response.challan_no || response.transfer_no || transferNo}`)
@@ -399,75 +387,6 @@ export default function TransferInPage({ params }: TransferInPageProps) {
         }
       })
       setLineWeights(weightsMap)
-
-      // Init cold storage item map — keyed by unique item name
-      const today = new Date().toISOString().split("T")[0]
-      const coldMap: Record<string, any> = {}
-      const seenItems = new Set<string>()
-      ;(response.lines || []).forEach((line: any) => {
-        const name = line.item_desc_raw || line.item_description || "Unknown Item"
-        if (!seenItems.has(name)) {
-          seenItems.add(name)
-          coldMap[name] = {
-            inward_dt: today, vakkal: "", lot_no: "", rate: "",
-            exporter: "", storage_location: toWarehouse, item_mark: "",
-            group_name: line.item_category || "",
-            item_subgroup: line.sub_category || "",
-            cold_company: (company || "cfpl").toLowerCase(), spl_remarks: "",
-          }
-        }
-      })
-      setColdStorageItems(coldMap)
-
-      // Auto-fetch extra details for each unique item
-      for (const itemName of Object.keys(coldMap)) {
-        // 1. Fetch from cold storage (item_mark, exporter)
-        try {
-          const csResult = await ColdStorageApiService.searchColdStorageStocks({
-            company: (company || "cfpl").toLowerCase(),
-            item_description: itemName,
-            limit: "1",
-          })
-          if (csResult.results?.length > 0) {
-            const csRecord = csResult.results[0]
-            setColdStorageItems(prev => ({
-              ...prev,
-              [itemName]: {
-                ...prev[itemName],
-                group_name: prev[itemName]?.group_name || csRecord.group_name || "",
-                item_mark: csRecord.item_mark || prev[itemName]?.item_mark || "",
-                exporter: csRecord.exporter || prev[itemName]?.exporter || "",
-              }
-            }))
-          }
-        } catch (e) {
-          console.warn(`Could not fetch cold storage data for ${itemName}:`, e)
-        }
-
-        // 2. Fetch group/sub_group from categorial_inv if still missing
-        if (!coldMap[itemName].group_name || !coldMap[itemName].item_subgroup) {
-          try {
-            const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/interunit/categorial-search?search=${encodeURIComponent(itemName)}&limit=1`
-            const res = await fetch(apiUrl, { headers: { 'Accept': 'application/json' } })
-            if (res.ok) {
-              const catData = await res.json()
-              const match = catData.items?.find((i: any) => i.item_description?.toUpperCase() === itemName.toUpperCase())
-              if (match) {
-                setColdStorageItems(prev => ({
-                  ...prev,
-                  [itemName]: {
-                    ...prev[itemName],
-                    group_name: prev[itemName]?.group_name || match.group || "",
-                    item_subgroup: prev[itemName]?.item_subgroup || match.sub_group || "",
-                  }
-                }))
-              }
-            }
-          } catch (e) {
-            console.warn(`Could not fetch categorial data for ${itemName}:`, e)
-          }
-        }
-      }
 
       const boxCount = (response.boxes || []).length
       const lineCount = (response.lines || []).length
@@ -793,7 +712,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
         box_id: sentBoxId,
         article: articleName,
         batch_number: line.batch_number || null,
-        lot_number: dedicatedLot(line?._box_origin) || getColdLotNo(articleName) || line.lot_number || null,
+        lot_number: dedicatedLot(line?._box_origin) || line.lot_number || null,
         transaction_no: scanned.transaction_no || inwardTransactionNo || line.transaction_no || boxRef.transaction_no || null,
         net_weight: w.net_weight ? Number(w.net_weight) : (line.net_weight ? Number(line.net_weight) : null),
         gross_weight: w.total_weight ? Number(w.total_weight) : (line.total_weight ? Number(line.total_weight) : null),
@@ -926,8 +845,8 @@ export default function TransferInPage({ params }: TransferInPageProps) {
           box_id: generatedBoxIds[idx] || targetLine.box_id || targetBoxRef.box_id || `ART-${idx + 1}`,
           article: targetArticle,
           batch_number: targetLine.batch_number || null,
-          lot_number: dedicatedLot(targetLine?._box_origin) || getColdLotNo(targetArticle) || targetLine.lot_number || null,
-          transaction_no: inwardTransactionNo || targetLine.transaction_no || targetBoxRef.transaction_no || null,
+          lot_number: dedicatedLot(targetLine?._box_origin) || targetLine.lot_number || null,
+          transaction_no: targetBoxRef.transaction_no || targetLine.transaction_no || inwardTransactionNo || null,
           net_weight: issueNetWt ? Number(issueNetWt) : (targetLine.net_weight ? Number(targetLine.net_weight) : null),
           gross_weight: issueTotalWt ? Number(issueTotalWt) : (targetLine.total_weight ? Number(targetLine.total_weight) : null),
           is_matched: false,
@@ -992,8 +911,8 @@ export default function TransferInPage({ params }: TransferInPageProps) {
           box_id: generatedBoxIds[i] || line.box_id || boxRef.box_id || `ART-${i + 1}`,
           article: articleName,
           batch_number: line.batch_number || null,
-          lot_number: dedicatedLot(line?._box_origin) || getColdLotNo(articleName) || line.lot_number || null,
-          transaction_no: inwardTransactionNo || line.transaction_no || boxRef.transaction_no || null,
+          lot_number: dedicatedLot(line?._box_origin) || line.lot_number || null,
+          transaction_no: boxRef.transaction_no || line.transaction_no || inwardTransactionNo || null,
           net_weight: w.net_weight ? Number(w.net_weight) : (line.net_weight ? Number(line.net_weight) : null),
           gross_weight: w.total_weight ? Number(w.total_weight) : (line.total_weight ? Number(line.total_weight) : null),
           is_matched: true,
@@ -1002,21 +921,26 @@ export default function TransferInPage({ params }: TransferInPageProps) {
       }
     })
 
-    boxes.forEach((b: any) => {
-      if (!boxesMatchMap[b.id]) {
-        batchItems.push({
-          box_id: String(b.box_id || b.box_number || b.id || ""),
-          transfer_out_box_id: b.id,
-          article: b.article ? String(b.article) : null,
-          batch_number: b.batch_number ? String(b.batch_number) : null,
-          lot_number: dedicatedLot(b) || (b.lot_number ? String(b.lot_number) : null),
-          transaction_no: b.transaction_no ? String(b.transaction_no) : null,
-          net_weight: b.net_weight ? Number(b.net_weight) : null,
-          gross_weight: b.gross_weight ? Number(b.gross_weight) : null,
-          is_matched: true,
-        })
-      }
-    })
+    // In cold-storage mode (linesAreBoxes) OR when boxes cover all lines, each
+    // displayed "line" IS one of the boxes — iterating boxes here would push the
+    // same physical unit twice, producing duplicate rows in transfer_in_boxes.
+    if (!linesAreBoxes && !allLinesCoveredByBoxes) {
+      boxes.forEach((b: any) => {
+        if (!boxesMatchMap[b.id]) {
+          batchItems.push({
+            box_id: String(b.box_id || b.box_number || b.id || ""),
+            transfer_out_box_id: b.id,
+            article: b.article ? String(b.article) : null,
+            batch_number: b.batch_number ? String(b.batch_number) : null,
+            lot_number: dedicatedLot(b) || (b.lot_number ? String(b.lot_number) : null),
+            transaction_no: b.transaction_no ? String(b.transaction_no) : null,
+            net_weight: b.net_weight ? Number(b.net_weight) : null,
+            gross_weight: b.gross_weight ? Number(b.gross_weight) : null,
+            is_matched: true,
+          })
+        }
+      })
+    }
 
     if (batchItems.length === 0) {
       toast.success("All items already acknowledged")
@@ -1026,9 +950,13 @@ export default function TransferInPage({ params }: TransferInPageProps) {
     try {
       await InterunitApiService.acknowledgeBatch(headerId, batchItems)
 
-      const newBoxMap = { ...boxesMatchMap }
-      boxes.forEach((b: any) => { newBoxMap[b.id] = true })
-      setBoxesMatchMap(newBoxMap)
+      // Same guard: don't mark boxes "matched" when lines already represent them,
+      // otherwise the finalize loop pushes duplicates.
+      if (!linesAreBoxes && !allLinesCoveredByBoxes) {
+        const newBoxMap = { ...boxesMatchMap }
+        boxes.forEach((b: any) => { newBoxMap[b.id] = true })
+        setBoxesMatchMap(newBoxMap)
+      }
 
       const newLineMap = { ...linesMatchMap }
       lines.forEach((_: any, i: number) => {
@@ -1057,8 +985,8 @@ export default function TransferInPage({ params }: TransferInPageProps) {
           box_id: generatedBoxIds[i] || line.box_id || boxRef.box_id || `ART-${i + 1}`,
           article: articleName,
           batch_number: line.batch_number || null,
-          lot_number: dedicatedLot(line?._box_origin) || getColdLotNo(articleName) || line.lot_number || null,
-          transaction_no: inwardTransactionNo || line.transaction_no || boxRef.transaction_no || null,
+          lot_number: dedicatedLot(line?._box_origin) || line.lot_number || null,
+          transaction_no: boxRef.transaction_no || line.transaction_no || inwardTransactionNo || null,
           net_weight: w.net_weight ? Number(w.net_weight) : (line.net_weight ? Number(line.net_weight) : null),
           gross_weight: w.total_weight ? Number(w.total_weight) : (line.total_weight ? Number(line.total_weight) : null),
           is_matched: true,
@@ -1262,8 +1190,8 @@ export default function TransferInPage({ params }: TransferInPageProps) {
             box_id: generatedBoxIds[lineIndex] || line.box_id || boxRef.box_id || `ART-${lineIndex + 1}`,
             article: articleName,
             batch_number: line.batch_number || null,
-            lot_number: dedicatedLot(line?._box_origin) || getColdLotNo(articleName) || line.lot_number || null,
-            transaction_no: inwardTransactionNo || line.transaction_no || boxRef.transaction_no || null,
+            lot_number: dedicatedLot(line?._box_origin) || line.lot_number || null,
+            transaction_no: boxRef.transaction_no || line.transaction_no || inwardTransactionNo || null,
             net_weight: w.net_weight ? Number(w.net_weight) : (line.net_weight ? Number(line.net_weight) : null),
             gross_weight: w.total_weight ? Number(w.total_weight) : (line.total_weight ? Number(line.total_weight) : null),
             is_matched: true,
@@ -1613,7 +1541,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
         box_id: boxId,
         article: articleName,
         batch_number: line.batch_number || null,
-        lot_number: dedicatedLot(line?._box_origin) || getColdLotNo(articleName) || line.lot_number || null,
+        lot_number: dedicatedLot(line?._box_origin) || line.lot_number || null,
         transaction_no: txNo || null,
         net_weight: netWt,
         gross_weight: calculatedGrossWt,
@@ -1760,56 +1688,6 @@ export default function TransferInPage({ params }: TransferInPageProps) {
     try {
       setLoading(true)
 
-      // Helper: build cold storage payload
-      const buildColdStoragePayload = () => {
-        if (!isColdStorageTransfer) return undefined
-        return uniqueColdItems.map((item) => {
-          const ci = coldStorageItems[item.name] || {}
-          const itemRate = parseFloat(ci.rate || "0")
-
-          const itemBoxes = boxes
-            .filter((b: any) => (b.article || "") === item.name)
-            .map((b: any) => ({
-              box_id: b.box_id || null,
-              transaction_no: b.transaction_no || null,
-              weight_kg: b.net_weight ? Number(b.net_weight) : null,
-            }))
-
-          const itemLineBoxes = itemBoxes.length > 0 ? itemBoxes : item.lines.map((l: any, i: number) => {
-            const bData = lineBoxDataMap[l.id] || {}
-            // Use rawLines index since item.lines comes from transferData.lines (unfiltered)
-            const rawIdx = rawLines.indexOf(l)
-            const lineIdx = rawIdx >= 0 ? rawIdx : lines.indexOf(l)
-            const w = lineIdx >= 0 ? (lineWeights[lineIdx] || {}) : {}
-            return {
-              box_id: l.box_id || bData.box_id || null,
-              transaction_no: l.transaction_no || bData.transaction_no || null,
-              weight_kg: w.net_weight ? Number(w.net_weight) : (l.net_weight ? Number(l.net_weight) : null),
-            }
-          })
-
-          return {
-            cold_company: ci.cold_company || company || "cfpl",
-            item_description: item.name,
-            inward_dt: ci.inward_dt || null,
-            vakkal: ci.vakkal?.trim() || null,
-            lot_no: ci.lot_no?.trim() || null,
-            item_mark: ci.item_mark?.trim() || null,
-            group_name: ci.group_name?.trim() || null,
-            item_subgroup: ci.item_subgroup?.trim() || null,
-            storage_location: ci.storage_location?.trim() || null,
-            exporter: ci.exporter?.trim() || null,
-            no_of_cartons: item.totalQty || null,
-            weight_kg: item.totalWeight || null,
-            rate: itemRate || null,
-            value: itemRate > 0 ? item.totalWeight * itemRate : null,
-            unit: item.uom || null,
-            spl_remarks: ci.spl_remarks?.trim() || null,
-            box_details: itemLineBoxes,
-          }
-        })
-      }
-
       if (pendingHeaderId) {
         // ── Safety re-sync: re-send every locally-acknowledged item before finalize ──
         // Covers cases where a batch acknowledge silently missed data, or where the user
@@ -1828,8 +1706,8 @@ export default function TransferInPage({ params }: TransferInPageProps) {
             box_id: generatedBoxIds[i] || line.box_id || boxRef.box_id || `ART-${i + 1}`,
             article: articleName,
             batch_number: line.batch_number || null,
-            lot_number: dedicatedLot(line?._box_origin) || getColdLotNo(articleName) || line.lot_number || null,
-            transaction_no: inwardTransactionNo || line.transaction_no || boxRef.transaction_no || null,
+            lot_number: dedicatedLot(line?._box_origin) || line.lot_number || null,
+            transaction_no: boxRef.transaction_no || line.transaction_no || inwardTransactionNo || null,
             net_weight: issue?.net_weight
               ? Number(issue.net_weight)
               : (w.net_weight ? Number(w.net_weight) : (line.net_weight ? Number(line.net_weight) : null)),
@@ -1849,22 +1727,27 @@ export default function TransferInPage({ params }: TransferInPageProps) {
           })
         })
 
-        boxes.forEach((b: any) => {
-          if (!boxesMatchMap[b.id]) return
-          const articleName = b.article ? String(b.article) : ""
-          const coldLot = coldStorageItems[articleName]?.lot_no?.trim() || null
-          syncBatch.push({
-            box_id: String(b.box_id || b.box_number || b.id || ""),
-            transfer_out_box_id: b.id,
-            article: articleName || null,
-            batch_number: b.batch_number ? String(b.batch_number) : null,
-            lot_number: dedicatedLot(b) || coldLot || (b.lot_number ? String(b.lot_number) : null),
-            transaction_no: b.transaction_no ? String(b.transaction_no) : null,
-            net_weight: b.net_weight ? Number(b.net_weight) : null,
-            gross_weight: b.gross_weight ? Number(b.gross_weight) : null,
-            is_matched: true,
+        // In cold-storage mode OR when boxes cover all lines, the lines loop above
+        // already covers every box (lines are synthesized from boxes). Iterating
+        // boxes here would push duplicates → doubled rows in transfer_in_boxes
+        // and a stuck "Partially Received" status.
+        if (!linesAreBoxes && !allLinesCoveredByBoxes) {
+          boxes.forEach((b: any) => {
+            if (!boxesMatchMap[b.id]) return
+            const articleName = b.article ? String(b.article) : ""
+            syncBatch.push({
+              box_id: String(b.box_id || b.box_number || b.id || ""),
+              transfer_out_box_id: b.id,
+              article: articleName || null,
+              batch_number: b.batch_number ? String(b.batch_number) : null,
+              lot_number: dedicatedLot(b) || (b.lot_number ? String(b.lot_number) : null),
+              transaction_no: b.transaction_no ? String(b.transaction_no) : null,
+              net_weight: b.net_weight ? Number(b.net_weight) : null,
+              gross_weight: b.gross_weight ? Number(b.gross_weight) : null,
+              is_matched: true,
+            })
           })
-        })
+        }
 
         if (syncBatch.length > 0) {
           await InterunitApiService.acknowledgeBatch(pendingHeaderId, syncBatch)
@@ -1875,31 +1758,33 @@ export default function TransferInPage({ params }: TransferInPageProps) {
           box_condition: boxCondition,
           condition_remarks: conditionRemarks.trim() || null,
         }
-        const coldItems = buildColdStoragePayload()
-        if (coldItems) finalizePayload.cold_storage_items = coldItems
 
         await InterunitApiService.finalizeTransferIn(pendingHeaderId, finalizePayload)
 
         toast.success(`GRN ${pendingGrnNumber} finalized successfully.`)
       } else {
         // ── Fallback: original bulk-create path (no pending header) ──
-        const scannedBoxes = boxes
-          .filter((b: any) => boxesMatchMap[b.id])
-          .map((b: any) => {
-            const articleName = b.article ? String(b.article) : ""
-            const coldLot = coldStorageItems[articleName]?.lot_no?.trim() || null
-            return {
-              box_id: String(b.box_id || b.box_number || b.id || ""),
-              transfer_out_box_id: b.id,
-              article: articleName || null,
-              batch_number: b.batch_number ? String(b.batch_number) : null,
-              lot_number: dedicatedLot(b) || coldLot || (b.lot_number ? String(b.lot_number) : null),
-              transaction_no: b.transaction_no ? String(b.transaction_no) : null,
-              net_weight: b.net_weight ? Number(b.net_weight) : null,
-              gross_weight: b.gross_weight ? Number(b.gross_weight) : null,
-              is_matched: true,
-            }
-          })
+        // In cold-storage mode OR when boxes cover all lines, the article loops
+        // below already cover every box. Skip the boxes-array iteration to avoid
+        // pushing duplicate rows.
+        const scannedBoxes = (linesAreBoxes || allLinesCoveredByBoxes)
+          ? []
+          : boxes
+              .filter((b: any) => boxesMatchMap[b.id])
+              .map((b: any) => {
+                const articleName = b.article ? String(b.article) : ""
+                return {
+                  box_id: String(b.box_id || b.box_number || b.id || ""),
+                  transfer_out_box_id: b.id,
+                  article: articleName || null,
+                  batch_number: b.batch_number ? String(b.batch_number) : null,
+                  lot_number: dedicatedLot(b) || (b.lot_number ? String(b.lot_number) : null),
+                  transaction_no: b.transaction_no ? String(b.transaction_no) : null,
+                  net_weight: b.net_weight ? Number(b.net_weight) : null,
+                  gross_weight: b.gross_weight ? Number(b.gross_weight) : null,
+                  is_matched: true,
+                }
+              })
 
 
         const acknowledgedArticles = lines
@@ -1914,8 +1799,8 @@ export default function TransferInPage({ params }: TransferInPageProps) {
               transfer_out_box_id: null,
               article: articleName,
               batch_number: line.batch_number || null,
-              lot_number: dedicatedLot(line?._box_origin) || getColdLotNo(articleName) || line.lot_number || null,
-              transaction_no: inwardTransactionNo || line.transaction_no || boxRef.transaction_no || null,
+              lot_number: dedicatedLot(line?._box_origin) || line.lot_number || null,
+              transaction_no: boxRef.transaction_no || line.transaction_no || inwardTransactionNo || null,
               net_weight: w.net_weight ? Number(w.net_weight) : (line.net_weight ? Number(line.net_weight) : null),
               gross_weight: w.total_weight ? Number(w.total_weight) : (line.total_weight ? Number(line.total_weight) : null),
               is_matched: true,
@@ -1935,8 +1820,8 @@ export default function TransferInPage({ params }: TransferInPageProps) {
               transfer_out_box_id: null,
               article: articleName,
               batch_number: line.batch_number || null,
-              lot_number: dedicatedLot(line?._box_origin) || getColdLotNo(articleName) || line.lot_number || null,
-              transaction_no: inwardTransactionNo || line.transaction_no || boxRef.transaction_no || null,
+              lot_number: dedicatedLot(line?._box_origin) || line.lot_number || null,
+              transaction_no: boxRef.transaction_no || line.transaction_no || inwardTransactionNo || null,
               net_weight: w.net_weight ? Number(w.net_weight) : (line.net_weight ? Number(line.net_weight) : null),
               gross_weight: w.total_weight ? Number(w.total_weight) : (line.total_weight ? Number(line.total_weight) : null),
               is_matched: false,
@@ -1963,9 +1848,6 @@ export default function TransferInPage({ params }: TransferInPageProps) {
           condition_remarks: conditionRemarks.trim() || null,
           scanned_boxes: allScannedBoxes,
         }
-
-        const coldItems = buildColdStoragePayload()
-        if (coldItems) payload.cold_storage_items = coldItems
 
         await InterunitApiService.createTransferIn(payload)
 
@@ -2122,144 +2004,6 @@ export default function TransferInPage({ params }: TransferInPageProps) {
             </CardContent>
           </Card>
 
-          {/* ══════ Cold Storage Fields (Savla / Rishi) ══════ */}
-          {isColdStorageTransfer && boxes.length > 0 && (
-            <Card className="border-0 shadow-sm overflow-hidden">
-              <CardHeader className="pb-2 pt-3 px-4 bg-gradient-to-r from-amber-50 to-orange-50 border-b">
-                <CardTitle className="text-sm font-semibold text-gray-800 flex items-center gap-2">
-                  <Hash className="h-4 w-4 text-amber-600" />
-                  Lot Dedicator
-                </CardTitle>
-                <p className="text-xs text-muted-foreground mt-0.5">Assign a lot number to a range of box numbers — overrides the per-item lot for those boxes on acknowledge.</p>
-              </CardHeader>
-              <CardContent className="p-3 sm:p-4">
-                <LotRangeDedicator warehouse={toWarehouse} totalBoxes={boxes.length} onApply={(ranges) => setBoxLotRanges(ranges)} />
-              </CardContent>
-            </Card>
-          )}
-          {isColdStorageTransfer && (
-            <Card className="border-0 shadow-sm overflow-hidden">
-              <CardHeader className="pb-3 bg-gradient-to-r from-blue-50 to-indigo-50 border-b">
-                <CardTitle className="text-sm sm:text-base font-semibold text-gray-800 flex items-center gap-2">
-                  <Snowflake className="h-5 w-5 text-blue-600" />
-                  Cold Storage Details — {uniqueColdItems.length} Item{uniqueColdItems.length !== 1 ? "s" : ""}
-                </CardTitle>
-                <p className="text-xs text-muted-foreground mt-0.5">Fill details per item for {toWarehouse}</p>
-              </CardHeader>
-              <CardContent className="p-0">
-                <div className="divide-y divide-gray-200">
-                  {uniqueColdItems.map((item, idx) => {
-                    const ci = coldStorageItems[item.name] || { inward_dt: "", vakkal: "", lot_no: "", rate: "", exporter: "", storage_location: toWarehouse, item_mark: "", group_name: "" }
-                    const itemRate = parseFloat(ci.rate) || 0
-                    const itemValue = item.totalWeight * itemRate
-
-                    return (
-                      <div key={item.name} className="p-3 sm:p-4">
-                        {/* Item header */}
-                        <div className="flex items-center gap-2 mb-3">
-                          <div className="h-7 w-7 rounded-lg bg-blue-100 flex items-center justify-center shrink-0">
-                            <span className="text-xs font-bold text-blue-700">{idx + 1}</span>
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold text-gray-900 truncate">{item.name}</p>
-                            <p className="text-[11px] text-muted-foreground">
-                              Total Qty: <span className="font-semibold text-blue-600">{item.totalQty}</span>
-                              {item.uom ? ` ${item.uom}` : ""}
-                              {item.totalWeight ? ` · ${item.totalWeight.toFixed(2)} kg` : ""}
-                              {item.lines.length > 1 ? ` · ${item.lines.length} entries` : ""}
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* Fields grid */}
-                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-3">
-                          <div className="space-y-1">
-                            <Label className="text-[11px] font-medium text-gray-500">Company *</Label>
-                            <Select value={ci.cold_company || "cfpl"} onValueChange={(val) => updateColdItem(item.name, "cold_company", val)}>
-                              <SelectTrigger className="h-8 text-xs bg-white border-gray-200">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="cfpl">CFPL</SelectItem>
-                                <SelectItem value="cdpl">CDPL</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-[11px] font-medium text-gray-500">Inward Date *</Label>
-                            <Input type="date" value={ci.inward_dt} onChange={(e) => updateColdItem(item.name, "inward_dt", e.target.value)} className="h-8 text-xs bg-white border-gray-200" />
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-[11px] font-medium text-gray-500">Vakkal</Label>
-                            <Input type="text" value={ci.vakkal} onChange={(e) => updateColdItem(item.name, "vakkal", e.target.value)} placeholder="Vakkal" className="h-8 text-xs bg-white border-gray-200" />
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-[11px] font-medium text-gray-500">Lot No</Label>
-                            <Input
-                              type="number"
-                              min="1"
-                              step="1"
-                              value={ci.lot_no}
-                              onChange={(e) => {
-                                const val = e.target.value
-                                // Allow empty or positive integers only
-                                if (val === "" || /^\d+$/.test(val)) {
-                                  updateColdItem(item.name, "lot_no", val)
-                                }
-                              }}
-                              placeholder="Lot number"
-                              className={`h-8 text-xs bg-white border-gray-200 ${ci.lot_no && !/^\d+$/.test(ci.lot_no) ? "border-red-400" : ""}`}
-                            />
-                            {ci.lot_no && !/^\d+$/.test(ci.lot_no) && (
-                              <p className="text-[10px] text-red-500">Must be a positive integer</p>
-                            )}
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-[11px] font-medium text-gray-500">Item Mark</Label>
-                            <Input type="text" value={ci.item_mark} onChange={(e) => updateColdItem(item.name, "item_mark", e.target.value)} placeholder="Item mark" className="h-8 text-xs bg-white border-gray-200" />
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-[11px] font-medium text-gray-500">Group Name</Label>
-                            <Input type="text" value={ci.group_name} onChange={(e) => updateColdItem(item.name, "group_name", e.target.value)} placeholder="Group" className="h-8 text-xs bg-white border-gray-200" />
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-[11px] font-medium text-gray-500">Sub Group</Label>
-                            <Input type="text" value={ci.item_subgroup} onChange={(e) => updateColdItem(item.name, "item_subgroup", e.target.value)} placeholder="Sub group" className="h-8 text-xs bg-white border-gray-200" />
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-[11px] font-medium text-gray-500">Storage Location</Label>
-                            <Input type="text" value={ci.storage_location} onChange={(e) => updateColdItem(item.name, "storage_location", e.target.value)} placeholder="Location" className="h-8 text-xs bg-white border-gray-200" />
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-[11px] font-medium text-gray-500">Exporter</Label>
-                            <Input type="text" value={ci.exporter} onChange={(e) => updateColdItem(item.name, "exporter", e.target.value)} placeholder="Exporter" className="h-8 text-xs bg-white border-gray-200" />
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-[11px] font-medium text-gray-500">Rate (₹/kg)</Label>
-                            <Input type="number" step="any" value={ci.rate} onChange={(e) => updateColdItem(item.name, "rate", e.target.value)} placeholder="0.00" className="h-8 text-xs bg-white border-gray-200" />
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-[11px] font-medium text-gray-500">Value (Weight × Rate)</Label>
-                            <div className="h-8 flex items-center px-2 bg-gray-50 border border-gray-200 rounded-md text-xs font-semibold text-gray-800">
-                              {itemRate > 0 ? itemValue.toFixed(2) : "—"}
-                            </div>
-                          </div>
-                          <div className="space-y-1 sm:col-span-2">
-                            <Label className="text-[11px] font-medium text-gray-500">Spl. Remarks</Label>
-                            <Input type="text" value={ci.spl_remarks} onChange={(e) => updateColdItem(item.name, "spl_remarks", e.target.value)} placeholder="Special remarks..." className="h-8 text-xs bg-white border-gray-200" />
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-                {uniqueColdItems.length === 0 && (
-                  <div className="py-8 text-center text-sm text-muted-foreground">No items in this transfer</div>
-                )}
-              </CardContent>
-            </Card>
-          )}
-
           {/* ══════ Box & Article Acknowledgement ══════ */}
           <Card className="border-0 shadow-sm overflow-hidden">
             <CardHeader className="pb-3 bg-gradient-to-r from-teal-50 to-emerald-50 border-b">
@@ -2270,7 +2014,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                     Box & Article Acknowledgement
                   </CardTitle>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    {transferData.challan_no || transferData.transfer_no} — {totalBoxes} boxes, {totalLines} articles
+                    {transferData.challan_no || transferData.transfer_no} — {totalBoxes} boxes, {uniqueArticleCount || totalLines} article{(uniqueArticleCount || totalLines) !== 1 ? "s" : ""}
                   </p>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
@@ -2452,19 +2196,26 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                       )}
                       {/* ── Generate QR's button — enabled only when boxes have no box_id/transaction_no yet ── */}
                       {(() => {
-                        // Boxes already tagged means the outward side already assigned box_id + transaction_no
-                        const boxesAlreadyTagged = boxes.length > 0 && boxes.every((b: any) => b.box_id && b.transaction_no)
+                        // Mixed scan + manual: scanned boxes are already tagged by the outward
+                        // side, but manually-typed Article Entries still need ids. Gate on whether
+                        // any *displayed entry* still lacks an id — not on whether the scanned
+                        // boxes happen to be tagged (the old check disabled the button in mixed mode).
+                        // LINE-style placeholders are sentinels (pending_stock_tools.py) — not real ids.
+                        const lineHasId = (l: any, i: number) =>
+                          !!generatedBoxIds[i] ||
+                          (!!l.box_id && !isSyntheticLineBoxId(l.box_id)) ||
+                          !!(lineBoxDataMap[l.id]?.box_id)
+                        const linesNeedingQr = lines.some((l: any, i: number) => !lineHasId(l, i))
                         const qrsGeneratedNow = !!inwardTransactionNo
-                        const qrsExist = qrsGeneratedNow || boxesAlreadyTagged
-                        const canGenerate = !qrsExist && !generatingQRs && !!transferData
+                        const canGenerate = !generatingQRs && !!transferData && !qrsGeneratedNow && linesNeedingQr
                         const existingTx = inwardTransactionNo || boxes.find((b: any) => b.transaction_no)?.transaction_no
-                        const disabledReason = qrsGeneratedNow
-                          ? `QRs already generated this session — TX: ${inwardTransactionNo}`
-                          : boxesAlreadyTagged
-                          ? `Boxes already have QR data — TX: ${existingTx || boxes[0]?.transaction_no || "pre-tagged"}`
-                          : !transferData
+                        const disabledReason = !transferData
                           ? "Load a transfer first"
-                          : "Generate QR stickers for all boxes"
+                          : qrsGeneratedNow
+                          ? `QRs already generated this session — TX: ${inwardTransactionNo}`
+                          : !linesNeedingQr
+                          ? `All entries already have QR data — TX: ${existingTx || boxes[0]?.transaction_no || "pre-tagged"}`
+                          : "Generate QR stickers for entries that need them"
                         return (
                         <button
                           onClick={canGenerate ? handleGenerateQRs : undefined}
@@ -2584,7 +2335,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                                 <td className={`py-2.5 px-3 text-right tabular-nums ${issued && linesIssueMap[index]?.net_weight ? "text-red-600 font-bold" : "text-gray-600"}`}>{(issued && linesIssueMap[index]?.net_weight) || lineWeights[index]?.net_weight || line.net_weight || "-"}</td>
                                 <td className={`py-2.5 px-3 text-right tabular-nums ${issued && linesIssueMap[index]?.total_weight ? "text-red-600 font-bold" : "text-gray-600"}`}>{(issued && linesIssueMap[index]?.total_weight) || lineWeights[index]?.total_weight || line.total_weight || "-"}</td>
                                 {hasBatchData && <td className="py-2.5 px-3 text-gray-600 font-mono text-xs truncate">{line.batch_number || "-"}</td>}
-                                <td className="py-2.5 px-3 text-gray-600 font-mono text-xs truncate">{coldStorageItems[line.item_desc_raw || line.item_description || ""]?.lot_no?.trim() || line.lot_number || "-"}</td>
+                                <td className="py-2.5 px-3 text-gray-600 font-mono text-xs truncate">{line.lot_number || "-"}</td>
                                 <td className="py-2.5 px-3 sticky right-0 bg-inherit">
                                   <div className="flex items-center justify-end gap-1.5">
                                     {!hasExistingQRData ? (
@@ -2785,7 +2536,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                               {isColdStorageFrom && <div><span className="text-gray-500">Trans No:</span> <span className="font-mono font-medium">{scannedLineData[index]?.transaction_no || line.transaction_no || mobileBoxData.transaction_no || "-"}</span></div>}
                               {isColdStorageFrom && <div><span className="text-gray-500">Box ID:</span> <span className="font-mono font-medium">{scannedLineData[index]?.box_id || line.box_id || mobileBoxData.box_id || "-"}</span></div>}
                               {line.batch_number && <div><span className="text-gray-500">Batch:</span> <span className="font-mono font-medium">{line.batch_number}</span></div>}
-                              {(coldStorageItems[line.item_desc_raw || line.item_description || ""]?.lot_no?.trim() || line.lot_number) && <div><span className="text-gray-500">Lot:</span> <span className="font-mono font-medium">{coldStorageItems[line.item_desc_raw || line.item_description || ""]?.lot_no?.trim() || line.lot_number}</span></div>}
+                              {line.lot_number && <div><span className="text-gray-500">Lot:</span> <span className="font-mono font-medium">{line.lot_number}</span></div>}
                             </div>
                             {/* Issue details on mobile */}
                             {issued && linesIssueMap[index] && (
@@ -2942,13 +2693,10 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                     <p className="text-[11px] text-gray-500 uppercase tracking-wider font-medium">Total Net Wt</p>
                     <p className="text-lg sm:text-xl font-bold text-emerald-700">
                       {(() => {
-                        let total = 0
-                        if (allLinesCoveredByBoxes) {
-                          total = boxes.reduce((sum: number, b: any) => sum + (parseFloat(b.net_weight) || 0), 0)
-                        } else {
-                          total = boxes.reduce((sum: number, b: any) => sum + (parseFloat(b.net_weight) || 0), 0)
-                            + lines.reduce((sum: number, l: any, i: number) => sum + (parseFloat(lineWeights[i]?.net_weight || l.net_weight) || 0), 0)
-                        }
+                        // `lines` holds every entry (scanned + manual), so summing it avoids
+                        // both double-counting scanned boxes and dropping manual entries.
+                        const total = lines.reduce((sum: number, l: any, i: number) =>
+                          sum + (parseFloat(lineWeights[i]?.net_weight || l.net_weight) || 0), 0)
                         return `${total.toFixed(2)} kg`
                       })()}
                     </p>
@@ -2957,13 +2705,8 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                     <p className="text-[11px] text-gray-500 uppercase tracking-wider font-medium">Total Gross Wt</p>
                     <p className="text-lg sm:text-xl font-bold text-amber-700">
                       {(() => {
-                        let total = 0
-                        if (allLinesCoveredByBoxes) {
-                          total = boxes.reduce((sum: number, b: any) => sum + (parseFloat(b.gross_weight) || 0), 0)
-                        } else {
-                          total = boxes.reduce((sum: number, b: any) => sum + (parseFloat(b.gross_weight) || 0), 0)
-                            + lines.reduce((sum: number, l: any, i: number) => sum + (parseFloat(lineWeights[i]?.total_weight || l.total_weight) || 0), 0)
-                        }
+                        const total = lines.reduce((sum: number, l: any, i: number) =>
+                          sum + (parseFloat(lineWeights[i]?.total_weight || l.total_weight) || 0), 0)
                         return `${total.toFixed(2)} kg`
                       })()}
                     </p>

@@ -34,7 +34,6 @@ export default function TransferPage({ params }: TransferPageProps) {
   const { toast } = useToast()
   const { user } = useAuthStore()
   const canDelete = user?.email === 'yash@candorfoods.in'
-  const canDeleteInnerCold = user?.email === 'hrithik@candorfoods.in' || user?.email === 'yash@candorfoods.in'
   const [activeTab, setActiveTab] = useState("transferout")
   const [warehouseFilter, setWarehouseFilter] = useState<string>("all")
   const [userDefaultWarehouses, setUserDefaultWarehouses] = useState<string[]>([])
@@ -59,13 +58,6 @@ export default function TransferPage({ params }: TransferPageProps) {
   const [totalPages, setTotalPages] = useState(1)
   const [totalRecords, setTotalRecords] = useState(0)
   const [perPage] = useState(15)
-
-  // State for inner cold transfers
-  const [innerColdTransfers, setInnerColdTransfers] = useState<any[]>([])
-  const [innerColdLoading, setInnerColdLoading] = useState(false)
-  const [innerColdPage, setInnerColdPage] = useState(1)
-  const [innerColdTotalPages, setInnerColdTotalPages] = useState(1)
-  const [innerColdTotal, setInnerColdTotal] = useState(0)
 
   // State for transfers data
   const [transfers, setTransfers] = useState<any[]>([])
@@ -162,32 +154,11 @@ export default function TransferPage({ params }: TransferPageProps) {
     }
   }
 
-  // Load inner cold transfers
-  const loadInnerColdTransfers = async (page: number = 1) => {
-    setInnerColdLoading(true)
-    try {
-      const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/cold-storage/inner-transfer/list?page=${page}&per_page=${perPage}`
-      const res = await fetch(apiUrl, { headers: { 'Accept': 'application/json' } })
-      if (res.ok) {
-        const data = await res.json()
-        setInnerColdTransfers(data.records || [])
-        setInnerColdTotalPages(data.total_pages || 1)
-        setInnerColdTotal(data.total || 0)
-        setInnerColdPage(page)
-      }
-    } catch (error: any) {
-      toast({ title: "Error", description: "Failed to load inner cold transfers.", variant: "destructive" })
-    } finally {
-      setInnerColdLoading(false)
-    }
-  }
-
   useEffect(() => { loadRequests(1) }, [])
 
   useEffect(() => {
     if (activeTab === "transferout" && transfers.length === 0) loadTransfers(1)
     if (activeTab === "transferin" && transferIns.length === 0) loadTransferIns(1)
-    if (activeTab === "innercold" && innerColdTransfers.length === 0) loadInnerColdTransfers(1)
     if (activeTab === "details" && transfers.length === 0) loadTransfers(1)
   }, [activeTab])
 
@@ -214,7 +185,6 @@ export default function TransferPage({ params }: TransferPageProps) {
   const handlePageChange = (page: number) => { if (page >= 1 && page <= totalPages) loadRequests(page) }
   const handleTransfersPageChange = (page: number) => { if (page >= 1 && page <= transfersTotalPages) loadTransfers(page) }
   const handleTransferInsPageChange = (page: number) => { if (page >= 1 && page <= transferInsTotalPages) loadTransferIns(page) }
-  const handleInnerColdPageChange = (page: number) => { if (page >= 1 && page <= innerColdTotalPages) loadInnerColdTransfers(page) }
 
   // Client-side search filter helper
   const searchMatch = (record: any, query: string, fields: string[]) => {
@@ -253,7 +223,28 @@ export default function TransferPage({ params }: TransferPageProps) {
     return normalized.some(w => w === target)
   }
 
+  // Pure cold→cold transfers live in the dedicated /cold-transfer section, so they must NOT
+  // appear here. But cold→NORMAL-warehouse transfers ARE normal transfer-outs (received at a
+  // regular warehouse via the normal flow), so they MUST stay visible in this list.
+  const COLD_WAREHOUSES = ["cold storage", "rishi", "savla d-39", "savla d-514", "supreme", "supreme cold"]
+  const isColdWarehouse = (w: any) => COLD_WAREHOUSES.includes(String(w || "").trim().toLowerCase())
+  const isColdSource = (t: any) =>
+    (!!t?.from_cold_unit && String(t.from_cold_unit).trim() !== "") || isColdWarehouse(t?.from_warehouse)
+  const isColdDest = (t: any) =>
+    (!!t?.to_cold_unit && String(t.to_cold_unit).trim() !== "") || isColdWarehouse(t?.to_warehouse)
+  // Hide only cold→cold; keep cold→normal (and everything else).
+  const isPureColdTransfer = (t: any) => isColdSource(t) && isColdDest(t)
+
+  // Cold-DESTINATION GRNs (warehouse→Savla/Rishi/Supreme, and cold→cold) are now owned
+  // by the dedicated /cold-transfer page's "Transfer IN" section, so they must NOT appear
+  // in this list. Normalize first so backend case/alias variants ("RISHI", "SAVLA D-514",
+  // "savla bond") resolve to a canonical cold code before the check.
+  const isColdDestTransferIn = (t: any) =>
+    isColdWarehouse(normalizeWarehouseName(t?.receiving_warehouse))
+
   const filteredTransfers = transfers.filter(t => {
+    // Exclude only cold→cold (their own /cold-transfer section). Cold→normal stays visible.
+    if (isPureColdTransfer(t)) return false
     // Pass from_cold_unit too so the Cold-sub chips (Savla D-39 / D-514 / Rishi /
     // Supreme Cold) match cold-source transfers whose from_warehouse is just
     // "Cold Storage". The header carries the canonical sub-cold(s) and
@@ -266,6 +257,8 @@ export default function TransferPage({ params }: TransferPageProps) {
     return searchMatch(r, requestSearch, ["request_no", "from_warehouse", "to_warehouse", "request_date", "status"])
   })
   const filteredTransferIns = transferIns.filter(t => {
+    // Cold-destination receipts live in the /cold-transfer "Transfer IN" section now — hide them here.
+    if (isColdDestTransferIn(t)) return false
     if (!warehouseMatches(t.from_warehouse, t.receiving_warehouse, t.from_cold_unit)) return false
     return searchMatch(t, transferInSearch, ["grn_number", "transfer_out_no", "receiving_warehouse", "from_warehouse", "received_by", "status", "grn_date", "lot_numbers"])
   })
@@ -312,23 +305,6 @@ export default function TransferPage({ params }: TransferPageProps) {
       loadTransferIns(transferInsPage)
     } catch (error: any) {
       toast({ title: "Error", description: error.message || "Failed to delete transfer IN.", variant: "destructive" })
-    }
-  }
-
-  const handleDeleteInnerCold = async (challanNo: string) => {
-    if (!confirm("Are you sure you want to delete this inner cold transfer?")) return
-    try {
-      const apiUrl = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/cold-storage/inner-transfer/${encodeURIComponent(challanNo)}?user_email=${encodeURIComponent(user?.email || '')}`
-      const res = await fetch(apiUrl, { method: 'DELETE', headers: { 'Accept': 'application/json' } })
-      if (!res.ok) {
-        const err = await res.json().catch(() => null)
-        throw new Error(err?.detail || `Delete failed: ${res.status}`)
-      }
-      const data = await res.json()
-      toast({ title: "Deleted", description: data.message || "Inner cold transfer deleted." })
-      loadInnerColdTransfers(innerColdPage)
-    } catch (error: any) {
-      toast({ title: "Error", description: error.message || "Failed to delete inner cold transfer.", variant: "destructive" })
     }
   }
 
@@ -546,9 +522,6 @@ export default function TransferPage({ params }: TransferPageProps) {
           </TabsTrigger>
           <TabsTrigger value="transferin" className="text-[11px] sm:text-sm py-2 sm:py-2.5 px-2.5 sm:px-3 rounded-lg data-[state=active]:bg-gray-900 data-[state=active]:text-white data-[state=active]:shadow-sm gap-1 sm:gap-1.5 whitespace-nowrap flex-shrink-0">
             <Inbox className="h-3.5 w-3.5" /><span className="hidden sm:inline">Transfer In</span><span className="sm:hidden">In</span>
-          </TabsTrigger>
-          <TabsTrigger value="innercold" className="text-[11px] sm:text-sm py-2 sm:py-2.5 px-2.5 sm:px-3 rounded-lg data-[state=active]:bg-gray-900 data-[state=active]:text-white data-[state=active]:shadow-sm gap-1 sm:gap-1.5 whitespace-nowrap flex-shrink-0">
-            <PackageCheck className="h-3.5 w-3.5" /><span className="hidden sm:inline">Inner Cold</span><span className="sm:hidden">Cold</span>
           </TabsTrigger>
           <TabsTrigger value="details" className="text-[11px] sm:text-sm py-2 sm:py-2.5 px-2.5 sm:px-3 rounded-lg data-[state=active]:bg-gray-900 data-[state=active]:text-white data-[state=active]:shadow-sm gap-1 sm:gap-1.5 whitespace-nowrap flex-shrink-0">
             <Package className="h-3.5 w-3.5" /><span className="hidden sm:inline">All Transfers</span><span className="sm:hidden">All</span>
@@ -1306,195 +1279,6 @@ export default function TransferPage({ params }: TransferPageProps) {
               </>
             )}
             <PaginationBar page={transferInsPage} totalPages={transferInsTotalPages} total={transferInsTotal} onPageChange={handleTransferInsPageChange} />
-          </Card>
-        </TabsContent>
-
-        {/* ════════════════ INNER COLD TAB ════════════════ */}
-        <TabsContent value="innercold" className="mt-4 space-y-4">
-          <Card className="border-0 shadow-sm overflow-hidden">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 sm:px-5 py-3 sm:py-4 border-b bg-white">
-              <div>
-                <h3 className="text-sm sm:text-base font-semibold text-gray-900">Inner Cold Transfers</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">{innerColdTotal} record{innerColdTotal !== 1 ? 's' : ''}</p>
-              </div>
-              <div className="flex items-center gap-2 self-end sm:self-auto flex-wrap">
-                <Button size="sm" onClick={() => router.push(`/${company}/transfer/innercoldtransfer`)}
-                  className="h-8 px-3 text-xs bg-blue-600 hover:bg-blue-700 text-white shadow-sm">
-                  <Plus className="h-3.5 w-3.5 mr-1" />
-                  New Transfer
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => loadInnerColdTransfers(innerColdPage)} disabled={innerColdLoading}
-                  className="h-8 px-3 text-xs text-muted-foreground hover:text-foreground">
-                  <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${innerColdLoading ? 'animate-spin' : ''}`} />
-                  Refresh
-                </Button>
-              </div>
-            </div>
-
-            {innerColdLoading ? <LoadingSkeleton /> : innerColdTransfers.length === 0 ? (
-              <EmptyState icon={PackageCheck} title="No inner cold transfers"
-                subtitle="Inner cold transfer records will appear here once created."
-                action={() => router.push(`/${company}/transfer/innercoldtransfer`)}
-                actionLabel="New Inner Cold Transfer" />
-            ) : (
-              <>
-                {/* Mobile card list */}
-                <div className="md:hidden divide-y">
-                  {innerColdTransfers.map((t: any) => (
-                    <div key={t.challan_no} className="p-4 space-y-3">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <ChallanHoverCard
-                            challanNo={t.challan_no}
-                            from={t.from_warehouse}
-                            to={t.lines?.find((l: any) => l.new_storage_location)?.new_storage_location || undefined}
-                            reason={t.reason_code || t.remark}
-                            lines={t.lines?.map((l: any) => ({ name: l.item_description, qty: l.quantity, lotFrom: String(l.old_lot_number), lotTo: String(l.new_lot_number) }))}
-                          />
-                          <p className="text-xs text-muted-foreground mt-0.5">{t.transfer_date || formatDate(t.created_at)}</p>
-                        </div>
-                        <Badge variant="outline" className="text-[11px] font-medium px-2 py-0.5 bg-emerald-50 text-emerald-700 border-emerald-200">
-                          {t.status}
-                        </Badge>
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        <span className="font-medium text-gray-700">{t.from_warehouse || 'N/A'}</span>
-                        <span className="mx-1">|</span>
-                        <span>{t.reason_code}</span>
-                      </div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <Badge variant="outline" className="text-[11px] bg-blue-50 text-blue-700 border-blue-200">
-                          {t.line_count} Item{t.line_count !== 1 ? 's' : ''}
-                        </Badge>
-                        <Badge variant="outline" className="text-[11px] bg-violet-50 text-violet-700 border-violet-200">
-                          {t.total_boxes} Boxes
-                        </Badge>
-                      </div>
-                      {/* Line details */}
-                      <div className="space-y-1.5 pt-1">
-                        {t.lines?.map((line: any, i: number) => (
-                          <div key={i} className="text-xs bg-gray-50 rounded p-2 space-y-1">
-                            <div className="flex items-center justify-between">
-                              <span className="font-medium truncate">{line.item_description}</span>
-                              <span className="text-gray-500 ml-2 shrink-0">{line.quantity} boxes</span>
-                            </div>
-                            <div className="flex items-center gap-1 text-[11px]">
-                              <span className="font-mono text-gray-400">{line.old_lot_number}</span>
-                              <span className="text-gray-400">→</span>
-                              <span className="font-mono font-semibold text-orange-700">{line.new_lot_number}</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="flex gap-2 pt-1">
-                        <Button variant="outline" size="sm"
-                          onClick={() => router.push(`/${company}/transfer/innercoldtransfer?editChallan=${encodeURIComponent(t.challan_no)}`)}
-                          className="flex-1 h-9 text-xs border-amber-200 hover:bg-amber-50 text-amber-700">
-                          <Pencil className="h-3.5 w-3.5 mr-1.5" />Edit
-                        </Button>
-                        {canDeleteInnerCold && (
-                          <Button variant="outline" size="sm" onClick={() => handleDeleteInnerCold(t.challan_no)}
-                            className="h-9 w-9 p-0 border-red-200 hover:bg-red-50">
-                            <Trash2 className="h-3.5 w-3.5 text-red-500" />
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Desktop table */}
-                <div className="hidden md:block">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b bg-gray-50/80">
-                        <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Challan No</th>
-                        <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Date</th>
-                        <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Cold Storage</th>
-                        <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Reason</th>
-                        <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Items</th>
-                        <th className="hidden lg:table-cell text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Lot Changes</th>
-                        <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
-                        <th className="text-right py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                      {innerColdTransfers.map((t: any) => (
-                        <tr key={t.challan_no} className="hover:bg-gray-50/50 transition-colors">
-                          <td className="py-3 px-4">
-                            <ChallanHoverCard
-                              challanNo={t.challan_no}
-                              from={t.from_warehouse}
-                              to={t.lines?.find((l: any) => l.new_storage_location)?.new_storage_location || undefined}
-                              reason={t.reason_code || t.remark}
-                              lines={t.lines?.map((l: any) => ({ name: l.item_description, qty: l.quantity, lotFrom: String(l.old_lot_number), lotTo: String(l.new_lot_number) }))}
-                            />
-                          </td>
-                          <td className="py-3 px-4 text-sm text-gray-600">{t.transfer_date || formatDate(t.created_at)}</td>
-                          <td className="py-3 px-4 text-sm font-medium">{t.from_warehouse || 'N/A'}</td>
-                          <td className="py-3 px-4">
-                            <p className="text-sm">{t.reason_code}</p>
-                            {t.remark && t.remark !== t.reason_code && (
-                              <p className="text-xs text-muted-foreground mt-0.5 truncate max-w-[200px]">{t.remark}</p>
-                            )}
-                          </td>
-                          <td className="py-3 px-4">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <Badge variant="outline" className="text-[11px] bg-blue-50 text-blue-700 border-blue-200">
-                                {t.line_count ?? t.lines?.length ?? 0} Items
-                              </Badge>
-                              {t.lines?.[0] && (
-                                <span className="text-xs text-gray-600 truncate max-w-[140px]">
-                                  {t.lines[0].item_description}
-                                  {(t.lines?.length ?? 0) > 1 && (
-                                    <span className="text-gray-400 ml-1">+{t.lines.length - 1} more</span>
-                                  )}
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="hidden lg:table-cell py-3 px-4">
-                            {t.lines?.[0] ? (
-                              <div className="space-y-0.5">
-                                <div className="flex items-center gap-1 text-xs">
-                                  <span className="font-mono text-gray-500">{t.lines[0].old_lot_number}</span>
-                                  <ArrowRight className="h-3 w-3 text-gray-400 shrink-0" />
-                                  <span className="font-mono font-semibold text-orange-700">{t.lines[0].new_lot_number}</span>
-                                </div>
-                                {(t.lines?.length ?? 0) > 1 && (
-                                  <span className="text-[11px] text-gray-400">+{t.lines.length - 1} more</span>
-                                )}
-                              </div>
-                            ) : <span className="text-xs text-gray-400">—</span>}
-                          </td>
-                          <td className="py-3 px-4">
-                            <Badge variant="outline" className="text-[11px] font-medium px-2 py-0.5 bg-emerald-50 text-emerald-700 border-emerald-200">
-                              {t.status}
-                            </Badge>
-                          </td>
-                          <td className="py-3 px-4">
-                            <div className="flex items-center justify-end gap-1.5">
-                              <Button variant="outline" size="sm"
-                                onClick={() => router.push(`/${company}/transfer/innercoldtransfer?editChallan=${encodeURIComponent(t.challan_no)}`)}
-                                className="h-8 px-3 text-xs border-amber-200 hover:bg-amber-50 text-amber-700">
-                                <Pencil className="h-3.5 w-3.5 mr-1" />Edit
-                              </Button>
-                              {canDeleteInnerCold && (
-                                <Button variant="ghost" size="sm" onClick={() => handleDeleteInnerCold(t.challan_no)}
-                                  className="h-8 w-8 p-0 hover:bg-red-50">
-                                  <Trash2 className="h-3.5 w-3.5 text-red-500" />
-                                </Button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </>
-            )}
-            <PaginationBar page={innerColdPage} totalPages={innerColdTotalPages} total={innerColdTotal} onPageChange={handleInnerColdPageChange} />
           </Card>
         </TabsContent>
 

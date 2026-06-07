@@ -1853,7 +1853,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                   <SelectItem value="A101">A101</SelectItem>
                   <SelectItem value="A68">A68</SelectItem>
                   <SelectItem value="F53">F53</SelectItem>
-                  <SelectItem value="Cold Storage">Cold Storage</SelectItem>
 
                 </SelectContent>
 
