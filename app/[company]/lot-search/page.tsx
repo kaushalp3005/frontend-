@@ -87,7 +87,7 @@ function CategoryCard({ catKey, cat }: { catKey: string; cat: Category }) {
             <div className="flex items-center gap-2 text-left">
               {open ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
               <CardTitle className="text-sm font-semibold">{cat.label}</CardTitle>
-              <Badge variant="secondary" className="text-xs">{cat.count}{cat.truncated ? "+" : ""}</Badge>
+              <Badge variant="secondary" className="text-xs">{cat.count}</Badge>
             </div>
           </CardHeader>
         </CollapsibleTrigger>
@@ -114,7 +114,7 @@ function CategoryCard({ catKey, cat }: { catKey: string; cat: Category }) {
               ))}
               {cat.truncated && (
                 <p className="text-[11px] text-muted-foreground italic">
-                  Showing first {cat.rows.length} — refine the query (add a transaction_no or box_id) to narrow.
+                  Showing first {cat.rows.length} of {cat.count} — refine the query (add a transaction_no or box_id) to narrow.
                 </p>
               )}
             </div>
