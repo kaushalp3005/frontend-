@@ -1896,13 +1896,16 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     // Build lines from scannedBoxes (manually added articles)
     // net_weight and total_weight are already in Kg (converted at add time)
     const lines = scannedBoxes.map((box) => ({
-      material_type: clean(box.materialType),
+      // Backend contract uses canonical DB column names:
+      //   material_type→rm_pm_fg_type, item_description→item_desc_raw, quantity→qty.
+      // pack_size/qty must be numbers — an empty string fails Pydantic float parsing (422).
+      rm_pm_fg_type: clean(box.materialType),
       item_category: clean(box.itemCategory),
       sub_category: clean(box.subCategory),
-      item_description: clean(box.itemDescription),
-      quantity: String(box.quantityUnits && box.quantityUnits !== 'N/A' ? box.quantityUnits : 0),
+      item_desc_raw: clean(box.itemDescription),
+      qty: Number(box.quantityUnits && box.quantityUnits !== 'N/A' ? box.quantityUnits : 0) || 0,
       uom: clean(box.uom),
-      pack_size: String(clean(box.packagingType)),
+      pack_size: Number(clean(box.packagingType)) || 0,
       unit_pack_size: box.packageSize ? String(clean(box.packageSize)) : null,
       net_weight: String(box.netWeight || 0),
       total_weight: String(box.totalWeight || 0),

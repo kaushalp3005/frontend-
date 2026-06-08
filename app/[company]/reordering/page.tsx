@@ -154,9 +154,9 @@ export default function RTVListPage({ params }: RTVListPageProps) {
         {/* Header */}
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <h1 className="text-lg sm:text-xl md:text-2xl font-bold tracking-tight">RTV / Rejection</h1>
+            <h1 className="text-lg sm:text-xl md:text-2xl font-bold tracking-tight">CR / Rejection</h1>
             <p className="text-xs sm:text-sm text-muted-foreground mt-0.5 hidden sm:block">
-              Manage return to vendor entries and approvals
+              Manage customer return entries and approvals
             </p>
           </div>
           <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -169,7 +169,7 @@ export default function RTVListPage({ params }: RTVListPageProps) {
             <Button asChild size="sm" className="gap-1.5">
               <Link href={`/${company}/reordering/new`}>
                 <Plus className="h-4 w-4" />
-                <span className="hidden xs:inline">New RTV</span>
+                <span className="hidden xs:inline">New CR</span>
               </Link>
             </Button>
           </div>
@@ -260,9 +260,9 @@ export default function RTVListPage({ params }: RTVListPageProps) {
                 <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center mb-3">
                   <RotateCcw className="h-6 w-6 text-muted-foreground" />
                 </div>
-                <p className="text-sm font-medium">No RTV entries found</p>
+                <p className="text-sm font-medium">No CR entries found</p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  {hasFilters ? "Try adjusting your filters" : "Create your first RTV entry"}
+                  {hasFilters ? "Try adjusting your filters" : "Create your first CR entry"}
                 </p>
               </div>
             ) : (
@@ -272,7 +272,7 @@ export default function RTVListPage({ params }: RTVListPageProps) {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b bg-muted/30">
-                        <th className="text-left font-medium px-4 py-2.5">RTV ID</th>
+                        <th className="text-left font-medium px-4 py-2.5">CR No</th>
                         <th className="text-left font-medium px-4 py-2.5">Date</th>
                         <th className="text-left font-medium px-4 py-2.5">Status</th>
                         <th className="text-left font-medium px-4 py-2.5">Customer</th>
@@ -398,7 +398,7 @@ export default function RTVListPage({ params }: RTVListPageProps) {
         <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
           <AlertDialogContent className="max-w-[90vw] sm:max-w-lg">
             <AlertDialogHeader>
-              <AlertDialogTitle>Delete RTV</AlertDialogTitle>
+              <AlertDialogTitle>Delete CR</AlertDialogTitle>
               <AlertDialogDescription>
                 Are you sure you want to delete <span className="font-medium text-foreground">{deleteTarget?.rtv_id}</span>?
                 This will remove all lines and boxes. This action cannot be undone.
