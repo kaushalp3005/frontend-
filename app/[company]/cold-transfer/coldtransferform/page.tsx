@@ -2747,7 +2747,23 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         driver_name: payload.header.driver_name,
         approved_by: payload.header.approved_by,
         created_by: user?.email || user?.name || 'unknown',
-        lines: payload.lines,
+        // Map line fields to the cold OUT endpoint's ColdOutLineInput shape
+        // (item_desc_raw/qty/rm_pm_fg_type + numeric pack/weights). The regular-interunit
+        // `lines` use item_description/quantity/string pack_size, which 422s here.
+        lines: payload.lines.map((l: any) => ({
+          item_desc_raw: l.item_description || "",
+          qty: parseFloat(l.quantity) || 0,
+          uom: l.uom || null,
+          net_weight: parseFloat(l.net_weight) || 0,
+          total_weight: parseFloat(l.total_weight) || 0,
+          lot_number: l.lot_number || null,
+          batch_number: l.batch_number || "",
+          rm_pm_fg_type: l.material_type || "RM",
+          item_category: l.item_category || "",
+          sub_category: l.sub_category || "",
+          pack_size: parseFloat(l.pack_size) || 0,
+          unit_pack_size: parseFloat(l.unit_pack_size) || 0,
+        })),
         boxes: payload.boxes.map((b: any) => ({
           box_id: b.box_id,
           transaction_no: b.transaction_no,

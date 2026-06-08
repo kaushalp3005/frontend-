@@ -263,11 +263,9 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
 
   const onAePickerNetChange = (v: number) => {
     setAeNetWeight(v)
-    if (aeUom > 0) setAeCasePack(round3(v / aeUom))
   }
   const onAePickerCasePackChange = (v: number) => {
     setAeCasePack(v)
-    if (aeUom > 0) setAeNetWeight(round3(v * aeUom))
   }
 
   // Article entry: total net weight of all boxes vs FG received
@@ -1897,7 +1895,6 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                                   setAeGeneratedArticles(prev => prev.map((a, i) => i === idx ? {
                                     ...a,
                                     case_pack: cp,
-                                    net_weight: (a.uom ?? 0) > 0 ? round3(cp * (a.uom as number)) : a.net_weight,
                                   } : a))
                                 }}
                                 onWheel={(e) => e.currentTarget.blur()}
@@ -1911,7 +1908,6 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                                   setAeGeneratedArticles(prev => prev.map((a, i) => i === idx ? {
                                     ...a,
                                     net_weight: nw,
-                                    case_pack: (a.uom ?? 0) > 0 ? round3(nw / (a.uom as number)) : (a.case_pack ?? 0),
                                   } : a))
                                 }}
                                 onWheel={(e) => e.currentTarget.blur()}
