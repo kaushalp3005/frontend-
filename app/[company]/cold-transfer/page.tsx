@@ -593,7 +593,7 @@ export default function TransferPage({ params }: TransferPageProps) {
           <Card className="border-0 shadow-sm overflow-hidden">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 sm:px-5 py-3 sm:py-4 border-b bg-white">
               <div>
-                <h3 className="text-sm sm:text-base font-semibold text-gray-900">Transfer Out Records</h3>
+                <h3 className="text-sm sm:text-base font-semibold text-gray-900">Cold transfer-out Records</h3>
                 <p className="text-xs text-muted-foreground mt-0.5">{transfersTotal} record{transfersTotal !== 1 ? 's' : ''}</p>
               </div>
               <div className="flex items-center gap-2 flex-wrap self-end sm:self-auto">
