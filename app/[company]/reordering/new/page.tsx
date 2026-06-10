@@ -571,8 +571,10 @@ export default function NewRTVPage({ params }: NewRTVPageProps) {
       setSubmitError(null)
 
       const { id: rtvId, rtv_id: rtvStringId } = await ensureRtvCreated()
+      // Hard-saved header+lines (no boxes). Now fire the threaded approval mail.
+      await rtvApi.sendForApproval(company, rtvId)
 
-      toast({ title: "CR Created", description: `${rtvStringId} created. Approval pending.` })
+      toast({ title: "Sent for Approval", description: `${rtvStringId} saved and sent to the Business Head.` })
       router.push(`/${company}/reordering/${rtvId}`)
     } catch (err) {
       console.error("Submit failed:", err)
@@ -601,9 +603,18 @@ export default function NewRTVPage({ params }: NewRTVPageProps) {
           <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0" onClick={() => setShowDiscard(true)}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <h1 className="text-lg sm:text-xl md:text-2xl font-bold tracking-tight">New CR</h1>
             <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">Create a new Customer Return entry</p>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <Button variant="outline" size="sm" onClick={() => setShowDiscard(true)} disabled={submitting}>
+              Discard
+            </Button>
+            <Button onClick={handleSubmit} disabled={submitting} className="gap-1.5" size="sm">
+              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              {submitting ? "Sending…" : "Send for Approval"}
+            </Button>
           </div>
         </div>
 
@@ -942,17 +953,6 @@ export default function NewRTVPage({ params }: NewRTVPageProps) {
             ))}
           </CardContent>
         </Card>
-
-        {/* Actions */}
-        <div className="flex items-center justify-end gap-2 pt-2">
-          <Button variant="outline" onClick={() => setShowDiscard(true)} disabled={submitting}>
-            Cancel
-          </Button>
-          <Button onClick={handleSubmit} disabled={submitting} className="gap-1.5">
-            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            Create
-          </Button>
-        </div>
 
         {/* Delete Box Dialog */}
         <AlertDialog open={deleteBoxIdx !== null} onOpenChange={(open) => { if (!open) setDeleteBoxIdx(null) }}>
