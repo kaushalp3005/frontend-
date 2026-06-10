@@ -25,6 +25,7 @@ import type {
   RTVSkuSearchParams,
   RTVSkuSearchResponse,
   AllSkuItem,
+  SendForApprovalResponse,
 } from "@/types/rtv"
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
@@ -77,6 +78,18 @@ export const rtvApi = {
       body: JSON.stringify(data),
     })
     return handleResponse<RTVWithDetails>(response)
+  },
+
+  // POST /rtv/{company}/{rtvId}/send-for-approval — fire the threaded BH approval mail.
+  async sendForApproval(
+    company: string,
+    rtvId: number | string
+  ): Promise<SendForApprovalResponse> {
+    const response = await fetch(`${API_URL}/rtv/${company}/${rtvId}/send-for-approval`, {
+      method: "POST",
+      headers: getAuthHeaders(),
+    })
+    return handleResponse<SendForApprovalResponse>(response)
   },
 
   // ─── List RTVs ─────────────────────────────────────────────────
