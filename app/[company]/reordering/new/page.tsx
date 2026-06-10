@@ -566,11 +566,15 @@ export default function NewRTVPage({ params }: NewRTVPageProps) {
       return
     }
 
+    let created = false
+    let savedStringId = ""
     try {
       setSubmitting(true)
       setSubmitError(null)
 
       const { id: rtvId, rtv_id: rtvStringId } = await ensureRtvCreated()
+      created = true
+      savedStringId = rtvStringId
       // Hard-saved header+lines (no boxes). Now fire the threaded approval mail.
       await rtvApi.sendForApproval(company, rtvId)
 
@@ -578,7 +582,10 @@ export default function NewRTVPage({ params }: NewRTVPageProps) {
       router.push(`/${company}/reordering/${rtvId}`)
     } catch (err) {
       console.error("Submit failed:", err)
-      setSubmitError(err instanceof Error ? err.message : "Failed to create CR")
+      const fallback = created
+        ? `${savedStringId} was saved, but sending for approval failed. You can retry sending.`
+        : "Failed to create CR"
+      setSubmitError(err instanceof Error ? err.message : fallback)
     } finally {
       setSubmitting(false)
     }

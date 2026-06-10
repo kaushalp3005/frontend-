@@ -80,10 +80,11 @@ export const rtvApi = {
     return handleResponse<RTVWithDetails>(response)
   },
 
+  // ─── Send for Approval ─────────────────────────────────────────
   // POST /rtv/{company}/{rtvId}/send-for-approval — fire the threaded BH approval mail.
   async sendForApproval(
     company: string,
-    rtvId: number | string
+    rtvId: number
   ): Promise<SendForApprovalResponse> {
     const response = await fetch(`${API_URL}/rtv/${company}/${rtvId}/send-for-approval`, {
       method: "POST",
