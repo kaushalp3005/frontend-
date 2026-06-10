@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import {
   ArrowLeft, CheckCircle2, Loader2, AlertCircle,
-  Package, Plus, Box, FileText, Printer,
+  Package, Plus, FileText, Printer, Lock,
   Pencil, Trash2, MoreVertical,
 } from "lucide-react"
 import {
@@ -25,6 +25,8 @@ import {
 import { rtvApi } from "@/lib/api/rtvApiService"
 import { BUSINESS_HEAD_OPTIONS, type BusinessHead, type RTVWithDetails } from "@/types/rtv"
 import type { RTVLineForm } from "@/components/modules/rtv/RTVLineEditor"
+import { BoxScrollContainer } from "@/components/modules/inward/BoxScrollContainer"
+import { LotRangeDedicator, type LotRange } from "@/components/modules/inward/LotRangeDedicator"
 import { PermissionGuard } from "@/components/auth/permission-gate"
 import { useAuthStore } from "@/lib/stores/auth"
 import { cn } from "@/lib/utils"
@@ -46,8 +48,16 @@ interface BoxForm {
   net_weight: string
   gross_weight: string
   count: string
+  lot_number: string
   box_id?: string
   is_printed: boolean
+}
+
+interface DiscrepancyRow {
+  item_description: string
+  expected: number
+  actual: number
+  diff: number
 }
 
 export default function RTVApprovePage({ params }: ApprovePageProps) {
@@ -92,6 +102,13 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [showDiscard, setShowDiscard] = useState(false)
+
+  // Net-weight discrepancy confirm (warn-but-allow) at final submit
+  const [discrepancyRows, setDiscrepancyRows] = useState<DiscrepancyRow[]>([])
+  const [showDiscrepancy, setShowDiscrepancy] = useState(false)
+
+  // Box-wise entry unlocks only after the mail ("first") approval.
+  const boxesUnlocked = data?.status === "Approved"
 
   useEffect(() => {
     if (isNaN(rtvId)) {
@@ -148,6 +165,7 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
             net_weight: b.net_weight?.toString() || "",
             gross_weight: b.gross_weight?.toString() || "",
             count: b.count?.toString() || "1",
+            lot_number: b.lot_number?.toString() || "",
             box_id: b.box_id || undefined,
             is_printed: !!b.box_id,
           }
@@ -165,6 +183,7 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
             net_weight: "",
             gross_weight: "",
             count: "1",
+            lot_number: "",
             box_id: undefined,
             is_printed: false,
           }
@@ -173,7 +192,7 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
         setBoxForms([...existingBoxes, ...defaultBoxes])
       } catch (err) {
         console.error("Failed to fetch detail:", err)
-        setError(err instanceof Error ? err.message : "Failed to load RTV")
+        setError(err instanceof Error ? err.message : "Failed to load CR")
       } finally {
         setLoading(false)
       }
@@ -192,6 +211,12 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
           const qty = parseFloat(field === "qty" ? value : l.qty) || 0
           const rate = parseFloat(field === "rate" ? value : l.rate) || 0
           if (qty > 0 && rate > 0) updated.value = String(qty * rate)
+        }
+        // Item-line container Net Weight = UOM × Total Qty (the expected total).
+        if (field === "qty" || field === "uom") {
+          const qty = parseFloat(field === "qty" ? value : l.qty) || 0
+          const uom = parseFloat(field === "uom" ? value : l.uom) || 0
+          updated.net_weight = uom > 0 && qty > 0 ? String(parseFloat((uom * qty).toFixed(3))) : ""
         }
         return updated
       })
@@ -232,18 +257,27 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
     }
   }
 
-  // ─── Recompute line totals from boxes (identical to inward) ────
+  // ─── Box net-weight sum (actual) ───────────────────────────────
+  // The item-line Net Weight is the *expected* total (UOM × Total Qty), so it
+  // is no longer overwritten by the box sum. The box-wise *actual* sum is
+  // derived for the "Net Wt (sum)" display and the discrepancy check.
 
-  const recomputeLineFromBoxes = (boxes: BoxForm[], articleDesc: string) => {
-    const articleBoxes = boxes.filter((b) => b.article_description === articleDesc)
-    const totalNet = articleBoxes.reduce((sum, b) => sum + (parseFloat(b.net_weight) || 0), 0)
+  const articleNetSum = (articleDesc: string): number =>
+    boxForms
+      .filter((b) => b.article_description === articleDesc)
+      .reduce((sum, b) => sum + (parseFloat(b.net_weight) || 0), 0)
 
-    setLineForms((prev) =>
-      prev.map((l) =>
-        l.item_description === articleDesc
-          ? { ...l, net_weight: totalNet > 0 ? String(parseFloat(totalNet.toFixed(3))) : "" }
-          : l
-      )
+  // Kept as a no-op for call-site compatibility — net_weight is expected-driven.
+  const recomputeLineFromBoxes = (_boxes: BoxForm[], _articleDesc: string) => {}
+
+  // Apply lot-number ranges (from the Lot Allocator) to a single article's boxes.
+  const applyLotRanges = (articleDesc: string, ranges: LotRange[]) => {
+    setBoxForms((prev) =>
+      prev.map((box) => {
+        if (box.article_description !== articleDesc) return box
+        const match = ranges.find((r) => box.box_number >= r.from && box.box_number <= r.to)
+        return match ? { ...box, lot_number: match.lot } : box
+      })
     )
   }
 
@@ -273,6 +307,7 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
           net_weight: "",
           gross_weight: "",
           count: "1",
+          lot_number: "",
           box_id: undefined,
           is_printed: false,
         })
@@ -315,6 +350,7 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
         net_weight: "",
         gross_weight: "",
         count: "1",
+        lot_number: "",
         box_id: undefined,
         is_printed: false,
       },
@@ -396,6 +432,7 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
         conversion: box.conversion || undefined,
         net_weight: box.net_weight || undefined,
         gross_weight: box.gross_weight || undefined,
+        lot_number: box.lot_number || undefined,
         count: box.count ? parseInt(box.count) : undefined,
       })
 
@@ -529,42 +566,81 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
     setEditingBoxIndices((prev) => new Set(prev).add(boxIdx))
   }
 
-  // ─── Approve ──────────────────────────────────────────────────
+  // ─── Discrepancy + Save (final submit) ─────────────────────────
+  // Box weights are persisted only after mail approval. Save runs a state-aware
+  // line merge + a full box sync (which also fires the discrepancy summary
+  // email). The only thing surfaced before submit is the net-weight
+  // discrepancy: expected (UOM × Total Qty) vs actual (Σ box net) — warn but
+  // allow.
 
-  const handleApprove = async () => {
+  const computeDiscrepancyRows = (): DiscrepancyRow[] =>
+    lineForms.map((l) => {
+      const uom = parseFloat(l.uom) || 0
+      const qty = parseFloat(l.qty) || 0
+      const expected = parseFloat((uom * qty).toFixed(3))
+      const actual = parseFloat(articleNetSum(l.item_description).toFixed(3))
+      return {
+        item_description: l.item_description,
+        expected,
+        actual,
+        diff: parseFloat((actual - expected).toFixed(3)),
+      }
+    })
+
+  const handleSave = () => {
+    const rows = computeDiscrepancyRows()
+    if (rows.some((r) => r.diff !== 0)) {
+      setDiscrepancyRows(rows)
+      setShowDiscrepancy(true)
+      return
+    }
+    void doSave()
+  }
+
+  const doSave = async () => {
     try {
       setSubmitting(true)
       setSubmitError(null)
+      setShowDiscrepancy(false)
 
-      await rtvApi.approveRTV(company, rtvId, {
-        approved_by: user?.email || "unknown",
-        header: {
-          factory_unit: factoryUnit || undefined,
-          customer: customer || undefined,
-          invoice_number: invoiceNumber || undefined,
-          challan_no: challanNo || undefined,
-          dn_no: dnNo || undefined,
-          sales_poc: salesPoc || undefined,
-          business_head: businessHead || undefined,
-          remark: remark || undefined,
-          vehicle_number: vehicleNumber || undefined,
-          transporter_name: transporterName || undefined,
-          driver_name: driverName || undefined,
-          inward_manager: inwardManager || undefined,
-        },
+      // 1. Persist header edits. (vehicle/transporter/driver/inward_manager are
+      //    sent but not yet stored server-side — known drift, out of scope.)
+      await rtvApi.updateRTVHeader(company, rtvId, {
+        factory_unit: factoryUnit || undefined,
+        customer: customer || undefined,
+        invoice_number: invoiceNumber || undefined,
+        challan_no: challanNo || undefined,
+        dn_no: dnNo || undefined,
+        sales_poc: salesPoc || undefined,
+        business_head: businessHead || undefined,
+        remark: remark || undefined,
+        vehicle_number: vehicleNumber || undefined,
+        transporter_name: transporterName || undefined,
+        driver_name: driverName || undefined,
+        inward_manager: inwardManager || undefined,
+      })
+
+      // 2. Persist line edits (state-aware merge — no destructive wipe).
+      await rtvApi.updateRTVLines(company, rtvId, {
         lines: lineForms.map((l) => ({
+          material_type: l.material_type || "RM",
+          item_category: l.item_category,
+          sub_category: l.sub_category,
           item_description: l.item_description,
-          uom: l.uom || undefined,
-          qty: l.qty || undefined,
-          rate: l.rate || undefined,
-          value: l.value || undefined,
-          carton_weight: l.carton_weight || undefined,
-          net_weight: l.net_weight || undefined,
-          material_type: l.material_type || undefined,
-          item_category: l.item_category || undefined,
-          sub_category: l.sub_category || undefined,
           sale_group: l.sale_group || undefined,
+          uom: l.uom || "0",
+          qty: l.qty || "0",
+          rate: l.rate || "0",
+          value: l.value || "0",
+          conversion: l.uom || undefined,
+          carton_weight: l.carton_weight || undefined,
+          net_weight: l.net_weight || "0",
         })),
+      })
+
+      // 3. Persist the full box set (state-aware sync). The backend sends the
+      //    net-weight discrepancy summary email after the sync.
+      await rtvApi.bulkSaveBoxes(company, rtvId, {
         boxes: boxForms.map((b) => {
           const parentLine = lineForms.find((l) => l.item_description === b.article_description)
           return {
@@ -572,6 +648,7 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
             box_number: b.box_number,
             uom: parentLine?.uom || undefined,
             conversion: b.conversion || undefined,
+            lot_number: b.lot_number || undefined,
             net_weight: b.net_weight || undefined,
             gross_weight: b.gross_weight || undefined,
             count: b.count ? parseInt(b.count) : undefined,
@@ -581,8 +658,9 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
 
       router.push(`/${company}/reordering/${rtvId}`)
     } catch (err) {
-      console.error("Approve failed:", err)
-      setSubmitError(err instanceof Error ? err.message : "Failed to approve RTV")
+      console.error("Save failed:", err)
+      setSubmitError(err instanceof Error ? err.message : "Failed to save CR")
+      setShowDiscrepancy(false)
     } finally {
       setSubmitting(false)
     }
@@ -604,7 +682,7 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
       <div className="p-3 sm:p-4 md:p-6 max-w-[1100px] mx-auto">
         <div className="flex items-center gap-2 text-destructive bg-destructive/10 px-4 py-3 rounded-lg">
           <AlertCircle className="h-4 w-4" />
-          <span className="text-sm">{error || "RTV not found"}</span>
+          <span className="text-sm">{error || "CR not found"}</span>
         </div>
         <Button variant="outline" className="mt-4 gap-1.5" onClick={() => router.push(`/${company}/reordering`)}>
           <ArrowLeft className="h-4 w-4" /> Back to list
@@ -630,11 +708,11 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
                 ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                 : "bg-amber-50 text-amber-700 border-amber-200"
               }>
-                {isApproved ? "Approved" : "Pending Review"}
+                {data.status}
               </Badge>
             </div>
             <p className="text-xs text-muted-foreground mt-0.5">
-              {isApproved ? "Edit approved RTV details" : "Review and approve this RTV"}
+              {isApproved ? "Enter box weights & print QR labels" : "Box entry is locked until mail approval"}
             </p>
           </div>
         </div>
@@ -651,7 +729,7 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
           <CardHeader className="pb-3 px-3 sm:px-6">
             <CardTitle className="text-sm flex items-center gap-1.5">
               <FileText className="h-4 w-4 text-muted-foreground" />
-              RTV Details
+              CR Details
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4 px-3 sm:px-6">
@@ -782,168 +860,206 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-[11px]">Net Wt <span className="text-muted-foreground text-[9px]">(sum)</span></Label>
-                    <Input type="number" value={line.net_weight} readOnly className="h-8 text-xs bg-muted" />
+                    <Label className="text-[11px]">Net Wt <span className="text-muted-foreground text-[9px]">(box sum)</span></Label>
+                    <Input type="number" value={articleNetSum(line.item_description) || ""} readOnly className="h-8 text-xs bg-muted" />
                   </div>
                 </div>
 
                 {/* Boxes for this article */}
                 <div className="mt-2 pt-2 border-t space-y-2">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                      <Box className="h-3 w-3" />
-                      Boxes ({boxForms.filter((b) => b.article_description === line.item_description).length})
-                    </p>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-6 text-xs gap-1"
-                      onClick={() => addBox(line.item_description)}
-                    >
-                      <Plus className="h-3 w-3" /> Add Box
-                    </Button>
-                  </div>
-                  {boxForms
-                    .map((box, boxIdx) => ({ box, boxIdx }))
-                    .filter(({ box }) => box.article_description === line.item_description)
-                    .map(({ box, boxIdx }) => {
-                      const isLocked = box.is_printed && !editingBoxIndices.has(boxIdx)
-                      const isPrinting = printingBoxIdx === boxIdx
-                      return (
-                        <div key={boxIdx} className={cn(
-                          "p-2 rounded space-y-2 sm:space-y-0",
-                          isLocked ? "bg-emerald-50/50 border border-emerald-200/50" : "bg-muted/30"
-                        )}>
-                          {/* Box header row */}
-                          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="sm" className="h-7 px-1.5 text-xs font-medium flex-shrink-0 gap-0.5">
-                                  #{box.box_number}
-                                  <MoreVertical className="h-3 w-3 text-muted-foreground" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="start">
-                                {box.is_printed && !editingBoxIndices.has(boxIdx) && (
-                                  <DropdownMenuItem onClick={() => handleEditBox(boxIdx)}>
-                                    <Pencil className="h-3.5 w-3.5 mr-2" /> Edit
-                                  </DropdownMenuItem>
+                  {!boxesUnlocked && (
+                    <div className="flex items-start gap-2 rounded-md border border-dashed border-amber-300 bg-amber-50/60 px-3 py-2 text-[11px] text-amber-700">
+                      <Lock className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
+                      <span>
+                        Box-wise net/gross weights, lot numbers &amp; QR labels are locked until this CR is
+                        approved by mail. Once approved, enter the weights here and submit.
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Lot Allocator — bulk-assign lot numbers to box ranges */}
+                  {boxesUnlocked && (
+                    <LotRangeDedicator
+                      warehouse={factoryUnit}
+                      totalBoxes={boxForms.filter((b) => b.article_description === line.item_description).length}
+                      onApply={(ranges) => applyLotRanges(line.item_description, ranges)}
+                    />
+                  )}
+
+                  {/* Go-to-box navigation + scrollable box list */}
+                  <BoxScrollContainer
+                    boxCount={boxForms.filter((b) => b.article_description === line.item_description).length}
+                    onAddBox={boxesUnlocked ? () => addBox(line.item_description) : undefined}
+                    boxForms={boxForms.filter((b) => b.article_description === line.item_description)}
+                  >
+                    {(registerRef) =>
+                      boxForms
+                        .map((box, boxIdx) => ({ box, boxIdx }))
+                        .filter(({ box }) => box.article_description === line.item_description)
+                        .map(({ box, boxIdx }) => {
+                          const isPrinted = box.is_printed && !editingBoxIndices.has(boxIdx)
+                          const isLocked = !boxesUnlocked || isPrinted
+                          const isPrinting = printingBoxIdx === boxIdx
+                          return (
+                            <div
+                              key={boxIdx}
+                              ref={(el) => registerRef(box.box_number, el)}
+                              className={cn(
+                                "p-2 rounded space-y-2 sm:space-y-0",
+                                isPrinted ? "bg-emerald-50/50 border border-emerald-200/50" : "bg-muted/30"
+                              )}
+                            >
+                              {/* Box header row */}
+                              <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="sm" className="h-7 px-1.5 text-xs font-medium flex-shrink-0 gap-0.5">
+                                      #{box.box_number}
+                                      <MoreVertical className="h-3 w-3 text-muted-foreground" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="start">
+                                    {isPrinted && boxesUnlocked && (
+                                      <DropdownMenuItem onClick={() => handleEditBox(boxIdx)}>
+                                        <Pencil className="h-3.5 w-3.5 mr-2" /> Edit
+                                      </DropdownMenuItem>
+                                    )}
+                                    <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => setDeleteBoxIdx(boxIdx)} disabled={!boxesUnlocked}>
+                                      <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                                {isPrinted && (
+                                  <Badge variant="outline" className="text-[10px] h-5 bg-emerald-50 text-emerald-700 border-emerald-200 flex-shrink-0">
+                                    Printed
+                                  </Badge>
                                 )}
-                                <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => setDeleteBoxIdx(boxIdx)}>
-                                  <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                            {box.is_printed && !editingBoxIndices.has(boxIdx) && (
-                              <Badge variant="outline" className="text-[10px] h-5 bg-emerald-50 text-emerald-700 border-emerald-200 flex-shrink-0">
-                                Printed
-                              </Badge>
-                            )}
-                            {editingBoxIndices.has(boxIdx) && (
-                              <Badge variant="outline" className="text-[10px] h-5 bg-amber-50 text-amber-700 border-amber-200 flex-shrink-0">
-                                Editing
-                              </Badge>
-                            )}
-                            {/* Desktop: inline inputs */}
-                            <div className="hidden sm:contents">
-                              <Input
-                                type="number"
-                                placeholder="Conv."
-                                value={box.conversion}
-                                readOnly
-                                className="h-7 text-xs flex-1 min-w-0 bg-muted"
-                              />
-                              <Input
-                                type="number"
-                                step="0.001"
-                                placeholder="Net wt"
-                                value={box.net_weight}
-                                onChange={(e) => updateBox(boxIdx, "net_weight", e.target.value)}
-                                readOnly={isLocked}
-                                className={cn("h-7 text-xs flex-1 min-w-0", isLocked ? "bg-muted" : "")}
-                              />
-                              <Input
-                                type="number"
-                                step="0.001"
-                                placeholder="Gross wt"
-                                value={box.gross_weight}
-                                onChange={(e) => updateBox(boxIdx, "gross_weight", e.target.value)}
-                                readOnly={isLocked}
-                                className={cn("h-7 text-xs flex-1 min-w-0", isLocked ? "bg-muted" : "")}
-                              />
-                              <Input
-                                type="number"
-                                placeholder="Count"
-                                value={box.count}
-                                onChange={(e) => updateBox(boxIdx, "count", e.target.value)}
-                                readOnly={isLocked}
-                                className={cn("h-7 text-xs flex-1 min-w-0", isLocked ? "bg-muted" : "")}
-                              />
+                                {editingBoxIndices.has(boxIdx) && (
+                                  <Badge variant="outline" className="text-[10px] h-5 bg-amber-50 text-amber-700 border-amber-200 flex-shrink-0">
+                                    Editing
+                                  </Badge>
+                                )}
+                                {/* Desktop: inline inputs */}
+                                <div className="hidden sm:contents">
+                                  <Input
+                                    type="number"
+                                    placeholder="Conv."
+                                    value={box.conversion}
+                                    readOnly
+                                    className="h-7 text-xs flex-1 min-w-0 bg-muted"
+                                  />
+                                  <Input
+                                    type="number"
+                                    step="0.001"
+                                    placeholder="Net wt"
+                                    value={box.net_weight}
+                                    onChange={(e) => updateBox(boxIdx, "net_weight", e.target.value)}
+                                    readOnly={isLocked}
+                                    className={cn("h-7 text-xs flex-1 min-w-0", isLocked ? "bg-muted" : "")}
+                                  />
+                                  <Input
+                                    type="number"
+                                    step="0.001"
+                                    placeholder="Gross wt"
+                                    value={box.gross_weight}
+                                    onChange={(e) => updateBox(boxIdx, "gross_weight", e.target.value)}
+                                    readOnly={isLocked}
+                                    className={cn("h-7 text-xs flex-1 min-w-0", isLocked ? "bg-muted" : "")}
+                                  />
+                                  <Input
+                                    type="number"
+                                    placeholder="Count"
+                                    value={box.count}
+                                    onChange={(e) => updateBox(boxIdx, "count", e.target.value)}
+                                    readOnly={isLocked}
+                                    className={cn("h-7 text-xs flex-1 min-w-0", isLocked ? "bg-muted" : "")}
+                                  />
+                                  <Input
+                                    type="text"
+                                    placeholder="Lot #"
+                                    value={box.lot_number}
+                                    onChange={(e) => updateBox(boxIdx, "lot_number", e.target.value)}
+                                    readOnly={isLocked}
+                                    className={cn("h-7 text-xs flex-1 min-w-0", isLocked ? "bg-muted" : "")}
+                                  />
+                                </div>
+                                <div className="flex items-center gap-1 ml-auto flex-shrink-0">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7"
+                                    title={isPrinted ? "Re-print label" : "Print label"}
+                                    onClick={() => handlePrintBox(boxIdx)}
+                                    disabled={isPrinting || !boxesUnlocked}
+                                  >
+                                    {isPrinting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Printer className="h-3 w-3" />}
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 text-primary hover:text-primary"
+                                    onClick={() => addBox(line.item_description)}
+                                    title="Add box below"
+                                    disabled={!boxesUnlocked}
+                                  >
+                                    <Plus className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              </div>
+                              {/* Mobile: stacked inputs */}
+                              <div className="sm:hidden grid grid-cols-2 gap-2">
+                                <div className="space-y-0.5">
+                                  <Label className="text-[10px] text-muted-foreground">Conversion</Label>
+                                  <Input type="number" value={box.conversion} readOnly className="h-8 text-xs bg-muted" />
+                                </div>
+                                <div className="space-y-0.5">
+                                  <Label className="text-[10px] text-muted-foreground">Net wt (kg)</Label>
+                                  <Input
+                                    type="number"
+                                    step="0.001"
+                                    value={box.net_weight}
+                                    onChange={(e) => updateBox(boxIdx, "net_weight", e.target.value)}
+                                    readOnly={isLocked}
+                                    className={cn("h-8 text-xs", isLocked ? "bg-muted" : "")}
+                                  />
+                                </div>
+                                <div className="space-y-0.5">
+                                  <Label className="text-[10px] text-muted-foreground">Gross wt (kg)</Label>
+                                  <Input
+                                    type="number"
+                                    step="0.001"
+                                    value={box.gross_weight}
+                                    onChange={(e) => updateBox(boxIdx, "gross_weight", e.target.value)}
+                                    readOnly={isLocked}
+                                    className={cn("h-8 text-xs", isLocked ? "bg-muted" : "")}
+                                  />
+                                </div>
+                                <div className="space-y-0.5">
+                                  <Label className="text-[10px] text-muted-foreground">Count</Label>
+                                  <Input
+                                    type="number"
+                                    value={box.count}
+                                    onChange={(e) => updateBox(boxIdx, "count", e.target.value)}
+                                    readOnly={isLocked}
+                                    className={cn("h-8 text-xs", isLocked ? "bg-muted" : "")}
+                                  />
+                                </div>
+                                <div className="space-y-0.5">
+                                  <Label className="text-[10px] text-muted-foreground">Lot #</Label>
+                                  <Input
+                                    type="text"
+                                    value={box.lot_number}
+                                    onChange={(e) => updateBox(boxIdx, "lot_number", e.target.value)}
+                                    readOnly={isLocked}
+                                    className={cn("h-8 text-xs", isLocked ? "bg-muted" : "")}
+                                  />
+                                </div>
+                              </div>
                             </div>
-                            <div className="flex items-center gap-1 ml-auto flex-shrink-0">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7"
-                                title={box.is_printed && editingBoxIndices.has(boxIdx) ? "Save & Re-print" : "Print label"}
-                                onClick={() => handlePrintBox(boxIdx)}
-                                disabled={isPrinting}
-                              >
-                                {isPrinting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Printer className="h-3 w-3" />}
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7 text-primary hover:text-primary"
-                                onClick={() => addBox(line.item_description)}
-                                title="Add box below"
-                              >
-                                <Plus className="h-3 w-3" />
-                              </Button>
-                            </div>
-                          </div>
-                          {/* Mobile: stacked inputs */}
-                          <div className="sm:hidden grid grid-cols-2 gap-2">
-                            <div className="space-y-0.5">
-                              <Label className="text-[10px] text-muted-foreground">Conversion</Label>
-                              <Input type="number" value={box.conversion} readOnly className="h-8 text-xs bg-muted" />
-                            </div>
-                            <div className="space-y-0.5">
-                              <Label className="text-[10px] text-muted-foreground">Net wt (kg)</Label>
-                              <Input
-                                type="number"
-                                step="0.001"
-                                value={box.net_weight}
-                                onChange={(e) => updateBox(boxIdx, "net_weight", e.target.value)}
-                                readOnly={isLocked}
-                                className={cn("h-8 text-xs", isLocked ? "bg-muted" : "")}
-                              />
-                            </div>
-                            <div className="space-y-0.5">
-                              <Label className="text-[10px] text-muted-foreground">Gross wt (kg)</Label>
-                              <Input
-                                type="number"
-                                step="0.001"
-                                value={box.gross_weight}
-                                onChange={(e) => updateBox(boxIdx, "gross_weight", e.target.value)}
-                                readOnly={isLocked}
-                                className={cn("h-8 text-xs", isLocked ? "bg-muted" : "")}
-                              />
-                            </div>
-                            <div className="space-y-0.5">
-                              <Label className="text-[10px] text-muted-foreground">Count</Label>
-                              <Input
-                                type="number"
-                                value={box.count}
-                                onChange={(e) => updateBox(boxIdx, "count", e.target.value)}
-                                readOnly={isLocked}
-                                className={cn("h-8 text-xs", isLocked ? "bg-muted" : "")}
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      )
-                    })}
+                          )
+                        })
+                    }
+                  </BoxScrollContainer>
                 </div>
               </div>
             ))}
@@ -957,14 +1073,63 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
           </Button>
           <Button
             size="sm"
-            onClick={handleApprove}
-            disabled={submitting}
+            onClick={handleSave}
+            disabled={submitting || !boxesUnlocked}
+            title={!boxesUnlocked ? "Box entry & save unlock after mail approval" : undefined}
             className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
           >
             {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-            {isApproved ? "Save Changes" : "Approve"}
+            Save
           </Button>
         </div>
+
+        {/* Net-weight discrepancy confirm (warn but allow) */}
+        <AlertDialog open={showDiscrepancy} onOpenChange={(o) => { if (!o) setShowDiscrepancy(false) }}>
+          <AlertDialogContent className="max-w-[92vw] sm:max-w-xl">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Net-weight discrepancy</AlertDialogTitle>
+              <AlertDialogDescription>
+                The box-wise net weights don&apos;t match the expected totals (UOM × Total Qty). Review the
+                summary below — you can still submit. A summary email will be sent.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="max-h-[40vh] overflow-y-auto rounded-md border text-xs">
+              <table className="w-full">
+                <thead className="bg-muted/50">
+                  <tr>
+                    <th className="text-left font-medium px-2 py-1.5">Item</th>
+                    <th className="text-right font-medium px-2 py-1.5">Expected</th>
+                    <th className="text-right font-medium px-2 py-1.5">Actual</th>
+                    <th className="text-right font-medium px-2 py-1.5">Diff</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {discrepancyRows.map((r, i) => (
+                    <tr key={i} className="border-t">
+                      <td className="px-2 py-1.5 truncate max-w-[180px]">{r.item_description}</td>
+                      <td className="px-2 py-1.5 text-right">{r.expected.toFixed(3)}</td>
+                      <td className="px-2 py-1.5 text-right">{r.actual.toFixed(3)}</td>
+                      <td className={cn("px-2 py-1.5 text-right font-medium", r.diff !== 0 ? "text-destructive" : "text-emerald-600")}>
+                        {r.diff > 0 ? "+" : ""}{r.diff.toFixed(3)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={submitting}>Go back</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => void doSave()}
+                disabled={submitting}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              >
+                {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+                Submit anyway
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         {/* Delete Box Dialog */}
         <AlertDialog open={deleteBoxIdx !== null} onOpenChange={(open) => { if (!open) setDeleteBoxIdx(null) }}>

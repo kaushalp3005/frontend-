@@ -10,7 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import Link from "next/link"
 import {
   ArrowLeft, Edit, CheckCircle2, Clock, Trash2,
-  Package, Box, AlertCircle, Loader2, FileText, Printer,
+  Package, Box, AlertCircle, Loader2, FileText, Printer, Lock,
 } from "lucide-react"
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -80,7 +80,7 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
         setData(detail)
       } catch (err) {
         console.error("Failed to fetch detail:", err)
-        setError(err instanceof Error ? err.message : "Failed to load RTV")
+        setError(err instanceof Error ? err.message : "Failed to load CR")
       } finally {
         setLoading(false)
       }
@@ -217,7 +217,7 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
       <div className="p-3 sm:p-4 md:p-6 max-w-[1100px] mx-auto">
         <div className="flex items-center gap-2 text-destructive bg-destructive/10 px-4 py-3 rounded-lg">
           <AlertCircle className="h-4 w-4" />
-          <span className="text-sm">{error || "RTV not found"}</span>
+          <span className="text-sm">{error || "CR not found"}</span>
         </div>
         <Button variant="outline" className="mt-4 gap-1.5" onClick={() => router.push(`/${company}/reordering`)}>
           <ArrowLeft className="h-4 w-4" /> Back to list
@@ -227,6 +227,7 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
   }
 
   const isPending = data.status === "Pending"
+  const isApproved = data.status === "Approved"
 
   return (
     <PermissionGuard module="reordering" action="view">
@@ -249,11 +250,24 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 pl-10 sm:pl-11">
-            <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs sm:text-sm" asChild>
-              <Link href={`/${company}/reordering/${rtvId}/approve`}>
-                <CheckCircle2 className="h-3.5 w-3.5" /> {isPending ? "Review & Approve" : "Review & Edit"}
-              </Link>
-            </Button>
+            {isApproved ? (
+              <Button variant="default" size="sm" className="gap-1.5 h-8 text-xs sm:text-sm" asChild>
+                <Link href={`/${company}/reordering/${rtvId}/approve`}>
+                  <Box className="h-3.5 w-3.5" /> Enter / Edit Box Weights
+                </Link>
+              </Button>
+            ) : (
+              <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs sm:text-sm" asChild>
+                <Link href={`/${company}/reordering/${rtvId}/approve`}>
+                  <FileText className="h-3.5 w-3.5" /> Review
+                </Link>
+              </Button>
+            )}
+            {!isApproved && (
+              <span className="inline-flex items-center gap-1 text-[11px] text-amber-700">
+                <Lock className="h-3 w-3" /> Box entry unlocks after mail approval
+              </span>
+            )}
             {isPending && (
               <Button
                 variant="outline"
@@ -270,12 +284,12 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4">
           {/* Left column */}
           <div className="lg:col-span-2 space-y-3 sm:space-y-4">
-            {/* RTV Information */}
+            {/* CR Information */}
             <Card>
               <CardHeader className="pb-2 px-3 sm:px-6">
                 <CardTitle className="text-sm flex items-center gap-1.5">
                   <FileText className="h-4 w-4 text-muted-foreground" />
-                  RTV Information
+                  CR Information
                 </CardTitle>
               </CardHeader>
               <CardContent className="px-3 sm:px-6">
@@ -287,7 +301,7 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
                   <Field label="DN No" value={data.dn_no} />
                   <Field label="Sales POC" value={data.sales_poc} />
                   <Field label="Business Head" value={data.business_head} />
-                  <Field label="RTV Date" value={data.rtv_date ? format(new Date(data.rtv_date), "dd MMM yyyy") : null} />
+                  <Field label="CR Date" value={data.rtv_date ? format(new Date(data.rtv_date), "dd MMM yyyy") : null} />
                   <Field label="Vehicle Number" value={data.vehicle_number} />
                   <Field label="Transporter" value={data.transporter_name} />
                   <Field label="Driver Name" value={data.driver_name} />
@@ -319,7 +333,7 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
                       <Field label="Sub Category" value={line.sub_category} />
                       <Field label="Sale Group" value={line.sale_group} />
                       <Field label="UOM" value={line.uom} />
-                      <Field label="Qty" value={line.qty} />
+                      <Field label="Total Qty (Units/Kgs)" value={line.qty} />
                       <Field label="Rate" value={line.rate} />
                       <Field label="Value" value={line.value} />
                       <Field label="Carton Weight" value={line.carton_weight} />
@@ -465,7 +479,7 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
         <AlertDialog open={showDelete} onOpenChange={setShowDelete}>
           <AlertDialogContent className="max-w-[90vw] sm:max-w-lg">
             <AlertDialogHeader>
-              <AlertDialogTitle>Delete RTV</AlertDialogTitle>
+              <AlertDialogTitle>Delete CR</AlertDialogTitle>
               <AlertDialogDescription>
                 Are you sure you want to delete <strong>{data.rtv_id}</strong>? This will remove all lines and boxes. This cannot be undone.
               </AlertDialogDescription>

@@ -16,7 +16,7 @@ import {
 import {
   ArrowLeft, CheckCircle2, Loader2, AlertCircle,
   Package, Plus, Box, FileText, Printer, Send,
-  Pencil, Trash2, MoreVertical,
+  Pencil, Trash2, MoreVertical, Lock,
 } from "lucide-react"
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
@@ -175,6 +175,12 @@ export default function NewRTVPage({ params }: NewRTVPageProps) {
           const rate = parseFloat(field === "rate" ? value : l.rate) || 0
           if (qty > 0 && rate > 0) updated.value = String(qty * rate)
         }
+        // Item-line container Net Weight = UOM × Total Qty (the expected total).
+        if (field === "qty" || field === "uom") {
+          const qty = parseFloat(field === "qty" ? value : l.qty) || 0
+          const uom = parseFloat(field === "uom" ? value : l.uom) || 0
+          updated.net_weight = uom > 0 && qty > 0 ? String(parseFloat((uom * qty).toFixed(3))) : ""
+        }
         return updated
       })
     )
@@ -226,20 +232,18 @@ export default function NewRTVPage({ params }: NewRTVPageProps) {
     }
   }
 
-  // ─── Recompute line totals from boxes ──────────────────────────
+  // ─── Box net-weight sum (actual) ───────────────────────────────
+  // The item-line Net Weight is now the *expected* total (UOM × Total Qty),
+  // so it must NOT be overwritten by the box sum. The box-wise *actual* sum is
+  // derived on demand for the "Net Wt (sum)" display and the discrepancy check.
 
-  const recomputeLineFromBoxes = (boxes: BoxForm[], articleDesc: string) => {
-    const articleBoxes = boxes.filter((b) => b.article_description === articleDesc)
-    const totalNet = articleBoxes.reduce((sum, b) => sum + (parseFloat(b.net_weight) || 0), 0)
+  const articleNetSum = (articleDesc: string): number =>
+    boxForms
+      .filter((b) => b.article_description === articleDesc)
+      .reduce((sum, b) => sum + (parseFloat(b.net_weight) || 0), 0)
 
-    setLines((prev) =>
-      prev.map((l) =>
-        l.item_description === articleDesc
-          ? { ...l, net_weight: totalNet > 0 ? String(parseFloat(totalNet.toFixed(3))) : "" }
-          : l
-      )
-    )
-  }
+  // Kept as a no-op for call-site compatibility — net_weight is expected-driven.
+  const recomputeLineFromBoxes = (_boxes: BoxForm[], _articleDesc: string) => {}
 
   // ─── Line resolved — create default box ────────────────────────
 
@@ -568,11 +572,11 @@ export default function NewRTVPage({ params }: NewRTVPageProps) {
 
       const { id: rtvId, rtv_id: rtvStringId } = await ensureRtvCreated()
 
-      toast({ title: "RTV Created", description: `${rtvStringId} created. Approval pending.` })
+      toast({ title: "CR Created", description: `${rtvStringId} created. Approval pending.` })
       router.push(`/${company}/reordering/${rtvId}`)
     } catch (err) {
       console.error("Submit failed:", err)
-      setSubmitError(err instanceof Error ? err.message : "Failed to create RTV")
+      setSubmitError(err instanceof Error ? err.message : "Failed to create CR")
     } finally {
       setSubmitting(false)
     }
@@ -582,6 +586,10 @@ export default function NewRTVPage({ params }: NewRTVPageProps) {
 
   const isLineResolved = (line: RTVLineForm) =>
     !!(line.item_description && (line.material_type || line.item_category))
+
+  // Box-wise entry is always locked on the create screen — boxes are entered
+  // only after the mail ("first") approval, on the edit screen.
+  const boxesLocked = true
 
   // ─── Render ────────────────────────────────────────────────────
 
@@ -594,8 +602,8 @@ export default function NewRTVPage({ params }: NewRTVPageProps) {
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div className="min-w-0">
-            <h1 className="text-lg sm:text-xl md:text-2xl font-bold tracking-tight">New RTV</h1>
-            <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">Create a new Return to Vendor entry</p>
+            <h1 className="text-lg sm:text-xl md:text-2xl font-bold tracking-tight">New CR</h1>
+            <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">Create a new Customer Return entry</p>
           </div>
         </div>
 
@@ -611,7 +619,7 @@ export default function NewRTVPage({ params }: NewRTVPageProps) {
           <CardHeader className="pb-3 px-3 sm:px-6">
             <CardTitle className="text-sm flex items-center gap-1.5">
               <FileText className="h-4 w-4 text-muted-foreground" />
-              RTV Details
+              CR Details
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4 px-3 sm:px-6">
@@ -763,12 +771,12 @@ export default function NewRTVPage({ params }: NewRTVPageProps) {
                         />
                       </div>
                       <div className="space-y-1">
-                        <Label className="text-[11px]">Net Wt <span className="text-muted-foreground text-[9px]">(sum)</span></Label>
-                        <Input type="number" value={line.net_weight} readOnly className="h-8 text-xs bg-muted" />
+                        <Label className="text-[11px]">Net Wt <span className="text-muted-foreground text-[9px]">(box sum)</span></Label>
+                        <Input type="number" value={articleNetSum(line.item_description) || ""} readOnly className="h-8 text-xs bg-muted" />
                       </div>
                     </div>
 
-                    {/* Boxes for this article */}
+                    {/* Boxes for this article — LOCKED until approval */}
                     <div className="mt-2 pt-2 border-t space-y-2">
                       <div className="flex items-center justify-between">
                         <p className="text-xs font-medium text-muted-foreground flex items-center gap-1">
@@ -780,20 +788,31 @@ export default function NewRTVPage({ params }: NewRTVPageProps) {
                           size="sm"
                           className="h-6 text-xs gap-1"
                           onClick={() => addBox(line.item_description)}
+                          disabled={boxesLocked}
                         >
                           <Plus className="h-3 w-3" /> Add Box
                         </Button>
                       </div>
+
+                      {/* Lock banner — box weights & QR are entered after mail approval */}
+                      <div className="flex items-start gap-2 rounded-md border border-dashed border-amber-300 bg-amber-50/60 px-3 py-2 text-[11px] text-amber-700">
+                        <Lock className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
+                        <span>
+                          Box-wise net/gross weights &amp; QR labels unlock after mail approval. This entry is
+                          saved with <strong>0 boxes</strong>; enter box weights from the CR once it is approved.
+                        </span>
+                      </div>
+
                       {boxForms
                         .map((box, boxIdx) => ({ box, boxIdx }))
                         .filter(({ box }) => box.article_description === line.item_description)
                         .map(({ box, boxIdx }) => {
-                          const isLocked = box.is_printed && !editingBoxIndices.has(boxIdx)
+                          const isLocked = boxesLocked || (box.is_printed && !editingBoxIndices.has(boxIdx))
                           const isPrinting = printingBoxIdx === boxIdx
                           return (
                             <div key={boxIdx} className={cn(
-                              "p-2 rounded space-y-2 sm:space-y-0",
-                              isLocked ? "bg-emerald-50/50 border border-emerald-200/50" : "bg-muted/30"
+                              "p-2 rounded space-y-2 sm:space-y-0 opacity-80",
+                              isLocked ? "bg-muted/40 border border-dashed" : "bg-muted/30"
                             )}>
                               {/* Box header row */}
                               <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
@@ -810,22 +829,12 @@ export default function NewRTVPage({ params }: NewRTVPageProps) {
                                         <Pencil className="h-3.5 w-3.5 mr-2" /> Edit
                                       </DropdownMenuItem>
                                     )}
-                                    <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => setDeleteBoxIdx(boxIdx)}>
+                                    <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => setDeleteBoxIdx(boxIdx)} disabled={boxesLocked}>
                                       <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete
                                     </DropdownMenuItem>
                                   </DropdownMenuContent>
                                 </DropdownMenu>
-                                {box.is_printed && !editingBoxIndices.has(boxIdx) && (
-                                  <Badge variant="outline" className="text-[10px] h-5 bg-emerald-50 text-emerald-700 border-emerald-200 flex-shrink-0">
-                                    Printed
-                                  </Badge>
-                                )}
-                                {editingBoxIndices.has(boxIdx) && (
-                                  <Badge variant="outline" className="text-[10px] h-5 bg-amber-50 text-amber-700 border-amber-200 flex-shrink-0">
-                                    Editing
-                                  </Badge>
-                                )}
-                                {/* Desktop: inline inputs */}
+                                {/* Desktop: inline inputs (locked pre-approval) */}
                                 <div className="hidden sm:contents">
                                   <Input
                                     type="number"
@@ -866,9 +875,9 @@ export default function NewRTVPage({ params }: NewRTVPageProps) {
                                     variant="ghost"
                                     size="icon"
                                     className="h-7 w-7"
-                                    title={box.is_printed && editingBoxIndices.has(boxIdx) ? "Save & Re-print" : "Print label"}
+                                    title="Printing unlocks after approval"
                                     onClick={() => handlePrintBox(boxIdx)}
-                                    disabled={isPrinting}
+                                    disabled={isPrinting || boxesLocked}
                                   >
                                     {isPrinting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Printer className="h-3 w-3" />}
                                   </Button>
@@ -878,6 +887,7 @@ export default function NewRTVPage({ params }: NewRTVPageProps) {
                                     className="h-7 w-7 text-primary hover:text-primary"
                                     onClick={() => addBox(line.item_description)}
                                     title="Add box below"
+                                    disabled={boxesLocked}
                                   >
                                     <Plus className="h-3 w-3" />
                                   </Button>

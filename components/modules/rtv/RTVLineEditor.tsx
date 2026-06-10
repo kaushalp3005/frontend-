@@ -352,7 +352,7 @@ export function RTVLineEditor({
               <Input type="number" step="0.01" value={line.uom} onChange={(e) => onChange(index, "uom", e.target.value)} placeholder="0" className="h-8 sm:h-9 text-xs" disabled={disabled} />
             </div>
             <div className="space-y-1">
-              <Label className="text-[10px] sm:text-xs text-muted-foreground">Qty</Label>
+              <Label className="text-[10px] sm:text-xs text-muted-foreground">Total Qty (Units/Kgs)</Label>
               <Input type="number" value={line.qty} onChange={(e) => onChange(index, "qty", e.target.value)} placeholder="0" className="h-8 sm:h-9 text-xs" disabled={disabled} />
             </div>
             <div className="space-y-1">
@@ -368,8 +368,8 @@ export function RTVLineEditor({
               <Input type="number" step="0.001" value={line.carton_weight} onChange={(e) => onChange(index, "carton_weight", e.target.value)} placeholder="0" className="h-8 sm:h-9 text-xs" disabled={disabled} />
             </div>
             <div className="space-y-1">
-              <Label className="text-[10px] sm:text-xs text-muted-foreground">Net Weight</Label>
-              <Input type="number" step="0.001" value={line.net_weight} onChange={(e) => onChange(index, "net_weight", e.target.value)} placeholder="0" className="h-8 sm:h-9 text-xs" disabled={disabled} />
+              <Label className="text-[10px] sm:text-xs text-muted-foreground">Net Weight <span className="text-[9px]">(UOM × Total Qty)</span></Label>
+              <Input type="number" step="0.001" value={line.net_weight} readOnly placeholder="0" className="h-8 sm:h-9 text-xs bg-muted" />
             </div>
           </div>
         </div>
@@ -544,7 +544,7 @@ export function RTVLineEditor({
               <Input type="number" step="0.01" value={line.uom} onChange={(e) => onChange(index, "uom", e.target.value)} placeholder="0" className="h-8 sm:h-9 text-xs" />
             </div>
             <div className="space-y-1">
-              <Label className="text-[10px] sm:text-xs">Qty</Label>
+              <Label className="text-[10px] sm:text-xs">Total Qty (Units/Kgs)</Label>
               <Input type="number" value={line.qty} onChange={(e) => onChange(index, "qty", e.target.value)} placeholder="0" className="h-8 sm:h-9 text-xs" />
             </div>
             <div className="space-y-1">
@@ -560,8 +560,8 @@ export function RTVLineEditor({
               <Input type="number" step="0.001" value={line.carton_weight} onChange={(e) => onChange(index, "carton_weight", e.target.value)} placeholder="0" className="h-8 sm:h-9 text-xs" />
             </div>
             <div className="space-y-1">
-              <Label className="text-[10px] sm:text-xs">Net Weight</Label>
-              <Input type="number" step="0.001" value={line.net_weight} onChange={(e) => onChange(index, "net_weight", e.target.value)} placeholder="0" className="h-8 sm:h-9 text-xs" />
+              <Label className="text-[10px] sm:text-xs">Net Weight <span className="text-[9px]">(UOM × Total Qty)</span></Label>
+              <Input type="number" step="0.001" value={line.net_weight} readOnly placeholder="0" className="h-8 sm:h-9 text-xs bg-muted" />
             </div>
           </div>
         </div>

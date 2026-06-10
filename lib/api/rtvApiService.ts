@@ -12,6 +12,8 @@ import type {
   RTVLinesUpdateResponse,
   RTVBoxUpsertRequest,
   RTVBoxUpsertResponse,
+  RTVBulkBoxUpdateRequest,
+  RTVBulkBoxUpdateResponse,
   RTVApprovalRequest,
   RTVApprovalResponse,
   RTVDeleteResponse,
@@ -181,6 +183,28 @@ export const rtvApi = {
       }
     )
     return handleResponse<RTVBoxUpsertResponse>(response)
+  },
+
+  // ─── Bulk Box Save (post-approval final submit) ────────────────
+  // PUT /rtv/{company}/{rtvId}/boxes — state-aware full sync of the box set.
+  // Set notifyDiscrepancy=false to skip the net-weight summary email.
+
+  async bulkSaveBoxes(
+    company: string,
+    rtvId: number,
+    data: RTVBulkBoxUpdateRequest,
+    notifyDiscrepancy: boolean = true,
+  ): Promise<RTVBulkBoxUpdateResponse> {
+    const qs = notifyDiscrepancy ? "" : "?notify_discrepancy=false"
+    const response = await fetch(
+      `${API_URL}/rtv/${company}/${rtvId}/boxes${qs}`,
+      {
+        method: "PUT",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(data),
+      }
+    )
+    return handleResponse<RTVBulkBoxUpdateResponse>(response)
   },
 
   // ─── Approve RTV ───────────────────────────────────────────────

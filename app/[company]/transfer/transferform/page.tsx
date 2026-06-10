@@ -1655,13 +1655,15 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         reason_code: formData.reason
       },
       lines: articles.map((article, index) => ({
-        material_type: article.material_type,
+        // Canonical backend contract: rm_pm_fg_type / item_desc_raw / qty.
+        // qty & pack_size must be numbers (empty/invalid → Pydantic 422).
+        rm_pm_fg_type: article.material_type,
         item_category: article.item_category,
         sub_category: article.sub_category,
-        item_description: article.item_description,
-        quantity: String(article.quantity_units),
+        item_desc_raw: article.item_description,
+        qty: Number(article.quantity_units) || 0,
         uom: article.uom,
-        pack_size: String(article.pack_size),
+        pack_size: Number(article.pack_size) || 0,
         unit_pack_size: article.unit_pack_size ? String(article.unit_pack_size) : null,
         batch_number: null,
         lot_number: null

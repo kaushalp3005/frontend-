@@ -147,6 +147,35 @@ export interface RTVBoxUpsertResponse {
   box_number: number
 }
 
+// ─── Bulk box save (state-aware full sync) ─────────────────────────
+// PUT /rtv/{company}/{rtv_id}/boxes — persists the complete box set on the
+// post-approval final submit. Insert new / update changed / keep unchanged /
+// delete removed, preserving box_id & printed state on matched rows.
+
+export interface RTVBulkBoxItem {
+  article_description: string
+  box_number: number
+  uom?: string
+  conversion?: string
+  lot_number?: string
+  net_weight?: string
+  gross_weight?: string
+  count?: number
+}
+
+export interface RTVBulkBoxUpdateRequest {
+  boxes: RTVBulkBoxItem[]
+}
+
+export interface RTVBulkBoxUpdateResponse {
+  status: string
+  rtv_id: string
+  inserted: number
+  updated: number
+  unchanged: number
+  deleted: number
+}
+
 // ─── Composite types ───────────────────────────────────────────────
 
 export interface RTVWithDetails extends RTVHeader {
