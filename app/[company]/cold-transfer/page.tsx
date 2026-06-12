@@ -67,12 +67,21 @@ export default function TransferPage({ params }: TransferPageProps) {
   const [innerColdTotalPages, setInnerColdTotalPages] = useState(1)
   const [innerColdTotal, setInnerColdTotal] = useState(0)
 
-  // State for transfers data
+  // State for transfers data (ALL Transfers tab — server-paginated over every transfer)
   const [transfers, setTransfers] = useState<any[]>([])
   const [transfersLoading, setTransfersLoading] = useState(false)
   const [transfersPage, setTransfersPage] = useState(1)
   const [transfersTotalPages, setTransfersTotalPages] = useState(1)
   const [transfersTotal, setTransfersTotal] = useState(0)
+
+  // State for the cold Transfer-OUT list (Transfer Out tab). This list is ALWAYS
+  // cold-filtered client-side (isColdRelated) over the mixed cold+warehouse
+  // interunit_transfers table, so server pagination would only surface the cold
+  // subset of each 15-row page (the "1 of 15 is cold" bug). We bulk-fetch the full
+  // set and filter + paginate client-side — exactly like the Transfer-In tab.
+  const [coldOutRaw, setColdOutRaw] = useState<any[]>([])
+  const [coldOutLoading, setColdOutLoading] = useState(false)
+  const [coldOutPage, setColdOutPage] = useState(1)
 
   // State for transfer INs data
   const [transferIns, setTransferIns] = useState<any[]>([])
@@ -93,6 +102,11 @@ export default function TransferPage({ params }: TransferPageProps) {
   // Transfer-In is always cold-filtered client-side, so we fetch in bulk and
   // paginate the filtered slice at 10 rows / page.
   const TRANSFER_IN_CLIENT_PAGE_SIZE = 10
+  // Transfer-OUT is likewise always cold-filtered client-side. Bulk-fetch page
+  // size (backend caps per_page at 1000) and the client-side page size for the
+  // cold-filtered slice. loadColdOut pages through if the table exceeds one bulk page.
+  const COLD_OUT_FETCH_SIZE = 1000
+  const COLD_OUT_CLIENT_PAGE_SIZE = 15
   const requestsFilterActive =
     requestSearch.trim() !== "" || warehouseFilter !== "all"
   const transferOutFilterActive =
@@ -143,6 +157,40 @@ export default function TransferPage({ params }: TransferPageProps) {
     }
   }
 
+  // Load the cold Transfer-OUT list in bulk (cold filter is always on, so we
+  // can't rely on server pagination — see coldOutRaw state above). Pages through
+  // until the whole interunit_transfers table is retrieved so no cold record is
+  // silently dropped, with a hard safety cap. Filtering + pagination happen
+  // client-side via filteredTransfers / pagedColdOut below.
+  const loadColdOut = async () => {
+    setColdOutLoading(true)
+    try {
+      const all: any[] = []
+      let page = 1
+      let total = 0
+      // Safety cap: 20 × 1000 = 20k headers, far beyond foreseeable volume.
+      while (page <= 20) {
+        const response = await InterunitApiService.getTransfers({
+          page,
+          per_page: COLD_OUT_FETCH_SIZE,
+          sort_by: "created_ts",
+          sort_order: "desc",
+        })
+        const recs = response.records || []
+        all.push(...recs)
+        total = response.total || all.length
+        if (all.length >= total || recs.length === 0) break
+        page += 1
+      }
+      setColdOutRaw(all)
+      setTransfersTotal(total)
+    } catch (error: any) {
+      toast({ title: "Error", description: "Failed to load transfers.", variant: "destructive" })
+    } finally {
+      setColdOutLoading(false)
+    }
+  }
+
   // Load transfer INs data
   const loadTransferIns = async (_page: number = 1) => {
     setTransferInsLoading(true)
@@ -189,7 +237,7 @@ export default function TransferPage({ params }: TransferPageProps) {
   useEffect(() => { loadRequests(1) }, [])
 
   useEffect(() => {
-    if (activeTab === "transferout" && transfers.length === 0) loadTransfers(1)
+    if (activeTab === "transferout" && coldOutRaw.length === 0) loadColdOut()
     if (activeTab === "transferin" && transferIns.length === 0) loadTransferIns(1)
     if (activeTab === "innercold" && innerColdTransfers.length === 0) loadInnerColdTransfers(1)
     if (activeTab === "details" && transfers.length === 0) loadTransfers(1)
@@ -202,11 +250,19 @@ export default function TransferPage({ params }: TransferPageProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestsFilterActive, warehouseFilter])
 
+  // All-Transfers tab still server-paginates, so it must re-fetch when the
+  // active/warehouse filter toggles. The Transfer-Out tab filters coldOutRaw
+  // client-side (no refetch) — we just reset to page 1 so a new filter never
+  // strands the view on an out-of-range page.
   useEffect(() => {
-    if (activeTab !== "transferout" && activeTab !== "details") return
+    if (activeTab !== "details") return
     loadTransfers(1)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transferOutFilterActive, warehouseFilter])
+
+  useEffect(() => {
+    setColdOutPage(1)
+  }, [transferOutSearch, warehouseFilter])
 
   useEffect(() => {
     if (activeTab !== "transferin") return
@@ -217,6 +273,10 @@ export default function TransferPage({ params }: TransferPageProps) {
 
   const handlePageChange = (page: number) => { if (page >= 1 && page <= totalPages) loadRequests(page) }
   const handleTransfersPageChange = (page: number) => { if (page >= 1 && page <= transfersTotalPages) loadTransfers(page) }
+  const handleColdOutPageChange = (page: number) => {
+    // Client-side slicing only — no refetch. Clamped against the cold-filtered count.
+    if (page >= 1 && page <= coldOutClientTotalPages) setColdOutPage(page)
+  }
   const handleTransferInsPageChange = (page: number) => {
     // Client-side slicing only — no refetch. Page is clamped against the
     // cold-filtered count derived below.
@@ -287,7 +347,10 @@ export default function TransferPage({ params }: TransferPageProps) {
       ? `/${company}/cold-transfer/coldtransferform?editId=${t.id}`
       : `/${company}/transfer/directtransferform?editId=${t.id}`
 
-  const filteredTransfers = transfers.filter(t => {
+  // Cold Transfer-OUT list: filter the bulk-fetched coldOutRaw (NOT the
+  // server-paginated `transfers`, which the All-Transfers tab owns) down to
+  // cold-related rows, then warehouse + search.
+  const filteredTransfers = coldOutRaw.filter(t => {
     if (!isColdRelated(t.from_warehouse, t.to_warehouse, t.from_cold_unit)) return false
     // Pass from_cold_unit too so the Cold-sub chips (Savla D-39 / D-514 / Rishi /
     // Supreme Cold) match cold-source transfers whose from_warehouse is just
@@ -296,6 +359,14 @@ export default function TransferPage({ params }: TransferPageProps) {
     if (!warehouseMatches(t.from_warehouse, t.to_warehouse, t.from_cold_unit)) return false
     return searchMatch(t, transferOutSearch, ["challan_no", "from_warehouse", "to_warehouse", "from_cold_unit", "stock_trf_date", "status", "vehicle_no", "lot_numbers_text"])
   })
+  // Client-side pagination for Transfer-Out (cold filter is always on).
+  const coldOutClientTotal = filteredTransfers.length
+  const coldOutClientTotalPages = Math.max(1, Math.ceil(coldOutClientTotal / COLD_OUT_CLIENT_PAGE_SIZE))
+  const effectiveColdOutPage = Math.min(coldOutPage, coldOutClientTotalPages)
+  const pagedColdOut = filteredTransfers.slice(
+    (effectiveColdOutPage - 1) * COLD_OUT_CLIENT_PAGE_SIZE,
+    effectiveColdOutPage * COLD_OUT_CLIENT_PAGE_SIZE,
+  )
   const filteredRequests = requests.filter(r => {
     if (!warehouseMatches(r.from_warehouse, r.to_warehouse)) return false
     return searchMatch(r, requestSearch, ["request_no", "from_warehouse", "to_warehouse", "request_date", "status"])
@@ -335,7 +406,7 @@ export default function TransferPage({ params }: TransferPageProps) {
     try {
       const response = await InterunitApiService.deleteTransfer(transferId, user?.email || '')
       toast({ title: "Deleted", description: response.message || "Transfer deleted." })
-      loadTransfers(transfersPage)
+      loadColdOut()
     } catch (error: any) {
       const msg = error.response?.data?.detail || error.response?.data?.message || "Failed to delete transfer."
       toast({ title: "Error", description: String(msg), variant: "destructive" })
@@ -594,7 +665,7 @@ export default function TransferPage({ params }: TransferPageProps) {
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 sm:px-5 py-3 sm:py-4 border-b bg-white">
               <div>
                 <h3 className="text-sm sm:text-base font-semibold text-gray-900">Cold transfer-out Records</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">{transfersTotal} record{transfersTotal !== 1 ? 's' : ''}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{coldOutClientTotal} record{coldOutClientTotal !== 1 ? 's' : ''}</p>
               </div>
               <div className="flex items-center gap-2 flex-wrap self-end sm:self-auto">
                 <Button
@@ -605,9 +676,9 @@ export default function TransferPage({ params }: TransferPageProps) {
                   <Plus className="h-3.5 w-3.5 mr-1" />
                   <span className="hidden sm:inline">Direct Transfer Out</span><span className="sm:hidden">Direct Out</span>
                 </Button>
-                <Button variant="ghost" size="sm" onClick={() => loadTransfers(transfersPage)} disabled={transfersLoading}
+                <Button variant="ghost" size="sm" onClick={() => loadColdOut()} disabled={coldOutLoading}
                   className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground">
-                  <RefreshCw className={`h-3.5 w-3.5 ${transfersLoading ? 'animate-spin' : ''}`} />
+                  <RefreshCw className={`h-3.5 w-3.5 ${coldOutLoading ? 'animate-spin' : ''}`} />
                   <span className="hidden sm:inline ml-1.5">Refresh</span>
                 </Button>
               </div>
@@ -647,14 +718,14 @@ export default function TransferPage({ params }: TransferPageProps) {
               </div>
             </div>
 
-            {transfersLoading ? <LoadingSkeleton /> : filteredTransfers.length === 0 ? (
+            {coldOutLoading ? <LoadingSkeleton /> : filteredTransfers.length === 0 ? (
               <EmptyState icon={Send} title={transferOutSearch ? "No matching records" : "No outbound transfers"}
                 subtitle={transferOutSearch ? "Try a different search term." : "Accept a request to create a transfer out."} />
             ) : (
               <>
                 {/* Mobile card list */}
                 <div className="md:hidden divide-y">
-                  {filteredTransfers.map((t) => (
+                  {pagedColdOut.map((t) => (
                     <div key={t.id} className="p-4 space-y-3">
                       <div className="flex items-start justify-between">
                         <div>
@@ -746,7 +817,7 @@ export default function TransferPage({ params }: TransferPageProps) {
                       </tr>
                     </thead>
                     <tbody className="divide-y">
-                      {filteredTransfers.map((t) => (
+                      {pagedColdOut.map((t) => (
                         <tr key={t.id} className="hover:bg-gray-50/50 transition-colors">
                           <td className="py-3 px-4">
                             <ChallanHoverCard
@@ -828,7 +899,7 @@ export default function TransferPage({ params }: TransferPageProps) {
                 </div>
               </>
             )}
-            <PaginationBar page={transfersPage} totalPages={transfersTotalPages} total={transfersTotal} onPageChange={handleTransfersPageChange} />
+            <PaginationBar page={effectiveColdOutPage} totalPages={coldOutClientTotalPages} total={coldOutClientTotal} onPageChange={handleColdOutPageChange} pageSize={COLD_OUT_CLIENT_PAGE_SIZE} />
           </Card>
         </TabsContent>
 

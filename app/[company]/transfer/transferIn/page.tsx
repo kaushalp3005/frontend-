@@ -189,7 +189,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
   }, [lines])
   const hasBatchData = lines.some((l: any) => l.batch_number)
 
-  // Group line indices by article name (for per-article box range reprint)
+  // Group line indices by article name (for per-article box range reprint + per-article tables)
   const articleLineGroups = useMemo(() => {
     const groups: Record<string, number[]> = {}
     lines.forEach((line: any, i: number) => {
@@ -198,6 +198,16 @@ export default function TransferInPage({ params }: TransferInPageProps) {
       groups[name].push(i)
     })
     return groups
+  }, [lines])
+  // Article names in first-appearance order — drives the per-article Article Entries tables.
+  const articleOrder = useMemo(() => {
+    const seen = new Set<string>()
+    const order: string[] = []
+    lines.forEach((line: any, i: number) => {
+      const name = line.item_desc_raw || line.item_description || `Article ${i + 1}`
+      if (!seen.has(name)) { seen.add(name); order.push(name) }
+    })
+    return order
   }, [lines])
   // When lines come from boxes (cold storage) OR boxes cover all lines, only Article Entries
   // is shown — total count should only include lines, not boxes-section duplicates.
@@ -1073,20 +1083,37 @@ export default function TransferInPage({ params }: TransferInPageProps) {
       return
     }
 
-    // Match using transaction_no AND box_id from DB
+    // Prefix of a box_id = everything before the last '-' (e.g. "12345-07" -> "12345").
+    // Physical cartons arrive with a different suffix than the FIFO-picked id, so we
+    // match on (prefix + transaction_no) and let the backend swap the exact box_id.
+    const prefixOf = (id: string) => {
+      const s = String(id || "").trim()
+      const i = s.lastIndexOf("-")
+      return i > 0 ? s.slice(0, i) : s
+    }
+    const scannedPrefix = prefixOf(scannedBoxId)
+
+    // Match using transaction_no AND box_id PREFIX from DB
     const isMatch = (bBoxId: string, bTxnNo: string) => {
       if (scannedBoxId && scannedTransactionNo) {
-        return bBoxId === scannedBoxId && bTxnNo === scannedTransactionNo
+        return prefixOf(bBoxId) === scannedPrefix && bTxnNo === scannedTransactionNo
       }
       if (scannedTransactionNo) return bTxnNo === scannedTransactionNo
-      if (scannedBoxId) return bBoxId === scannedBoxId
+      if (scannedBoxId) return prefixOf(bBoxId) === scannedPrefix
       return false
     }
 
-    // Match scanned QR against transfer boxes from DB (using box_id + transaction_no)
-    const matchedBox = boxes.find((b: any) =>
-      isMatch(String(b.box_id || "").trim(), String(b.transaction_no || "").trim())
-    )
+    // Match scanned QR against transfer boxes (prefix + transaction_no). Each scan
+    // consumes the next UNACKNOWLEDGED matching slot; fall back to an already-matched
+    // one only so the "Already Acknowledged" message can still surface.
+    const matchedBox =
+      boxes.find((b: any) =>
+        !boxesMatchMap[b.id] &&
+        isMatch(String(b.box_id || "").trim(), String(b.transaction_no || "").trim())
+      ) ||
+      boxes.find((b: any) =>
+        isMatch(String(b.box_id || "").trim(), String(b.transaction_no || "").trim())
+      )
 
     if (matchedBox) {
       const article = matchedBox.article || "Unknown"
@@ -1145,13 +1172,16 @@ export default function TransferInPage({ params }: TransferInPageProps) {
       return
     }
 
-    // Match against lines via lineBoxDataMap (box_id + transaction_no from DB)
-    const matchedLineIndex = lines.findIndex((l: any) => {
+    // Match against lines via lineBoxDataMap (prefix + transaction_no). Prefer the
+    // next UNACKNOWLEDGED line so repeated same-prefix scans fill successive slots.
+    const lineMatches = (l: any) => {
       const boxRef = lineBoxDataMap[l.id] || {}
       const lBoxId = String(l.box_id || boxRef.box_id || "").trim()
       const lTxnNo = String(l.transaction_no || boxRef.transaction_no || "").trim()
       return isMatch(lBoxId, lTxnNo)
-    })
+    }
+    let matchedLineIndex = lines.findIndex((l: any, i: number) => !linesMatchMap[i] && lineMatches(l))
+    if (matchedLineIndex < 0) matchedLineIndex = lines.findIndex((l: any) => lineMatches(l))
 
     if (matchedLineIndex >= 0) {
       const line = lines[matchedLineIndex]
@@ -2240,11 +2270,28 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                     </div>
                   </div>
 
-                  {/* Desktop table with horizontal scroll */}
-                  <div className="hidden md:block overflow-x-auto">
+                  {/* Desktop — one table per article */}
+                  <div className="hidden md:block space-y-4 px-3 sm:px-4 pb-3">
+                    {articleOrder.map((artName: string) => {
+                      const indices = articleLineGroups[artName] || []
+                      const artResolved = indices.filter((i: number) => linesMatchMap[i] || linesIssueMap[i]).length
+                      const artIssues = indices.filter((i: number) => linesIssueMap[i]).length
+                      const artComplete = indices.length > 0 && artResolved === indices.length
+                      return (
+                      <div key={artName} className="border border-violet-100 rounded-lg overflow-hidden">
+                        <div className="flex items-center justify-between gap-2 px-3 py-2 bg-violet-50/50 border-b border-violet-100">
+                          <span className="text-xs sm:text-sm font-semibold text-violet-800 truncate" title={artName}>{artName}</span>
+                          <span className="flex items-center gap-2 shrink-0">
+                            <span className="text-[11px] text-violet-500">{indices.length} box{indices.length !== 1 ? "es" : ""}</span>
+                            <Badge variant="outline" className={`text-[11px] ${artComplete ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-700 border-amber-200"}`}>{artResolved}/{indices.length}</Badge>
+                            {artIssues > 0 && <Badge variant="outline" className="text-[11px] bg-red-50 text-red-600 border-red-200">{artIssues} issue{artIssues !== 1 ? "s" : ""}</Badge>}
+                          </span>
+                        </div>
+                        {/* Height-capped: ~10 rows visible, the rest scrolls inside this box (header stays pinned) */}
+                        <div className="overflow-auto max-h-[460px]">
                     <table className="w-full min-w-[1050px] text-sm">
-                      <thead>
-                        <tr className="bg-violet-50/40 border-b text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
+                      <thead className="sticky top-0 z-20">
+                        <tr className="bg-violet-50 border-b text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
                           <th className="text-center py-2.5 px-2 w-[50px]">Sr. No.</th>
                           <th className="text-left py-2.5 px-3 min-w-[220px]">Item Name</th>
                           <th className="text-left py-2.5 px-3 w-[130px]">Transaction No</th>
@@ -2255,11 +2302,12 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                           <th className="text-right py-2.5 px-3 w-[100px]">Total Wt</th>
                           {hasBatchData && <th className="text-left py-2.5 px-3 w-[110px]">Batch</th>}
                           <th className="text-left py-2.5 px-3 w-[110px]">Lot</th>
-                          <th className="text-right py-2.5 px-3 w-[160px] sticky right-0 bg-violet-50/40">Action</th>
+                          <th className="text-right py-2.5 px-3 w-[160px] sticky right-0 bg-violet-50">Action</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
-                        {lines.map((line: any, index: number) => {
+                        {indices.map((index: number, posInArticle: number) => {
+                          const line = lines[index]
                           const matched = !!linesMatchMap[index]
                           const issued = !!linesIssueMap[index]
                           const isIssueOpen = issueOpenIndex === index
@@ -2293,7 +2341,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                           return (
                             <Fragment key={index}>
                               <tr className={`${matched ? "bg-emerald-50/40" : issued ? "bg-red-50/30" : "hover:bg-gray-50/50"} transition-colors`}>
-                                <td className="py-2.5 px-2 text-center text-gray-500 font-medium tabular-nums">{index + 1}</td>
+                                <td className="py-2.5 px-2 text-center text-gray-500 font-medium tabular-nums">{posInArticle + 1}</td>
                                 <td className="py-2.5 px-3 font-semibold text-gray-900 max-w-[220px]">
                                   <span className="block truncate" title={line.item_desc_raw || line.item_description}>
                                     {line.item_desc_raw || line.item_description || `Article ${index + 1}`}
@@ -2464,15 +2512,36 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                         })}
                       </tbody>
                     </table>
+                        </div>
+                      </div>
+                      )
+                    })}
                   </div>
 
-                  {/* Mobile cards */}
-                  <div className="md:hidden divide-y divide-gray-100">
-                    {lines.map((line: any, index: number) => {
-                      const matched = !!linesMatchMap[index]
-                      const issued = !!linesIssueMap[index]
-                      const isIssueOpen = issueOpenIndex === index
-                      const mobileBoxData = lineBoxDataMap[line.id] || {}
+                  {/* Mobile — grouped by article */}
+                  <div className="md:hidden px-3 pb-3 space-y-4">
+                    {articleOrder.map((artName: string) => {
+                      const indices = articleLineGroups[artName] || []
+                      const artResolved = indices.filter((i: number) => linesMatchMap[i] || linesIssueMap[i]).length
+                      const artIssues = indices.filter((i: number) => linesIssueMap[i]).length
+                      const artComplete = indices.length > 0 && artResolved === indices.length
+                      return (
+                      <div key={artName} className="border border-violet-100 rounded-lg overflow-hidden">
+                        <div className="flex items-center justify-between gap-2 px-3 py-2 bg-violet-50/50 border-b border-violet-100">
+                          <span className="text-xs font-semibold text-violet-800 truncate" title={artName}>{artName}</span>
+                          <span className="flex items-center gap-1.5 shrink-0">
+                            <span className="text-[11px] text-violet-500">{indices.length} box{indices.length !== 1 ? "es" : ""}</span>
+                            <Badge variant="outline" className={`text-[11px] ${artComplete ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-700 border-amber-200"}`}>{artResolved}/{indices.length}</Badge>
+                            {artIssues > 0 && <Badge variant="outline" className="text-[11px] bg-red-50 text-red-600 border-red-200">{artIssues}</Badge>}
+                          </span>
+                        </div>
+                        <div className="divide-y divide-gray-100">
+                          {indices.map((index: number, posInArticle: number) => {
+                            const line = lines[index]
+                            const matched = !!linesMatchMap[index]
+                            const issued = !!linesIssueMap[index]
+                            const isIssueOpen = issueOpenIndex === index
+                            const mobileBoxData = lineBoxDataMap[line.id] || {}
                       const hasExistingQRData = !!(
                         (line.transaction_no || mobileBoxData.transaction_no) &&
                         (line.box_id || mobileBoxData.box_id)
@@ -2483,7 +2552,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                           <div className="space-y-1.5">
                             <div className="flex items-start justify-between gap-2">
                               <div className="flex-1 min-w-0">
-                                <span className="text-sm font-semibold text-gray-900 truncate"><span className="text-gray-500 font-medium mr-1.5">{index + 1}.</span>{line.item_desc_raw || line.item_description || `Article ${index + 1}`}</span>
+                                <span className="text-sm font-semibold text-gray-900 truncate"><span className="text-gray-500 font-medium mr-1.5">{posInArticle + 1}.</span>{line.item_desc_raw || line.item_description || `Article ${index + 1}`}</span>
                               </div>
                               {!hasExistingQRData ? (
                                 /* No pre-existing data → Print QR */
@@ -2596,6 +2665,10 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                             </div>
                           )}
                         </div>
+                      )
+                          })}
+                        </div>
+                      </div>
                       )
                     })}
                   </div>
