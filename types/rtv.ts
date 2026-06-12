@@ -387,6 +387,13 @@ export interface RTVDeleteResponse {
   rtv_id: string
 }
 
+// ─── Send for Approval ────────────────────────────────────────────
+
+export interface SendForApprovalResponse {
+  status: string
+  rtv_id: string
+}
+
 // ─── Box edit log ──────────────────────────────────────────────────
 
 export interface RTVBoxEditChange {
