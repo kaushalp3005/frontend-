@@ -232,26 +232,36 @@ export default function TransferInPage({ params }: TransferInPageProps) {
     const _boxes = (transferData?.boxes as any[]) || []
     const _lines = transferData?.lines || []
     if (_boxes.length === 0) return {}
-    const keyOf = (article: any, lot: any) =>
-      `${String(article || "").trim().toUpperCase()}|${String(lot || "").trim()}`
+    const artOf = (article: any) => String(article || "").trim().toUpperCase()
+    const keyOf = (article: any, lot: any) => `${artOf(article)}|${String(lot || "").trim()}`
+    // Index boxes BOTH by (article, lot) and by article alone. The article-only index is a
+    // fallback for transfers whose OUT *lines* carry a blank/mismatched lot while the OUT
+    // *boxes* carry the real lot (the TRANS202606111352 class). Without it the lines never
+    // bind to their boxes, the entries show no box_id/txn, the receiver "Generate QR"s fresh
+    // ids + a null lot, and the receipt can't reconcile against the parked pending rows — so
+    // the transfer freezes at Dispatch/Pending even after every box is acknowledged.
     const boxesByKey: Record<string, any[]> = {}
+    const boxesByArt: Record<string, any[]> = {}
     _boxes.forEach((b: any) => {
-      const k = keyOf(b.article, b.lot_number)
-      ;(boxesByKey[k] ||= []).push(b)
+      ;(boxesByKey[keyOf(b.article, b.lot_number)] ||= []).push(b)
+      ;(boxesByArt[artOf(b.article)] ||= []).push(b)
     })
-    const cursor: Record<string, number> = {}
-    const map: Record<number, { box_id: string; transaction_no: string }> = {}
+    const used = new Set<any>()
+    const takeNext = (arr: any[]) => {
+      for (const b of arr) { if (!used.has(b.id)) { used.add(b.id); return b } }
+      return null
+    }
+    const map: Record<number, { box_id: string; transaction_no: string; lot_number: string }> = {}
     _lines.forEach((l: any) => {
-      const k = keyOf(l.item_desc_raw || l.item_description, l.lot_number)
-      const arr = boxesByKey[k] || []
-      const i = cursor[k] || 0
-      if (i < arr.length) {
-        cursor[k] = i + 1
-        const b = arr[i]
+      // exact (article, lot) first; fall back to article-only so blank-lot lines still bind.
+      let b = takeNext(boxesByKey[keyOf(l.item_desc_raw || l.item_description, l.lot_number)] || [])
+      if (!b) b = takeNext(boxesByArt[artOf(l.item_desc_raw || l.item_description)] || [])
+      if (b) {
         const synthetic = isSyntheticLineBoxId(b.box_id)
         map[l.id] = {
           box_id: synthetic ? "" : (b.box_id || ""),
           transaction_no: synthetic ? "" : (b.transaction_no || ""),
+          lot_number: b.lot_number || "",
         }
       }
     })
