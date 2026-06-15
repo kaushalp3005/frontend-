@@ -328,7 +328,14 @@ export default function TransferPage({ params }: TransferPageProps) {
     for (const w of whs) {
       if (!w) continue
       for (const part of String(w).split(",")) {
-        const code = normalizeWarehouseName(part.trim())
+        const raw = part.trim()
+        if (!raw) continue
+        // Generic cold label: cold-source transfers store from_warehouse =
+        // "Cold Storage" and the sub-cold on from_cold_unit — which is blank on
+        // older rows. Treat the bare label as cold so those still surface
+        // (otherwise ~93 cold-source transfers with from_cold_unit unset vanish).
+        if (raw.toLowerCase().startsWith("cold storage")) return true
+        const code = normalizeWarehouseName(raw)
         if (code && isColdWarehouse(code)) return true
       }
     }
