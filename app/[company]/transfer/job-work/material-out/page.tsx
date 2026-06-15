@@ -943,8 +943,11 @@ export default function MaterialOutPage({ params }: MaterialOutPageProps) {
     // TRANS202605131331-style inventory loss (700 boxes collapsed to 1 on receive).
     let pickedBoxes: { id: number; box_id: string; transaction_no: string; weight_kg: number; [key: string]: any }[] = []
     if (isColdStorageArticle) {
-      if (!article.item_description || !article.lot_number || !article.cs_inward_no || !article.cs_company) {
-        toast({ title: "Cannot Add Cold Storage Item", description: "Re-select the stock record from the search — inward/lot/company details are missing, so per-box IDs cannot be fetched.", variant: "destructive" })
+      // inward_no is intentionally NOT required: transfer-in / bulk-mirror cold
+      // stock has a NULL inward_no but is still identifiable by box_id +
+      // transaction_no. pick-boxes matches on COALESCE(inward_no,'').
+      if (!article.item_description || !article.lot_number || !article.cs_company) {
+        toast({ title: "Cannot Add Cold Storage Item", description: "Re-select the stock record from the search — item/lot/company details are missing, so per-box IDs cannot be fetched.", variant: "destructive" })
         return
       }
       try {
@@ -954,7 +957,7 @@ export default function MaterialOutPage({ params }: MaterialOutPageProps) {
           company: article.cs_company,
           item_description: article.item_description,
           lot_no: article.lot_number,
-          inward_no: article.cs_inward_no,
+          inward_no: article.cs_inward_no || '',
           qty,
         })
         pickedBoxes = pickResult.boxes

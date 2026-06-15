@@ -1767,10 +1767,14 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     // loop caused TRANS202605131331-style inventory loss (700 boxes collapsed to 1 on receive).
     let pickedBoxes: { id: number; box_id: string; transaction_no: string; weight_kg: number }[] = []
     if (isColdStorageArticle) {
-      if (!article.item_description || !article.lot_number || !article.cs_inward_no) {
+      // inward_no is intentionally NOT required: cold stock that arrived via
+      // transfer-in / bulk-mirror has a NULL inward_no but is still fully
+      // identifiable by box_id + transaction_no. pick-boxes matches on
+      // COALESCE(inward_no,'') so the empty-inward pile resolves correctly.
+      if (!article.item_description || !article.lot_number) {
         toast({
           title: "Cannot Add Cold Storage Item",
-          description: "Re-select the stock record from the search — inward/lot details are missing, so per-box IDs cannot be fetched.",
+          description: "Re-select the stock record from the search — item/lot details are missing, so per-box IDs cannot be fetched.",
           variant: "destructive",
         })
         return
@@ -1812,7 +1816,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
           company: article.cs_company,
           item_description: article.item_description,
           lot_no: article.lot_number,
-          inward_no: article.cs_inward_no,
+          inward_no: article.cs_inward_no || '',
           qty,
         })
         pickedBoxes = pickResult.boxes
