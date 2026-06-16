@@ -1643,54 +1643,15 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         setScannedBoxes(prev => {
           const updatedBoxes = [...prev, newBox]
 
-          // Check if all request qty boxes are scanned (using quantity as request qty boxes)
-          const requestQtyBoxes = articles[0]?.quantity_units || 0
-          const scannedCount = updatedBoxes.length
-          const pendingCount = requestQtyBoxes - scannedCount
-
-          if (requestQtyBoxes > 0) {
-            if (pendingCount === 0) {
-              toast({
-                title: "✅ All Boxes Scanned!",
-                description: `All ${requestQtyBoxes} boxes have been scanned successfully`,
-              })
-            } else if (pendingCount > 0) {
-              toast({
-                title: "Box Scanned!",
-                description: `${newBox.itemDescription} | ${pendingCount} boxes pending`,
-              })
-            } else {
-              // More boxes scanned than request qty
-              toast({
-                title: "⚠️ Extra Box Scanned!",
-                description: `Request Qty ${requestQtyBoxes} boxes, but ${scannedCount} scanned`,
-                variant: "destructive",
-              })
-            }
-          } else {
-            toast({
-              title: "Box Scanned!",
-              description: `Box #${newBox.boxNumber} - ${newBox.itemDescription}`,
-            })
-          }
-          
-          // Update loadedItems scanned_count and pending for the matching item
-          try {
-            setLoadedItems(prevItems => {
-              const itemsCopy = prevItems.map(it => ({ ...it }))
-              const matchIdx = itemsCopy.findIndex(it => String(it.sku_id) === String(newBox.skuId) || it.item_description === newBox.itemDescription)
-              if (matchIdx !== -1) {
-                const matched = itemsCopy[matchIdx]
-                const currentScanned = parseInt(matched.scanned_count || '0') || 0
-                matched.scanned_count = currentScanned + 1
-                const qty = parseInt(matched.quantity) || 0
-                matched.pending = Math.max(0, qty - matched.scanned_count)
-              }
-              return itemsCopy
-            })
-          } catch (e) {
-            console.error('Failed to update loadedItems counts:', e)
-          }
+          // Direct transfer has NO request to fulfil — there is no "request qty" to
+          // scan against (this form is only ever opened without a requestId; request-
+          // based transfers use /transfer/transferform). So just confirm each scan;
+          // never warn about "extra" boxes vs articles[0].quantity_units (which is the
+          // top Article-Entry's qty field, defaulting to 1, not a target count).
+          toast({
+            title: "Box Scanned!",
+            description: `Box #${newBox.boxNumber} - ${newBox.itemDescription}`,
+          })
 
           return updatedBoxes
         })
@@ -2936,21 +2897,6 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                     <Package className="h-4 w-4 mr-2" />
                     Scanned Boxes ({scannedBoxes.length}) or Articles list
                   </CardTitle>
-                  {(articles[0]?.quantity_units || 0) > 0 && (
-                    <div className="flex flex-wrap items-center gap-2 text-xs sm:text-sm">
-                      <div className="hidden sm:block h-5 w-px bg-gray-300"></div>
-                      <span className="text-gray-600">Qty:</span>
-                      <span className="font-semibold text-gray-800">{articles[0]?.quantity_units}</span>
-                      {articles[0]?.item_description && (
-                        <>
-                          <span className="hidden sm:inline text-gray-400">•</span>
-                          <span className="text-gray-700 font-medium truncate max-w-[150px] sm:max-w-[300px]" title={articles[0]?.item_description}>
-                            {articles[0]?.item_description}
-                          </span>
-                        </>
-                      )}
-                    </div>
-                  )}
                 </div>
                 <p className="text-xs text-gray-600 mt-1">
                   Boxes scanned via QR code scanner
@@ -3198,26 +3144,10 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                 
                 {/* Summary */}
                 <div className="mt-3 p-3 bg-gray-50 rounded border border-gray-200">
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 sm:gap-4 text-center">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 sm:gap-4 text-center">
                     <div>
                       <p className="text-xs text-gray-600 mb-1">Total Boxes</p>
                       <p className="text-base sm:text-lg font-bold text-gray-800">{scannedBoxes.length}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-600 mb-1">Request Qty</p>
-                      <p className="text-base sm:text-lg font-bold text-blue-600">
-                        {articles[0]?.quantity_units || 0}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-600 mb-1">Remaining</p>
-                      <p className={`text-base sm:text-lg font-bold ${
-                        (articles[0]?.quantity_units || 0) - scannedBoxes.length > 0 
-                          ? 'text-orange-600' 
-                          : 'text-green-600'
-                      }`}>
-                        {Math.max(0, (articles[0]?.quantity_units || 0) - scannedBoxes.length)}
-                      </p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-600 mb-1">Total Net Wt</p>
