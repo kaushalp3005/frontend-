@@ -24,12 +24,18 @@ import { PermissionGuard } from "@/components/auth/permission-gate"
 import QRCode from "qrcode"
 import { ArticleEditor, type ArticleFields } from "@/components/modules/inward/ArticleEditor"
 import { BoxScrollContainer } from "@/components/modules/inward/BoxScrollContainer"
+import { isColdWarehouse } from "@/lib/constants/warehouses"
 
 interface EditInwardPageProps {
   params: { company: Company; id: string }
 }
 
-type ArticleEdit = ArticleFields
+// Cold per-article fields are edit-page-only (kept off the shared ArticleEditor).
+type ArticleEdit = ArticleFields & {
+  item_mark?: string
+  spl_remarks?: string
+  vakkal?: string
+}
 
 export default function EditInwardPage({ params }: EditInwardPageProps) {
   const { company, id: transactionNo } = params
@@ -48,6 +54,7 @@ export default function EditInwardPage({ params }: EditInwardPageProps) {
   const [source, setSource] = useState("")
   const [destination, setDestination] = useState("")
   const [poNumber, setPoNumber] = useState("")
+  const [warehouse, setWarehouse] = useState("")
   const [purchasedBy, setPurchasedBy] = useState("")
   const [totalAmount, setTotalAmount] = useState("")
   const [taxAmount, setTaxAmount] = useState("")
@@ -94,6 +101,7 @@ export default function EditInwardPage({ params }: EditInwardPageProps) {
         setCustomer(txn.customer_party_name || "")
         setSource(txn.source_location || "")
         setDestination(txn.destination_location || "")
+        setWarehouse((txn as any).warehouse || "")
         setPoNumber(txn.po_number || "")
         setPurchasedBy(txn.purchased_by || "")
         setTotalAmount(txn.total_amount?.toString() || "")
@@ -126,6 +134,9 @@ export default function EditInwardPage({ params }: EditInwardPageProps) {
             sub_category: a.sub_category,
             unit_rate: a.unit_rate,
             total_amount: a.total_amount,
+            item_mark: (a as any).item_mark || "",
+            spl_remarks: (a as any).spl_remarks || "",
+            vakkal: (a as any).vakkal || "",
           }))
         )
 
@@ -200,7 +211,14 @@ export default function EditInwardPage({ params }: EditInwardPageProps) {
           sub_category: a.sub_category,
           unit_rate: a.unit_rate,
           total_amount: a.total_amount,
-        })),
+          // Cold per-article fields — only sent for cold warehouses (matches the
+          // approve page); backend filters to columns the target table has.
+          ...(isColdWarehouse(warehouse) ? {
+            item_mark: a.item_mark || undefined,
+            spl_remarks: a.spl_remarks || undefined,
+            vakkal: a.vakkal || undefined,
+          } : {}),
+        })) as any,
         boxes: (() => {
           // Keep existing boxes, add a default box for any new article without boxes
           const articleDescs = new Set(articles.map((a) => a.item_description))
@@ -238,7 +256,7 @@ export default function EditInwardPage({ params }: EditInwardPageProps) {
     ])
   }
 
-  const updateArticle = (index: number, field: keyof ArticleFields, value: any) => {
+  const updateArticle = (index: number, field: keyof ArticleEdit, value: any) => {
     setArticles((prev) =>
       prev.map((a, i) => (i === index ? { ...a, [field]: value } : a))
     )
@@ -539,15 +557,48 @@ export default function EditInwardPage({ params }: EditInwardPageProps) {
           </CardHeader>
           <CardContent className="space-y-3 px-3 sm:px-6">
             {articles.map((article, idx) => (
-              <ArticleEditor
-                key={idx}
-                article={article}
-                index={idx}
-                company={company}
-                onChange={updateArticle}
-                onRemove={removeArticle}
-                removable={articles.length > 1}
-              />
+              <div key={idx} className="space-y-2">
+                <ArticleEditor
+                  article={article}
+                  index={idx}
+                  company={company}
+                  onChange={updateArticle}
+                  onRemove={removeArticle}
+                  removable={articles.length > 1}
+                />
+                {/* Cold storage per-article fields — only for cold warehouses */}
+                {isColdWarehouse(warehouse) && (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 px-3 pb-1">
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-blue-700">Item Mark</Label>
+                      <Input
+                        value={article.item_mark || ""}
+                        onChange={(e) => updateArticle(idx, "item_mark", e.target.value)}
+                        className="h-8 text-xs"
+                        placeholder="Item mark"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-blue-700">Spl. Remarks</Label>
+                      <Input
+                        value={article.spl_remarks || ""}
+                        onChange={(e) => updateArticle(idx, "spl_remarks", e.target.value)}
+                        className="h-8 text-xs"
+                        placeholder="Special remarks"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-blue-700">Vakkal</Label>
+                      <Input
+                        value={article.vakkal || ""}
+                        onChange={(e) => updateArticle(idx, "vakkal", e.target.value)}
+                        className="h-8 text-xs"
+                        placeholder="Vakkal"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
             ))}
 
             {articles.length === 0 && (
