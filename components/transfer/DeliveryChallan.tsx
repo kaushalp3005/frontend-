@@ -237,7 +237,7 @@ export default function DeliveryChallan({
                   <col />
                   {/* Item Description grabs leftover space */}
                   <col style={{ width: 'auto' }} />
-                  <col />
+                  <col />{/* Vakkal */}
                   <col />
                   <col />
                   <col />
@@ -250,7 +250,7 @@ export default function DeliveryChallan({
                 <>
                   <col />
                   <col style={{ width: 'auto' }} />
-                  <col />
+                  <col />{/* Vakkal */}
                   <col />
                   <col />
                   <col />
