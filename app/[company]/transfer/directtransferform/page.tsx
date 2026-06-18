@@ -2066,6 +2066,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
 
   // Compute PM total count for footer display
   const hasPMMaterial = scannedBoxes.some((b) => b.materialType === "PM")
+  const isColdDest = isColdWarehouse(normalizeWarehouseName(formData.toWarehouse))
   const totalPMCount = scannedBoxes
     .filter((b) => b.materialType === "PM")
     .reduce((sum, b) => {
@@ -2784,8 +2785,8 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                     {/* Vakkal (required for cold destinations) */}
                     <div className="space-y-1">
                       <Label htmlFor={`vakkal_${article.id}`}>
-                        Vakkal{isColdWarehouse(normalizeWarehouseName(formData.toWarehouse)) ? ' *' : ' '}
-                        {!isColdWarehouse(normalizeWarehouseName(formData.toWarehouse)) && (
+                        Vakkal{isColdDest ? ' *' : ' '}
+                        {!isColdDest && (
                           <span className="text-gray-400 font-normal">(Optional)</span>
                         )}
                       </Label>
@@ -3065,6 +3066,18 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                           </div>
                         </div>
                         <div>
+                          <span className="text-gray-500 block mb-0.5">
+                            Vakkal{isColdDest ? ' *' : ''}
+                          </span>
+                          <Input
+                            type="text"
+                            value={box.vakkal || ""}
+                            onChange={(e) => updateScannedBox(box.id, "vakkal", e.target.value)}
+                            className={`h-7 text-xs px-1 ${isColdDest && !box.vakkal?.trim() ? "border-red-400" : ""}`}
+                            placeholder="Vakkal"
+                          />
+                        </div>
+                        <div>
                           <span className="text-gray-500">Lot:</span>
                           <span className="ml-1 text-gray-700 font-mono">{box.lotNumber !== 'N/A' ? box.lotNumber : '-'}</span>
                         </div>
@@ -3091,6 +3104,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                         <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Net Wt</th>
                         <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Total Wt</th>
                         <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Lot No</th>
+                        <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Vakkal</th>
                         <th className="text-left py-2 px-2 text-xs font-medium text-gray-700">Transaction No</th>
                         <th className="text-center py-2 px-2 text-xs font-medium text-gray-700">Action</th>
                       </tr>
@@ -3166,6 +3180,15 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                             <span className="font-mono text-gray-700">
                               {box.lotNumber !== 'N/A' ? box.lotNumber : '-'}
                             </span>
+                          </td>
+                          <td className="py-2 px-1">
+                            <Input
+                              type="text"
+                              value={box.vakkal || ""}
+                              onChange={(e) => updateScannedBox(box.id, "vakkal", e.target.value)}
+                              className={`h-7 w-24 text-xs px-1 ${isColdDest && !box.vakkal?.trim() ? "border-red-400" : ""}`}
+                              placeholder="Vakkal"
+                            />
                           </td>
                           <td className="py-2 px-2 text-xs">
                             <span className="font-mono text-gray-800 font-medium">
