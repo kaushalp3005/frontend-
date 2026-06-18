@@ -134,6 +134,10 @@ export interface RTVLine {
   conversion: string | null
   carton_weight: string | null
   net_weight: string | null
+  lot_number?: string | null
+  item_mark?: string | null
+  spl_remarks?: string | null
+  vakkal?: string | null
   created_at: string | null
   updated_at: string | null
 }
@@ -151,6 +155,10 @@ export interface RTVLineCreate {
   conversion?: string
   carton_weight?: string
   net_weight?: string
+  lot_number?: string
+  item_mark?: string
+  spl_remarks?: string
+  vakkal?: string
 }
 
 // ─── Boxes ─────────────────────────────────────────────────────────
@@ -163,6 +171,9 @@ export interface RTVBox {
   box_id: string | null       // NULL until printed
   article_description: string
   lot_number: string | null
+  item_mark?: string | null
+  spl_remarks?: string | null
+  vakkal?: string | null
   uom: string | null
   conversion: string | null
   net_weight: string
@@ -180,6 +191,9 @@ export interface RTVBoxUpsertRequest {
   net_weight?: string
   gross_weight?: string
   lot_number?: string
+  item_mark?: string
+  spl_remarks?: string
+  vakkal?: string
   count?: number
 }
 
@@ -203,6 +217,9 @@ export interface RTVBulkBoxItem {
   uom?: string
   conversion?: string
   lot_number?: string
+  item_mark?: string
+  spl_remarks?: string
+  vakkal?: string
   net_weight?: string
   gross_weight?: string
   count?: number
@@ -330,6 +347,10 @@ export interface RTVApprovalLineFields {
   item_category?: string
   sub_category?: string
   sale_group?: string
+  lot_number?: string
+  item_mark?: string
+  spl_remarks?: string
+  vakkal?: string
 }
 
 export interface RTVApprovalBoxFields {
@@ -340,6 +361,9 @@ export interface RTVApprovalBoxFields {
   net_weight?: string
   gross_weight?: string
   lot_number?: string
+  item_mark?: string
+  spl_remarks?: string
+  vakkal?: string
   count?: number
 }
 
