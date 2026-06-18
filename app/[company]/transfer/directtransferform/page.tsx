@@ -21,6 +21,7 @@ import { useToast } from "@/hooks/use-toast"
 import { useFormPersistence } from "@/hooks/useFormPersistence"
 import HighPerformanceQRScanner from "@/components/transfer/high-performance-qr-scanner"
 import { BoxScrollContainer } from "@/components/modules/inward/BoxScrollContainer"
+import { isColdWarehouse, normalizeWarehouseName } from "@/lib/constants/warehouses"
 
 interface NewTransferRequestPageProps {
   params: {
@@ -327,6 +328,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     total_weight: number
     batch_number: string
     lot_number: string
+    vakkal: string
     manufacturing_date: string
     expiry_date: string
     import_date: string
@@ -362,6 +364,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       total_weight: 0,
       batch_number: "",
       lot_number: "",
+      vakkal: "",
       manufacturing_date: "",
       expiry_date: "",
       import_date: "",
@@ -706,6 +709,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                 net_weight: parseFloat(firstLine.net_weight) || 0,
                 lot_number: firstLine.lot_number || "",
                 batch_number: firstLine.batch_number || "",
+                vakkal: firstLine.vakkal || "",
               }
             }
             return art
@@ -723,6 +727,12 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
               lineLookup[key] = line
             }
           }
+
+          const _vnorm = (s: any) => String(s ?? "").trim().toUpperCase()
+          const vakkalByKey = new Map<string, string>()
+          ;(transfer.lines || []).forEach((l: any) => {
+            vakkalByKey.set(`${_vnorm(l.item_description)}|${_vnorm(l.lot_number)}`, l.vakkal || "")
+          })
 
           const qrBoxes = transfer.boxes.map((box: any) => {
             const uniqueId = boxIdCounterRef.current
@@ -744,6 +754,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
               totalWeight: box.gross_weight || "0",
               batchNumber: box.batch_number || "",
               lotNumber: box.lot_number || "",
+              vakkal: vakkalByKey.get(`${_vnorm(box.article)}|${_vnorm(box.lot_number)}`) || "",
               manufacturingDate: "",
               expiryDate: "",
               packagingType: matchedLine?.pack_size || "0",
@@ -789,6 +800,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
               totalWeight: line.total_weight || "0",
               batchNumber: line.batch_number || "",
               lotNumber: line.lot_number || "",
+              vakkal: line.vakkal || "",
               manufacturingDate: "",
               expiryDate: "",
               packagingType: line.pack_size || "0",
@@ -820,6 +832,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
               totalWeight: line.total_weight || "0",
               batchNumber: line.batch_number || "",
               lotNumber: line.lot_number || "",
+              vakkal: line.vakkal || "",
               manufacturingDate: "",
               expiryDate: "",
               packagingType: line.pack_size || "0",
@@ -909,6 +922,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       total_weight: 0,
       batch_number: "",
       lot_number: "",
+      vakkal: "",
       manufacturing_date: "",
       expiry_date: "",
       import_date: "",
@@ -1150,6 +1164,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         totalWeight: String(parseFloat(boxGrossWeight.toFixed(3))),
         batchNumber: article.batch_number || 'N/A',
         lotNumber: article.lot_number || 'N/A',
+        vakkal: article.vakkal || '',
         manufacturingDate: article.manufacturing_date || 'N/A',
         expiryDate: article.expiry_date || 'N/A',
         packagingType: String(article.packaging_type) || 'N/A',
@@ -1188,6 +1203,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       total_weight: 0,
       batch_number: "",
       lot_number: "",
+      vakkal: "",
       manufacturing_date: "",
       expiry_date: "",
       import_date: "",
@@ -1832,6 +1848,19 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       errors.push('Approval authority is required')
     }
 
+    // Vakkal is mandatory per article when the destination is a cold warehouse
+    if (isColdWarehouse(normalizeWarehouseName(formData.toWarehouse))) {
+      const missingVakkal = new Set<string>()
+      scannedBoxes.forEach((box) => {
+        if (!box.vakkal || !String(box.vakkal).trim()) {
+          missingVakkal.add(box.itemDescription || 'Unknown item')
+        }
+      })
+      missingVakkal.forEach((desc) =>
+        errors.push(`${desc}: Vakkal is required for transfers to a cold warehouse`)
+      )
+    }
+
     // If there are validation errors, show toast and stop
     if (errors.length > 0) {
       console.error('❌ Validation Failed:', errors)
@@ -1871,7 +1900,8 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       net_weight: String(box.netWeight || 0),
       total_weight: String(box.totalWeight || 0),
       batch_number: cleanNull(box.batchNumber),
-      lot_number: cleanNull(box.lotNumber)
+      lot_number: cleanNull(box.lotNumber),
+      vakkal: cleanNull(box.vakkal)
     }))
 
     // Only include boxes that were actually QR-scanned (not manually added via "Add to Articles List")
@@ -2748,6 +2778,23 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                         value={article.lot_number}
                         onChange={(e) => updateArticle(article.id, "lot_number", e.target.value)}
                         placeholder="Enter lot number"
+                      />
+                    </div>
+
+                    {/* Vakkal (required for cold destinations) */}
+                    <div className="space-y-1">
+                      <Label htmlFor={`vakkal_${article.id}`}>
+                        Vakkal{isColdWarehouse(normalizeWarehouseName(formData.toWarehouse)) ? ' *' : ' '}
+                        {!isColdWarehouse(normalizeWarehouseName(formData.toWarehouse)) && (
+                          <span className="text-gray-400 font-normal">(Optional)</span>
+                        )}
+                      </Label>
+                      <Input
+                        id={`vakkal_${article.id}`}
+                        type="text"
+                        value={article.vakkal}
+                        onChange={(e) => updateArticle(article.id, "vakkal", e.target.value)}
+                        placeholder="Enter vakkal"
                       />
                     </div>
                   </div>
