@@ -62,7 +62,7 @@ export const SALES_POC_OPTIONS: SalesPOC[] = [
 
 export interface RTVHeader {
   id: number
-  rtv_id: string              // Format: RTV-YYYYMMDDHHmmSS
+  rtv_id: string              // Format: CR-YYYYMMDDHHmmSS (legacy records may be RTV-…)
   rtv_date: string | null
   factory_unit: string
   customer: string
@@ -474,7 +474,7 @@ export interface RTVBoxEditChange {
 export interface RTVBoxEditLogRequest {
   email_id: string
   box_id: string
-  rtv_id: string              // The RTV-YYYYMMDD... string
+  rtv_id: string              // The CR-YYYYMMDD… string (legacy: RTV-…)
   changes: RTVBoxEditChange[]
 }
 
