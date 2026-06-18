@@ -21,6 +21,7 @@ import { rtvApi } from "@/lib/api/rtvApiService"
 import type { RTVListItem, RTVStatus } from "@/types/rtv"
 import { PermissionGuard } from "@/components/auth/permission-gate"
 import { useAuthStore } from "@/lib/stores/auth"
+import { getDisplayWarehouseName } from "@/lib/constants/warehouses"
 import { cn } from "@/lib/utils"
 
 interface RTVListPageProps {
@@ -293,7 +294,7 @@ export default function RTVListPage({ params }: RTVListPageProps) {
                           <td className="px-4 py-3"><StatusBadge status={item.status} /></td>
                           <td className="px-4 py-3 text-muted-foreground truncate max-w-[200px]">{item.customer || "\u2014"}</td>
                           <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">{item.business_head || "\u2014"}</td>
-                          <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">{item.factory_unit || "\u2014"}</td>
+                          <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">{getDisplayWarehouseName(item.factory_unit) || "\u2014"}</td>
                           <td className="px-4 py-3 hidden lg:table-cell">
                             <Badge variant="secondary" className="text-xs">{item.items_count} items</Badge>
                           </td>
@@ -349,7 +350,7 @@ export default function RTVListPage({ params }: RTVListPageProps) {
                         <span>{item.items_count} items</span>
                         <span>\u00b7</span>
                         <span>Qty: {item.total_qty}</span>
-                        {item.factory_unit && (<><span>\u00b7</span><span>{item.factory_unit}</span></>)}
+                        {item.factory_unit && (<><span>\u00b7</span><span>{getDisplayWarehouseName(item.factory_unit)}</span></>)}
                       </div>
                       <div className="flex items-center gap-1 pt-1">
                         <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 flex-1" asChild>

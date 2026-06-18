@@ -5,11 +5,13 @@ import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import Link from "next/link"
 import {
-  ArrowLeft, Edit, CheckCircle2, Clock, Trash2,
+  ArrowLeft, Edit, CheckCircle2, Clock, Trash2, X,
   Package, Box, AlertCircle, Loader2, FileText, Printer, Lock,
 } from "lucide-react"
 import {
@@ -19,14 +21,56 @@ import {
 } from "@/components/ui/alert-dialog"
 import { format } from "date-fns"
 import { rtvApi } from "@/lib/api/rtvApiService"
-import type { RTVWithDetails, RTVStatus, RTVBox } from "@/types/rtv"
+import type { RTVWithDetails, RTVStatus, RTVBox, RTVLine } from "@/types/rtv"
 import { PermissionGuard } from "@/components/auth/permission-gate"
 import { useAuthStore } from "@/lib/stores/auth"
+import { useToast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
 import QRCode from "qrcode"
+import { isColdWarehouse } from "@/lib/constants/warehouses"
+import {
+  cascadeArticleField, applyLotRanges as applyLotRangesHelper, type ColdBox,
+} from "@/lib/utils/rtvCold"
+import { printLabels } from "@/lib/utils/rtvPrint"
+import { LotRangeDedicator, type LotRange } from "@/components/modules/inward/LotRangeDedicator"
 
 interface RTVDetailPageProps {
   params: { company: string; id: string }
+}
+
+// Editable line form (subset of RTVLine + cold fields)
+interface LineForm {
+  item_description: string
+  material_type: string
+  item_category: string
+  sub_category: string
+  sale_group: string
+  uom: string
+  qty: string
+  rate: string
+  value: string
+  carton_weight: string
+  net_weight: string
+  lot_number: string
+  item_mark: string
+  spl_remarks: string
+  vakkal: string
+}
+
+// Editable box form matching ColdBox
+interface BoxForm {
+  article_description: string
+  box_number: number
+  conversion: string
+  net_weight: string
+  gross_weight: string
+  count: string
+  lot_number: string
+  item_mark: string
+  spl_remarks: string
+  vakkal: string
+  box_id?: string
+  is_printed: boolean
 }
 
 function StatusBadge({ status }: { status: RTVStatus }) {
@@ -59,6 +103,7 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
   const rtvId = parseInt(rtvIdStr, 10)
   const router = useRouter()
   const { user } = useAuthStore()
+  const { toast } = useToast()
 
   const [data, setData] = useState<RTVWithDetails | null>(null)
   const [loading, setLoading] = useState(true)
@@ -66,6 +111,17 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
   const [showDelete, setShowDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [printingBoxId, setPrintingBoxId] = useState<string | null>(null)
+
+  // ─── Edit mode (Approved CRs only) ────────────────────────────
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [lineForms, setLineForms] = useState<LineForm[]>([])
+  const [boxForms, setBoxForms] = useState<BoxForm[]>([])
+  // Snapshot of original box lot numbers (by box_id) for edit logging.
+  const [lotSnapshots, setLotSnapshots] = useState<Map<string, string>>(new Map())
+  // Per-article print range (From/To).
+  const [printRange, setPrintRange] = useState<Record<string, { from: string; to: string }>>({})
+  const [printingAll, setPrintingAll] = useState(false)
 
   useEffect(() => {
     if (isNaN(rtvId)) {
@@ -97,6 +153,243 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
       console.error("Delete failed:", err)
     } finally {
       setDeleting(false)
+    }
+  }
+
+  // ─── Edit-mode helpers ─────────────────────────────────────────
+
+  const buildLineForms = (lines: RTVLine[]): LineForm[] =>
+    lines.map((l) => ({
+      item_description: l.item_description,
+      material_type: l.material_type || "",
+      item_category: l.item_category || "",
+      sub_category: l.sub_category || "",
+      sale_group: l.sale_group || "",
+      uom: l.uom?.toString() || "",
+      qty: l.qty?.toString() || "",
+      rate: l.rate?.toString() || "",
+      value: l.value?.toString() || "",
+      carton_weight: l.carton_weight?.toString() || "",
+      net_weight: l.net_weight?.toString() || "",
+      lot_number: l.lot_number || "",
+      item_mark: l.item_mark || "",
+      spl_remarks: l.spl_remarks || "",
+      vakkal: l.vakkal || "",
+    }))
+
+  const buildBoxForms = (boxes: RTVBox[]): BoxForm[] =>
+    boxes.map((b) => ({
+      article_description: b.article_description,
+      box_number: b.box_number,
+      conversion: b.conversion?.toString() || "",
+      net_weight: b.net_weight?.toString() || "",
+      gross_weight: b.gross_weight?.toString() || "",
+      count: b.count?.toString() || "",
+      lot_number: b.lot_number?.toString() || "",
+      item_mark: b.item_mark?.toString() || "",
+      spl_remarks: b.spl_remarks?.toString() || "",
+      vakkal: b.vakkal?.toString() || "",
+      box_id: b.box_id || undefined,
+      is_printed: !!b.box_id,
+    }))
+
+  const enterEditMode = () => {
+    if (!data) return
+    setLineForms(buildLineForms(data.lines))
+    const bf = buildBoxForms(data.boxes)
+    setBoxForms(bf)
+    // Snapshot original lots for change-logging.
+    const snap = new Map<string, string>()
+    bf.forEach((b) => { if (b.box_id) snap.set(b.box_id, b.lot_number) })
+    setLotSnapshots(snap)
+    setEditing(true)
+  }
+
+  const cancelEditMode = () => {
+    setEditing(false)
+    setLineForms([])
+    setBoxForms([])
+    setLotSnapshots(new Map())
+  }
+
+  const updateLine = (idx: number, field: keyof LineForm, value: string) => {
+    setLineForms((prev) => prev.map((l, i) => (i === idx ? { ...l, [field]: value } : l)))
+  }
+
+  // Cascade a cold article field to the line + all of that article's boxes.
+  const updateColdArticleField = (
+    idx: number,
+    field: "lot_number" | "item_mark" | "spl_remarks" | "vakkal",
+    value: string,
+  ) => {
+    updateLine(idx, field, value)
+    const art = lineForms[idx]?.item_description
+    if (art) setBoxForms((prev) => cascadeArticleField(prev as ColdBox[], art, field, value) as BoxForm[])
+  }
+
+  // Apply lot-number ranges (from the Lot Allocator) to a single article's boxes.
+  const applyLotRangesOnBoxes = (article: string, ranges: LotRange[]) => {
+    setBoxForms((prev) => applyLotRangesHelper(prev as ColdBox[], article, ranges) as BoxForm[])
+  }
+
+  const updateBox = (boxNumber: number, article: string, field: keyof BoxForm, value: string) => {
+    setBoxForms((prev) =>
+      prev.map((b) => (b.box_number === boxNumber && b.article_description === article ? { ...b, [field]: value } : b))
+    )
+  }
+
+  const handleSaveEdits = async () => {
+    if (!data) return
+    try {
+      setSaving(true)
+
+      // 1. Persist line edits (include the 4 cold fields).
+      await rtvApi.updateRTVLines(company, rtvId, {
+        lines: lineForms.map((l) => ({
+          material_type: l.material_type || "RM",
+          item_category: l.item_category,
+          sub_category: l.sub_category,
+          item_description: l.item_description,
+          sale_group: l.sale_group || undefined,
+          uom: l.uom || "0",
+          qty: l.qty || "0",
+          rate: l.rate || "0",
+          value: l.value || "0",
+          conversion: l.uom || undefined,
+          carton_weight: l.carton_weight || undefined,
+          net_weight: l.net_weight || "0",
+          lot_number: l.lot_number || undefined,
+          item_mark: l.item_mark || undefined,
+          spl_remarks: l.spl_remarks || undefined,
+          vakkal: l.vakkal || undefined,
+        })),
+      })
+
+      // 2. Persist the full box set (include cold fields + weights).
+      await rtvApi.bulkSaveBoxes(company, rtvId, {
+        boxes: boxForms.map((b) => {
+          const parentLine = lineForms.find((l) => l.item_description === b.article_description)
+          return {
+            article_description: b.article_description,
+            box_number: b.box_number,
+            uom: parentLine?.uom || undefined,
+            conversion: b.conversion || undefined,
+            lot_number: b.lot_number || undefined,
+            item_mark: b.item_mark || undefined,
+            spl_remarks: b.spl_remarks || undefined,
+            vakkal: b.vakkal || undefined,
+            net_weight: b.net_weight || undefined,
+            gross_weight: b.gross_weight || undefined,
+            count: b.count ? parseInt(b.count) : undefined,
+          }
+        }),
+      })
+
+      // 3. Best-effort: log box lot changes (one entry per changed printed box).
+      try {
+        const changed = boxForms.filter(
+          (b) => b.box_id && (lotSnapshots.get(b.box_id) ?? "") !== b.lot_number
+        )
+        await Promise.all(
+          changed.map((b) =>
+            rtvApi.logBoxEdit({
+              email_id: user?.email || "unknown",
+              box_id: b.box_id!,
+              rtv_id: data.rtv_id,
+              changes: [{
+                field_name: "lot_number",
+                old_value: lotSnapshots.get(b.box_id!) ?? "",
+                new_value: b.lot_number,
+              }],
+            })
+          )
+        )
+      } catch (logErr) {
+        console.error("Box edit log failed (non-fatal):", logErr)
+      }
+
+      // 4. Re-fetch detail, exit edit mode, toast success.
+      const detail = await rtvApi.getRTVDetail(company, rtvId)
+      setData(detail)
+      cancelEditMode()
+      toast({ title: "Saved", description: "CR details updated." })
+    } catch (err) {
+      console.error("Save failed:", err)
+      toast({
+        title: "Save failed",
+        description: err instanceof Error ? err.message : "Failed to save changes",
+        variant: "destructive",
+      })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // ─── Reprint (available whenever boxes exist) ──────────────────
+
+  const printAllLabels = async () => {
+    if (!data) return
+    const boxes = data.boxes.filter((b) => b.box_id)
+    if (!boxes.length) {
+      toast({ title: "Nothing to print", description: "No printed boxes available." })
+      return
+    }
+    try {
+      setPrintingAll(true)
+      await printLabels({
+        company,
+        rtvStringId: data.rtv_id,
+        customer: data.customer || undefined,
+        boxes: boxes.map((b) => ({
+          box_id: b.box_id || undefined,
+          box_number: b.box_number,
+          article_description: b.article_description,
+          net_weight: b.net_weight?.toString() || undefined,
+          gross_weight: b.gross_weight?.toString() || undefined,
+          count: b.count?.toString() || undefined,
+          lot_number: b.lot_number || undefined,
+          item_mark: b.item_mark || undefined,
+        })),
+      })
+    } catch (err) {
+      console.error("Print all failed:", err)
+      toast({ title: "Print failed", description: err instanceof Error ? err.message : "Failed to print", variant: "destructive" })
+    } finally {
+      setPrintingAll(false)
+    }
+  }
+
+  const printArticleRange = async (article: string) => {
+    if (!data) return
+    const r = printRange[article]
+    const from = parseInt(r?.from || "1")
+    const to = parseInt(r?.to || "999999")
+    const boxes = data.boxes.filter(
+      (b) => b.article_description === article && b.box_id && b.box_number >= from && b.box_number <= to
+    )
+    if (!boxes.length) {
+      toast({ title: "Nothing to print", description: "No printed boxes in that range." })
+      return
+    }
+    try {
+      await printLabels({
+        company,
+        rtvStringId: data.rtv_id,
+        customer: data.customer || undefined,
+        boxes: boxes.map((b) => ({
+          box_id: b.box_id || undefined,
+          box_number: b.box_number,
+          article_description: b.article_description,
+          net_weight: b.net_weight?.toString() || undefined,
+          gross_weight: b.gross_weight?.toString() || undefined,
+          count: b.count?.toString() || undefined,
+          lot_number: b.lot_number || undefined,
+          item_mark: b.item_mark || undefined,
+        })),
+      })
+    } catch (err) {
+      console.error("Print range failed:", err)
+      toast({ title: "Print failed", description: err instanceof Error ? err.message : "Failed to print", variant: "destructive" })
     }
   }
 
@@ -161,11 +454,11 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
             </div>
             <div class="item">${box.article_description}</div>
             <div>
-              <div class="detail"><b>Box #${box.box_number}</b> &nbsp; Net: ${box.net_weight ?? "\u2014"}kg &nbsp; Gross: ${box.gross_weight ?? "\u2014"}kg</div>
+              <div class="detail"><b>Box #${box.box_number}</b> &nbsp; Net: ${box.net_weight ?? "—"}kg &nbsp; Gross: ${box.gross_weight ?? "—"}kg</div>
               ${box.count ? `<div class="detail">Count: ${box.count}</div>` : ""}
               <div class="detail">Date: ${formatDate(data.rtv_date)}</div>
             </div>
-            <div class="lot">${data.customer || ""}</div>
+            <div class="lot">${[box.lot_number, box.item_mark].filter(Boolean).join(" · ") || data.customer || ""}</div>
           </div>
         </div>
         <script>
@@ -228,6 +521,8 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
 
   const isPending = data.status === "Pending"
   const isApproved = data.status === "Approved"
+  const isCold = isColdWarehouse(data.factory_unit)
+  const hasBoxes = data.boxes.length > 0
 
   return (
     <PermissionGuard module="reordering" action="view">
@@ -244,19 +539,41 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
                 <StatusBadge status={data.status} />
               </div>
               <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
-                Created {data.created_ts ? format(new Date(data.created_ts), "dd MMM yyyy HH:mm") : "\u2014"}
+                Created {data.created_ts ? format(new Date(data.created_ts), "dd MMM yyyy HH:mm") : "—"}
                 {data.created_by && ` by ${data.created_by}`}
               </p>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 pl-10 sm:pl-11">
-            {isApproved ? (
+            {isApproved && !editing && (
+              <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs sm:text-sm" onClick={enterEditMode}>
+                <Edit className="h-3.5 w-3.5" /> Edit details
+              </Button>
+            )}
+            {editing && (
+              <>
+                <Button
+                  size="sm"
+                  className="gap-1.5 h-8 text-xs sm:text-sm bg-emerald-600 hover:bg-emerald-700 text-white"
+                  onClick={handleSaveEdits}
+                  disabled={saving}
+                >
+                  {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                  Save
+                </Button>
+                <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs sm:text-sm" onClick={cancelEditMode} disabled={saving}>
+                  <X className="h-3.5 w-3.5" /> Cancel
+                </Button>
+              </>
+            )}
+            {isApproved && !editing && (
               <Button variant="default" size="sm" className="gap-1.5 h-8 text-xs sm:text-sm" asChild>
                 <Link href={`/${company}/reordering/${rtvId}/approve`}>
                   <Box className="h-3.5 w-3.5" /> Enter / Edit Box Weights
                 </Link>
               </Button>
-            ) : (
+            )}
+            {!isApproved && (
               <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs sm:text-sm" asChild>
                 <Link href={`/${company}/reordering/${rtvId}/approve`}>
                   <FileText className="h-3.5 w-3.5" /> Review
@@ -268,7 +585,14 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
                 <Lock className="h-3 w-3" /> Box entry unlocks after mail approval
               </span>
             )}
-            {isPending && (
+            {/* Reprint controls — available whenever printed boxes exist */}
+            {hasBoxes && !editing && (
+              <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs sm:text-sm" onClick={printAllLabels} disabled={printingAll}>
+                {printingAll ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Printer className="h-3.5 w-3.5" />}
+                Print all labels
+              </Button>
+            )}
+            {isPending && !editing && (
               <Button
                 variant="outline"
                 size="sm"
@@ -320,32 +644,122 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
               <CardHeader className="pb-2 px-3 sm:px-6">
                 <CardTitle className="text-sm flex items-center gap-1.5">
                   <Package className="h-4 w-4 text-muted-foreground" />
-                  Line Items ({data.lines.length})
+                  Line Items ({editing ? lineForms.length : data.lines.length})
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3 px-3 sm:px-6">
-                {data.lines.map((line, idx) => (
-                  <div key={line.id || idx} className="p-3 border rounded-lg bg-muted/20 space-y-2">
-                    <p className="text-sm font-medium break-words">{line.item_description}</p>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 sm:gap-3 text-xs">
-                      <Field label="Material Type" value={line.material_type} />
-                      <Field label="Item Category" value={line.item_category} />
-                      <Field label="Sub Category" value={line.sub_category} />
-                      <Field label="Sale Group" value={line.sale_group} />
-                      <Field label="UOM" value={line.uom} />
-                      <Field label="Total Qty (Units/Kgs)" value={line.qty} />
-                      <Field label="Rate" value={line.rate} />
-                      <Field label="Value" value={line.value} />
-                      <Field label="Carton Weight" value={line.carton_weight} />
-                      <Field label="Net Weight" value={line.net_weight} />
+                {editing ? (
+                  // ─── Edit mode: per-article cold fields + lot ranges + per-box lot ──
+                  lineForms.map((line, idx) => {
+                    const articleBoxes = boxForms.filter((b) => b.article_description === line.item_description)
+                    return (
+                      <div key={idx} className="p-3 border rounded-lg space-y-3">
+                        <p className="text-sm font-medium break-words">{line.item_description}</p>
+
+                        {isCold && (
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                            <div className="space-y-1">
+                              <Label className="text-[11px]">Lot No</Label>
+                              <Input value={line.lot_number} onChange={(e) => updateColdArticleField(idx, "lot_number", e.target.value)} className="h-8 text-xs" placeholder="Lot no" />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-[11px]">Item Mark</Label>
+                              <Input value={line.item_mark} onChange={(e) => updateColdArticleField(idx, "item_mark", e.target.value)} className="h-8 text-xs" placeholder="Item mark" />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-[11px]">Spl. Remarks</Label>
+                              <Input value={line.spl_remarks} onChange={(e) => updateColdArticleField(idx, "spl_remarks", e.target.value)} className="h-8 text-xs" placeholder="Special remarks" />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-[11px]">Vakkal</Label>
+                              <Input value={line.vakkal} onChange={(e) => updateColdArticleField(idx, "vakkal", e.target.value)} className="h-8 text-xs" placeholder="Vakkal" />
+                            </div>
+                          </div>
+                        )}
+
+                        {isCold && (
+                          <LotRangeDedicator
+                            warehouse={data.factory_unit}
+                            totalBoxes={articleBoxes.length}
+                            onApply={(ranges) => applyLotRangesOnBoxes(line.item_description, ranges)}
+                          />
+                        )}
+
+                        {/* Per-box lot editing (lot no can be corrected later) */}
+                        {articleBoxes.length > 0 && (
+                          <div className="mt-2 pt-2 border-t space-y-1.5">
+                            <p className="text-[11px] font-medium text-muted-foreground">Box lot numbers</p>
+                            {articleBoxes.map((box) => (
+                              <div key={`${box.article_description}-${box.box_number}`} className="flex items-center gap-2">
+                                <span className="text-xs font-medium w-12 flex-shrink-0">#{box.box_number}</span>
+                                <Input
+                                  type="text"
+                                  placeholder="Lot #"
+                                  value={box.lot_number}
+                                  onChange={(e) => updateBox(box.box_number, box.article_description, "lot_number", e.target.value)}
+                                  className="h-7 text-xs flex-1 min-w-0"
+                                />
+                                {box.is_printed && (
+                                  <Badge variant="outline" className="text-[10px] h-5 bg-emerald-50 text-emerald-700 border-emerald-200 flex-shrink-0">
+                                    Printed
+                                  </Badge>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })
+                ) : (
+                  // ─── Read mode ───────────────────────────────────────
+                  data.lines.map((line, idx) => (
+                    <div key={line.id || idx} className="p-3 border rounded-lg bg-muted/20 space-y-2">
+                      <p className="text-sm font-medium break-words">{line.item_description}</p>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 sm:gap-3 text-xs">
+                        <Field label="Material Type" value={line.material_type} />
+                        <Field label="Item Category" value={line.item_category} />
+                        <Field label="Sub Category" value={line.sub_category} />
+                        <Field label="Sale Group" value={line.sale_group} />
+                        <Field label="UOM" value={line.uom} />
+                        <Field label="Total Qty (Units/Kgs)" value={line.qty} />
+                        <Field label="Rate" value={line.rate} />
+                        <Field label="Value" value={line.value} />
+                        <Field label="Carton Weight" value={line.carton_weight} />
+                        <Field label="Net Weight" value={line.net_weight} />
+                        {/* Cold fields — display when present */}
+                        <Field label="Lot No" value={line.lot_number} />
+                        <Field label="Item Mark" value={line.item_mark} />
+                        <Field label="Spl. Remarks" value={line.spl_remarks} />
+                        <Field label="Vakkal" value={line.vakkal} />
+                      </div>
+                      {/* Per-article print range (From/To) */}
+                      {hasBoxes && data.boxes.some((b) => b.article_description === line.item_description && b.box_id) && (
+                        <div className="flex flex-wrap items-end gap-2 pt-2 border-t">
+                          <span className="text-[11px] font-medium text-muted-foreground">Print range:</span>
+                          <Input
+                            type="number" min="1" placeholder="From" className="h-7 w-20 text-xs"
+                            value={printRange[line.item_description]?.from || ""}
+                            onChange={(e) => setPrintRange((p) => ({ ...p, [line.item_description]: { ...(p[line.item_description] || { from: "", to: "" }), from: e.target.value } }))}
+                          />
+                          <Input
+                            type="number" min="1" placeholder="To" className="h-7 w-20 text-xs"
+                            value={printRange[line.item_description]?.to || ""}
+                            onChange={(e) => setPrintRange((p) => ({ ...p, [line.item_description]: { ...(p[line.item_description] || { from: "", to: "" }), to: e.target.value } }))}
+                          />
+                          <Button type="button" variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => printArticleRange(line.item_description)}>
+                            <Printer className="h-3 w-3" /> Print range
+                          </Button>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </CardContent>
             </Card>
 
-            {/* Boxes */}
-            {data.boxes.length > 0 && (
+            {/* Boxes (read-only display, includes lot) */}
+            {hasBoxes && (
               <Card>
                 <CardHeader className="pb-2 px-3 sm:px-6">
                   <CardTitle className="text-sm flex items-center gap-1.5">
@@ -365,6 +779,7 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
                           <th className="text-right font-medium px-3 py-2">Net Wt</th>
                           <th className="text-right font-medium px-3 py-2">Gross Wt</th>
                           <th className="text-right font-medium px-3 py-2">Count</th>
+                          <th className="text-left font-medium px-3 py-2">Lot</th>
                           <th className="text-center font-medium px-3 py-2 w-[60px]">Print</th>
                         </tr>
                       </thead>
@@ -373,10 +788,11 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
                           <tr key={box.id || `${box.article_description}-${box.box_number}`} className="border-b last:border-0">
                             <td className="px-3 py-2 text-muted-foreground truncate max-w-[150px]">{box.article_description}</td>
                             <td className="px-3 py-2">{box.box_number}</td>
-                            <td className="px-3 py-2 text-right">{box.conversion ?? "\u2014"}</td>
-                            <td className="px-3 py-2 text-right">{box.net_weight ?? "\u2014"}</td>
-                            <td className="px-3 py-2 text-right">{box.gross_weight ?? "\u2014"}</td>
-                            <td className="px-3 py-2 text-right">{box.count ?? "\u2014"}</td>
+                            <td className="px-3 py-2 text-right">{box.conversion ?? "—"}</td>
+                            <td className="px-3 py-2 text-right">{box.net_weight ?? "—"}</td>
+                            <td className="px-3 py-2 text-right">{box.gross_weight ?? "—"}</td>
+                            <td className="px-3 py-2 text-right">{box.count ?? "—"}</td>
+                            <td className="px-3 py-2 text-muted-foreground">{box.lot_number || "—"}</td>
                             <td className="px-3 py-2 text-center">
                               {box.box_id ? (
                                 <Button
@@ -394,7 +810,7 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
                                   )}
                                 </Button>
                               ) : (
-                                <span className="text-xs text-muted-foreground">\u2014</span>
+                                <span className="text-xs text-muted-foreground">{"—"}</span>
                               )}
                             </td>
                           </tr>
@@ -430,9 +846,10 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
                         </div>
                         <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
                           {box.conversion && <div><span className="text-muted-foreground">Conv:</span> {box.conversion}</div>}
-                          <div><span className="text-muted-foreground">Net:</span> {box.net_weight ?? "\u2014"} kg</div>
-                          <div><span className="text-muted-foreground">Gross:</span> {box.gross_weight ?? "\u2014"} kg</div>
+                          <div><span className="text-muted-foreground">Net:</span> {box.net_weight ?? "—"} kg</div>
+                          <div><span className="text-muted-foreground">Gross:</span> {box.gross_weight ?? "—"} kg</div>
                           {box.count != null && <div><span className="text-muted-foreground">Count:</span> {box.count}</div>}
+                          {box.lot_number && <div><span className="text-muted-foreground">Lot:</span> {box.lot_number}</div>}
                         </div>
                       </div>
                     ))}
