@@ -27,11 +27,11 @@ import { useAuthStore } from "@/lib/stores/auth"
 import { useToast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
 import QRCode from "qrcode"
-import { isColdWarehouse } from "@/lib/constants/warehouses"
+import { isColdWarehouse, normalizeWarehouseName } from "@/lib/constants/warehouses"
 import {
   cascadeArticleField, applyLotRanges as applyLotRangesHelper, type ColdBox,
 } from "@/lib/utils/rtvCold"
-import { printLabels } from "@/lib/utils/rtvPrint"
+import { printLabels, escapeHtml } from "@/lib/utils/rtvPrint"
 import { LotRangeDedicator, type LotRange } from "@/components/modules/inward/LotRangeDedicator"
 
 interface RTVDetailPageProps {
@@ -448,17 +448,17 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
           <div class="qr"><img src="${qrCodeDataURL}" /></div>
           <div class="info">
             <div>
-              <div class="company">${company}</div>
-              <div class="txn">${data.rtv_id}</div>
-              <div class="boxid">ID: ${box.box_id}</div>
+              <div class="company">${escapeHtml(company)}</div>
+              <div class="txn">${escapeHtml(data.rtv_id)}</div>
+              <div class="boxid">ID: ${escapeHtml(box.box_id)}</div>
             </div>
-            <div class="item">${box.article_description}</div>
+            <div class="item">${escapeHtml(box.article_description)}</div>
             <div>
-              <div class="detail"><b>Box #${box.box_number}</b> &nbsp; Net: ${box.net_weight ?? "—"}kg &nbsp; Gross: ${box.gross_weight ?? "—"}kg</div>
-              ${box.count ? `<div class="detail">Count: ${box.count}</div>` : ""}
-              <div class="detail">Date: ${formatDate(data.rtv_date)}</div>
+              <div class="detail"><b>Box #${escapeHtml(box.box_number)}</b> &nbsp; Net: ${escapeHtml(box.net_weight ?? "—")}kg &nbsp; Gross: ${escapeHtml(box.gross_weight ?? "—")}kg</div>
+              ${box.count ? `<div class="detail">Count: ${escapeHtml(box.count)}</div>` : ""}
+              <div class="detail">Date: ${escapeHtml(formatDate(data.rtv_date))}</div>
             </div>
-            <div class="lot">${[box.lot_number, box.item_mark].filter(Boolean).join(" · ") || data.customer || ""}</div>
+            <div class="lot">${escapeHtml([box.lot_number, box.item_mark].filter(Boolean).join(" · ")) || escapeHtml(data.customer || "")}</div>
           </div>
         </div>
         <script>
@@ -521,7 +521,7 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
 
   const isPending = data.status === "Pending"
   const isApproved = data.status === "Approved"
-  const isCold = isColdWarehouse(data.factory_unit)
+  const isCold = isColdWarehouse(normalizeWarehouseName(data.factory_unit))
   const hasBoxes = data.boxes.length > 0
 
   return (
@@ -679,7 +679,7 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
 
                         {isCold && (
                           <LotRangeDedicator
-                            warehouse={data.factory_unit}
+                            warehouse={normalizeWarehouseName(data.factory_unit)}
                             totalBoxes={articleBoxes.length}
                             onApply={(ranges) => applyLotRangesOnBoxes(line.item_description, ranges)}
                           />

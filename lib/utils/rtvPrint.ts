@@ -1,5 +1,11 @@
 import QRCode from "qrcode"
 
+export function escapeHtml(s: unknown): string {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string
+  ))
+}
+
 export interface PrintLabelBox {
   box_id?: string
   box_number: number
@@ -33,13 +39,13 @@ export async function printLabels(opts: {
     <div class="label">
       <div class="qr"><img src="${qrCodes[i]}" /></div>
       <div class="info">
-        <div><div class="company">${company}</div><div class="txn">${rtvStringId}</div><div class="boxid">ID: ${b.box_id || "—"}</div></div>
-        <div class="item">${b.article_description}</div>
+        <div><div class="company">${escapeHtml(company)}</div><div class="txn">${escapeHtml(rtvStringId)}</div><div class="boxid">ID: ${escapeHtml(b.box_id || "—")}</div></div>
+        <div class="item">${escapeHtml(b.article_description)}</div>
         <div>
-          <div class="detail"><b>Box #${b.box_number}</b> &nbsp; Net: ${b.net_weight || "—"}kg &nbsp; Gross: ${b.gross_weight || "—"}kg</div>
-          ${b.count ? `<div class="detail">Count: ${b.count}</div>` : ""}
+          <div class="detail"><b>Box #${escapeHtml(b.box_number)}</b> &nbsp; Net: ${escapeHtml(b.net_weight || "—")}kg &nbsp; Gross: ${escapeHtml(b.gross_weight || "—")}kg</div>
+          ${b.count ? `<div class="detail">Count: ${escapeHtml(b.count)}</div>` : ""}
         </div>
-        <div class="lot">${[b.lot_number, b.item_mark].filter(Boolean).join(" · ") || customer || ""}</div>
+        <div class="lot">${escapeHtml([b.lot_number, b.item_mark].filter(Boolean).join(" · ")) || escapeHtml(customer || "")}</div>
       </div>
     </div>`,
     )

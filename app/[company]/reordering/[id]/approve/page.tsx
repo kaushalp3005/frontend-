@@ -35,9 +35,9 @@ import {
 } from "@/components/ui/select"
 import QRCode from "qrcode"
 import { WarehouseSelect } from "@/components/modules/warehouse/WarehouseSelect"
-import { isColdWarehouse } from "@/lib/constants/warehouses"
+import { isColdWarehouse, normalizeWarehouseName } from "@/lib/constants/warehouses"
 import { cascadeArticleField, applyLotRanges as applyLotRangesHelper, bulkFillBoxes, type ColdBox } from "@/lib/utils/rtvCold"
-import { printLabels } from "@/lib/utils/rtvPrint"
+import { printLabels, escapeHtml } from "@/lib/utils/rtvPrint"
 
 interface ApprovePageProps {
   params: { company: string; id: string }
@@ -465,6 +465,9 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
         net_weight: box.net_weight || undefined,
         gross_weight: box.gross_weight || undefined,
         lot_number: box.lot_number || undefined,
+        item_mark: box.item_mark || undefined,
+        spl_remarks: box.spl_remarks || undefined,
+        vakkal: box.vakkal || undefined,
         count: box.count ? parseInt(box.count) : undefined,
       })
 
@@ -548,17 +551,17 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
           <div class="qr"><img src="${qrCodeDataURL}" /></div>
           <div class="info">
             <div>
-              <div class="company">${company}</div>
-              <div class="txn">${data.rtv_id}</div>
-              <div class="boxid">ID: ${boxId}</div>
+              <div class="company">${escapeHtml(company)}</div>
+              <div class="txn">${escapeHtml(data.rtv_id)}</div>
+              <div class="boxid">ID: ${escapeHtml(boxId)}</div>
             </div>
-            <div class="item">${box.article_description}</div>
+            <div class="item">${escapeHtml(box.article_description)}</div>
             <div>
-              <div class="detail"><b>Box #${box.box_number}</b> &nbsp; Net: ${box.net_weight || "\u2014"}kg &nbsp; Gross: ${box.gross_weight || "\u2014"}kg</div>
-              ${box.count ? `<div class="detail">Count: ${box.count}</div>` : ""}
-              <div class="detail">Date: ${formatDate(data.rtv_date)}</div>
+              <div class="detail"><b>Box #${escapeHtml(box.box_number)}</b> &nbsp; Net: ${escapeHtml(box.net_weight || "\u2014")}kg &nbsp; Gross: ${escapeHtml(box.gross_weight || "\u2014")}kg</div>
+              ${box.count ? `<div class="detail">Count: ${escapeHtml(box.count)}</div>` : ""}
+              <div class="detail">Date: ${escapeHtml(formatDate(data.rtv_date))}</div>
             </div>
-            <div class="lot">${[box.lot_number, box.item_mark].filter(Boolean).join(" · ") || data.customer || ""}</div>
+            <div class="lot">${escapeHtml([box.lot_number, box.item_mark].filter(Boolean).join(" · ")) || escapeHtml(data.customer || "")}</div>
           </div>
         </div>
         <script>
@@ -667,6 +670,10 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
           conversion: l.uom || undefined,
           carton_weight: l.carton_weight || undefined,
           net_weight: l.net_weight || "0",
+          lot_number: l.lot_number || undefined,
+          item_mark: l.item_mark || undefined,
+          spl_remarks: l.spl_remarks || undefined,
+          vakkal: l.vakkal || undefined,
         })),
       })
 
@@ -889,7 +896,7 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
                     <Label className="text-[11px]">Net Wt <span className="text-muted-foreground text-[9px]">(box sum)</span></Label>
                     <Input type="number" value={articleNetSum(line.item_description) || ""} readOnly className="h-8 text-xs bg-muted" />
                   </div>
-                  {isColdWarehouse(factoryUnit) && (
+                  {isColdWarehouse(normalizeWarehouseName(factoryUnit)) && (
                     <>
                       <div className="space-y-1">
                         <Label className="text-[11px]">Lot No</Label>
@@ -926,7 +933,7 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
                   {/* Lot Allocator — bulk-assign lot numbers to box ranges */}
                   {boxesUnlocked && (
                     <LotRangeDedicator
-                      warehouse={factoryUnit}
+                      warehouse={normalizeWarehouseName(factoryUnit)}
                       totalBoxes={boxForms.filter((b) => b.article_description === line.item_description).length}
                       onApply={(ranges) => applyLotRanges(line.item_description, ranges)}
                     />
