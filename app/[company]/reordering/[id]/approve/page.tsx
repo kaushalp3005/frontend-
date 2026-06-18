@@ -34,6 +34,10 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import QRCode from "qrcode"
+import { WarehouseSelect } from "@/components/modules/warehouse/WarehouseSelect"
+import { isColdWarehouse } from "@/lib/constants/warehouses"
+import { cascadeArticleField, applyLotRanges as applyLotRangesHelper, bulkFillBoxes, type ColdBox } from "@/lib/utils/rtvCold"
+import { printLabels } from "@/lib/utils/rtvPrint"
 
 interface ApprovePageProps {
   params: { company: string; id: string }
@@ -49,6 +53,9 @@ interface BoxForm {
   gross_weight: string
   count: string
   lot_number: string
+  item_mark: string
+  spl_remarks: string
+  vakkal: string
   box_id?: string
   is_printed: boolean
 }
@@ -89,6 +96,10 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
 
   // Boxes
   const [boxForms, setBoxForms] = useState<BoxForm[]>([])
+
+  // Per-article bulk fill + print range (cold box entry helpers)
+  const [bulkFill, setBulkFill] = useState<Record<string, { net: string; gross: string; count: string }>>({})
+  const [printRange, setPrintRange] = useState<Record<string, { from: string; to: string }>>({})
 
   // Box edit tracking (for printed boxes)
   const [editingBoxIndices, setEditingBoxIndices] = useState<Set<number>>(new Set())
@@ -150,6 +161,10 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
             value: l.value?.toString() || "",
             carton_weight: l.carton_weight?.toString() || "",
             net_weight: l.net_weight?.toString() || "",
+            lot_number: l.lot_number || "",
+            item_mark: l.item_mark || "",
+            spl_remarks: l.spl_remarks || "",
+            vakkal: l.vakkal || "",
           }))
         )
 
@@ -166,6 +181,9 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
             gross_weight: b.gross_weight?.toString() || "",
             count: b.count?.toString() || "1",
             lot_number: b.lot_number?.toString() || "",
+            item_mark: b.item_mark?.toString() || "",
+            spl_remarks: b.spl_remarks?.toString() || "",
+            vakkal: b.vakkal?.toString() || "",
             box_id: b.box_id || undefined,
             is_printed: !!b.box_id,
           }
@@ -184,6 +202,9 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
             gross_weight: "",
             count: "1",
             lot_number: "",
+            item_mark: "",
+            spl_remarks: "",
+            vakkal: "",
             box_id: undefined,
             is_printed: false,
           }
@@ -271,14 +292,19 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
   const recomputeLineFromBoxes = (_boxes: BoxForm[], _articleDesc: string) => {}
 
   // Apply lot-number ranges (from the Lot Allocator) to a single article's boxes.
-  const applyLotRanges = (articleDesc: string, ranges: LotRange[]) => {
-    setBoxForms((prev) =>
-      prev.map((box) => {
-        if (box.article_description !== articleDesc) return box
-        const match = ranges.find((r) => box.box_number >= r.from && box.box_number <= r.to)
-        return match ? { ...box, lot_number: match.lot } : box
-      })
-    )
+  const applyLotRanges = (article: string, ranges: LotRange[]) => {
+    setBoxForms((prev) => applyLotRangesHelper(prev as ColdBox[], article, ranges) as BoxForm[])
+  }
+
+  // Cascade a cold article field to the line + all of that article's boxes.
+  const updateColdArticleField = (
+    idx: number,
+    field: "lot_number" | "item_mark" | "spl_remarks" | "vakkal",
+    value: string,
+  ) => {
+    updateLine(idx, field, value)
+    const art = lineForms[idx]?.item_description
+    if (art) setBoxForms((prev) => cascadeArticleField(prev as ColdBox[], art, field, value) as BoxForm[])
   }
 
   // ─── Quantity Units change — controls box count (identical to inward) ──
@@ -308,6 +334,9 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
           gross_weight: "",
           count: "1",
           lot_number: "",
+          item_mark: "",
+          spl_remarks: "",
+          vakkal: "",
           box_id: undefined,
           is_printed: false,
         })
@@ -351,6 +380,9 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
         gross_weight: "",
         count: "1",
         lot_number: "",
+        item_mark: "",
+        spl_remarks: "",
+        vakkal: "",
         box_id: undefined,
         is_printed: false,
       },
@@ -526,7 +558,7 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
               ${box.count ? `<div class="detail">Count: ${box.count}</div>` : ""}
               <div class="detail">Date: ${formatDate(data.rtv_date)}</div>
             </div>
-            <div class="lot">${data.customer || ""}</div>
+            <div class="lot">${[box.lot_number, box.item_mark].filter(Boolean).join(" · ") || data.customer || ""}</div>
           </div>
         </div>
         <script>
@@ -649,6 +681,9 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
             uom: parentLine?.uom || undefined,
             conversion: b.conversion || undefined,
             lot_number: b.lot_number || undefined,
+            item_mark: b.item_mark || undefined,
+            spl_remarks: b.spl_remarks || undefined,
+            vakkal: b.vakkal || undefined,
             net_weight: b.net_weight || undefined,
             gross_weight: b.gross_weight || undefined,
             count: b.count ? parseInt(b.count) : undefined,
@@ -736,16 +771,7 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
               <div className="space-y-1">
                 <Label className="text-xs">Factory Unit</Label>
-                <Select value={factoryUnit} onValueChange={setFactoryUnit}>
-                  <SelectTrigger className="h-9">
-                    <SelectValue placeholder="Select factory" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {["W202", "A185", "A68", "A101", "F53", "Savla", "New Savla", "Rishi"].map((f) => (
-                      <SelectItem key={f} value={f}>{f}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <WarehouseSelect value={factoryUnit} onChange={setFactoryUnit} />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Customer</Label>
@@ -863,6 +889,26 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
                     <Label className="text-[11px]">Net Wt <span className="text-muted-foreground text-[9px]">(box sum)</span></Label>
                     <Input type="number" value={articleNetSum(line.item_description) || ""} readOnly className="h-8 text-xs bg-muted" />
                   </div>
+                  {isColdWarehouse(factoryUnit) && (
+                    <>
+                      <div className="space-y-1">
+                        <Label className="text-[11px]">Lot No</Label>
+                        <Input value={line.lot_number || ""} onChange={(e) => updateColdArticleField(idx, "lot_number", e.target.value)} className="h-8 text-xs" placeholder="Lot no" />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[11px]">Item Mark</Label>
+                        <Input value={line.item_mark || ""} onChange={(e) => updateColdArticleField(idx, "item_mark", e.target.value)} className="h-8 text-xs" placeholder="Item mark" />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[11px]">Spl. Remarks</Label>
+                        <Input value={line.spl_remarks || ""} onChange={(e) => updateColdArticleField(idx, "spl_remarks", e.target.value)} className="h-8 text-xs" placeholder="Special remarks" />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[11px]">Vakkal</Label>
+                        <Input value={line.vakkal || ""} onChange={(e) => updateColdArticleField(idx, "vakkal", e.target.value)} className="h-8 text-xs" placeholder="Vakkal" />
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 {/* Boxes for this article */}
@@ -884,6 +930,56 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
                       totalBoxes={boxForms.filter((b) => b.article_description === line.item_description).length}
                       onApply={(ranges) => applyLotRanges(line.item_description, ranges)}
                     />
+                  )}
+
+                  {/* Bulk fill all boxes of this article */}
+                  {boxesUnlocked && (
+                    <div className="flex flex-wrap items-end gap-2 rounded-md border border-dashed p-2">
+                      <span className="text-[11px] font-medium text-muted-foreground">Bulk fill boxes:</span>
+                      <Input type="number" step="0.001" placeholder="Net wt" className="h-7 w-24 text-xs"
+                        value={bulkFill[line.item_description]?.net || ""}
+                        onChange={(e) => setBulkFill((p) => ({ ...p, [line.item_description]: { ...(p[line.item_description] || { net: "", gross: "", count: "" }), net: e.target.value } }))} />
+                      <Input type="number" step="0.001" placeholder="Gross wt" className="h-7 w-24 text-xs"
+                        value={bulkFill[line.item_description]?.gross || ""}
+                        onChange={(e) => setBulkFill((p) => ({ ...p, [line.item_description]: { ...(p[line.item_description] || { net: "", gross: "", count: "" }), gross: e.target.value } }))} />
+                      <Input type="number" placeholder="Count" className="h-7 w-20 text-xs"
+                        value={bulkFill[line.item_description]?.count || ""}
+                        onChange={(e) => setBulkFill((p) => ({ ...p, [line.item_description]: { ...(p[line.item_description] || { net: "", gross: "", count: "" }), count: e.target.value } }))} />
+                      <Button type="button" variant="outline" size="sm" className="h-7 text-xs"
+                        onClick={() => {
+                          const v = bulkFill[line.item_description]
+                          if (!v) return
+                          setBoxForms((prev) => bulkFillBoxes(prev as ColdBox[], line.item_description, {
+                            ...(v.net ? { net_weight: v.net } : {}),
+                            ...(v.gross ? { gross_weight: v.gross } : {}),
+                            ...(v.count ? { count: v.count } : {}),
+                          }) as BoxForm[])
+                        }}>
+                        Apply to all
+                      </Button>
+                    </div>
+                  )}
+
+                  {/* Print a range of box labels for this article */}
+                  {boxesUnlocked && (
+                    <div className="flex flex-wrap items-end gap-2">
+                      <span className="text-[11px] font-medium text-muted-foreground">Print range:</span>
+                      <Input type="number" min="1" placeholder="From" className="h-7 w-20 text-xs"
+                        value={printRange[line.item_description]?.from || ""}
+                        onChange={(e) => setPrintRange((p) => ({ ...p, [line.item_description]: { ...(p[line.item_description] || { from: "", to: "" }), from: e.target.value } }))} />
+                      <Input type="number" min="1" placeholder="To" className="h-7 w-20 text-xs"
+                        value={printRange[line.item_description]?.to || ""}
+                        onChange={(e) => setPrintRange((p) => ({ ...p, [line.item_description]: { ...(p[line.item_description] || { from: "", to: "" }), to: e.target.value } }))} />
+                      <Button type="button" variant="outline" size="sm" className="h-7 text-xs"
+                        onClick={() => {
+                          const r = printRange[line.item_description]
+                          const from = parseInt(r?.from || "1"), to = parseInt(r?.to || "999999")
+                          printLabels({ company, rtvStringId: data?.rtv_id || "", customer,
+                            boxes: boxForms.filter((b) => b.article_description === line.item_description && b.box_id && b.box_number >= from && b.box_number <= to) })
+                        }}>
+                        Print range
+                      </Button>
+                    </div>
                   )}
 
                   {/* Go-to-box navigation + scrollable box list */}
@@ -1071,6 +1167,11 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
           <Button variant="outline" size="sm" onClick={() => setShowDiscard(true)} className="gap-1.5">
             <ArrowLeft className="h-4 w-4" /> Cancel
           </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" className="gap-1.5" disabled={!boxesUnlocked}
+              onClick={() => printLabels({ company, rtvStringId: data?.rtv_id || "", customer, boxes: boxForms.filter((b) => b.box_id) })}>
+              <Printer className="h-4 w-4" /> Print all labels
+            </Button>
           <Button
             size="sm"
             onClick={handleSave}
@@ -1081,6 +1182,7 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
             {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
             Save
           </Button>
+          </div>
         </div>
 
         {/* Net-weight discrepancy confirm (warn but allow) */}
