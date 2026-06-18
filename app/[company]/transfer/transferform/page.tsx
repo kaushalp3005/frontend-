@@ -21,6 +21,7 @@ import { useToast } from "@/hooks/use-toast"
 import { useFormPersistence } from "@/hooks/useFormPersistence"
 import HighPerformanceQRScanner from "@/components/transfer/high-performance-qr-scanner"
 import { BoxScrollContainer } from "@/components/modules/inward/BoxScrollContainer"
+import { isColdWarehouse, normalizeWarehouseName } from "@/lib/constants/warehouses"
 
 interface NewTransferRequestPageProps {
   params: {
@@ -318,6 +319,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     total_weight: number
     batch_number: string
     lot_number: string
+    vakkal: string
     manufacturing_date: string
     expiry_date: string
     import_date: string
@@ -344,6 +346,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       total_weight: 0,
       batch_number: "",
       lot_number: "",
+      vakkal: "",
       manufacturing_date: "",
       expiry_date: "",
       import_date: "",
@@ -693,6 +696,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       total_weight: 0,
       batch_number: "",
       lot_number: "",
+      vakkal: "",
       manufacturing_date: "",
       expiry_date: "",
       import_date: "",
@@ -1582,8 +1586,13 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       if (!article.item_description) {
         errors.push(`Article ${index + 1}: Item description is required`)
       }
-      
-      
+
+      if (
+        isColdWarehouse(normalizeWarehouseName(formData.toWarehouse)) &&
+        (!article.vakkal || !article.vakkal.trim())
+      ) {
+        errors.push(`Article ${index + 1}: Vakkal is required for transfers to a cold warehouse`)
+      }
     })
 
     // Transfer Info Validation
@@ -1666,7 +1675,8 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         pack_size: Number(article.pack_size) || 0,
         unit_pack_size: article.unit_pack_size ? String(article.unit_pack_size) : null,
         batch_number: null,
-        lot_number: null
+        lot_number: null,
+        vakkal: article.vakkal || null
       })),
       boxes: scannedBoxes.map((box) => {
         const netVal = parseFloat(box.netWeight) || 0
@@ -2446,6 +2456,22 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                     value={article.lot_number}
                     onChange={(e) => updateArticle(article.id, "lot_number", e.target.value)}
                     placeholder="Enter lot number"
+                  />
+                </div>
+                {/* Vakkal (required for cold destinations) */}
+                <div>
+                  <Label htmlFor={`vakkal_${article.id}`}>
+                    Vakkal{isColdWarehouse(normalizeWarehouseName(formData.toWarehouse)) ? ' *' : ' '}
+                    {!isColdWarehouse(normalizeWarehouseName(formData.toWarehouse)) && (
+                      <span className="text-gray-400 font-normal">(Optional)</span>
+                    )}
+                  </Label>
+                  <Input
+                    id={`vakkal_${article.id}`}
+                    type="text"
+                    value={article.vakkal}
+                    onChange={(e) => updateArticle(article.id, "vakkal", e.target.value)}
+                    placeholder="Enter vakkal"
                   />
                 </div>
               </div>
