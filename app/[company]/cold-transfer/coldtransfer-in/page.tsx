@@ -471,7 +471,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
         if (!seenItems.has(name)) {
           seenItems.add(name)
           coldMap[name] = {
-            inward_dt: today, vakkal: "", lot_no: "", rate: "",
+            inward_dt: today, vakkal: line.vakkal || "", lot_no: "", rate: "",
             exporter: "", storage_location: toWarehouse, item_mark: "",
             group_name: line.item_category || "",
             item_subgroup: line.sub_category || "",
