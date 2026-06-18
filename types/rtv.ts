@@ -4,13 +4,58 @@
 export type RTVStatus = "Pending" | "Approved"
 
 // Backend matches by name, case-insensitive. Empty/null = no business head.
-export type BusinessHead = "Prashant Pal" | "Ajay Bajaj" | "Rakesh Ratra" | "Yash Gawdi"
+// Keep in sync with BUSINESS_HEAD_EMAILS in backend/shared/email_notifier.py.
+export type BusinessHead =
+  | "Prashant Pal"
+  | "Ajay Bajaj"
+  | "Rakesh Ratra"
+  | "Yash Gawdi"
+  | "Satyendra Garg"
+  | "R M Patil"
 
 export const BUSINESS_HEAD_OPTIONS: BusinessHead[] = [
   "Prashant Pal",
   "Ajay Bajaj",
   "Rakesh Ratra",
   "Yash Gawdi",
+  "Satyendra Garg",
+  "R M Patil",
+]
+
+// Sales POC dropdown. When one is selected, the backend adds their email to the
+// RTV mail CC. Keep in sync with SALES_POC_EMAILS in
+// backend/shared/email_notifier.py.
+export type SalesPOC =
+  | "Shubham Shivekar"
+  | "Shubham Seth"
+  | "Mayuresh Mahadik"
+  | "Suraj Salunkhe"
+  | "B Hrithik"
+  | "Sachin More"
+  | "Dashrath Birajdar"
+  | "Ashwin Baghul"
+  | "Rakesh Ratra"
+  | "Ajay Bajaj"
+  | "Yash Gawdi"
+  | "R M Patil"
+  | "Satyendra Garg"
+  | "Prashant Pal"
+
+export const SALES_POC_OPTIONS: SalesPOC[] = [
+  "Shubham Shivekar",
+  "Shubham Seth",
+  "Mayuresh Mahadik",
+  "Suraj Salunkhe",
+  "B Hrithik",
+  "Sachin More",
+  "Dashrath Birajdar",
+  "Ashwin Baghul",
+  "Rakesh Ratra",
+  "Ajay Bajaj",
+  "Yash Gawdi",
+  "R M Patil",
+  "Satyendra Garg",
+  "Prashant Pal",
 ]
 
 // ─── Header ────────────────────────────────────────────────────────
