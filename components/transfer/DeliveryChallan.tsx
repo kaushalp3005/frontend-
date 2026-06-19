@@ -92,6 +92,16 @@ export default function DeliveryChallan({
   // Total column count for colSpan computations (default 8, +1 when Count column is visible)
   const DC_COLS = showCountColumn ? 10 : 9
 
+  // Drop phantom/empty lines (no item description) so they never render as N/A rows
+  // and don't inflate the box/item totals.
+  const validItems = React.useMemo(
+    () => (items || []).filter((it: any) => {
+      const d = (it.item_description || it.item_desc_raw || '').trim()
+      return d !== '' && d.toUpperCase() !== 'N/A'
+    }),
+    [items]
+  )
+
   // Consolidate items: group by item description and sum quantities/weights
   const consolidatedItems = React.useMemo(() => {
     const itemMap = new Map<string, any>()
@@ -100,7 +110,7 @@ export default function DeliveryChallan({
     console.log('🔄 Sample item keys:', items.length > 0 ? Object.keys(items[0]) : 'none')
     console.log('🔄 Sample item:', items.length > 0 ? JSON.stringify(items[0]) : 'none')
 
-    for (const item of items) {
+    for (const item of validItems) {
       // Build key from item description (normalized) - this is the primary grouping field
       const description = (item.item_description || item.item_desc_raw || '').trim().toUpperCase()
       const category = (item.item_category || '').trim().toUpperCase()
@@ -124,7 +134,7 @@ export default function DeliveryChallan({
 
     console.log('🔄 Consolidated to', itemMap.size, 'unique items')
     return Array.from(itemMap.values())
-  }, [items])
+  }, [validItems])
 
   // Split consolidated items into chunks for pagination - 10 items per page
   const itemsPerPage = 10
@@ -290,7 +300,16 @@ export default function DeliveryChallan({
                       {item.uom || 'N/A'}
                     </td>
                     <td style={{ padding: '5px 6px', border: '1px solid #000', textAlign: 'center', fontSize: '10.5px', whiteSpace: 'nowrap' }}>
-                      {item.pack_size && item.pack_size !== '0' ? Number(item.pack_size).toLocaleString('en-IN', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) : 'N/A'}
+                      {(() => {
+                        // PM/packaging items carry their per-box pack quantity as a COUNT in
+                        // unit_pack_size (pack_size/box-weight is 0 for them); FG/RM use pack_size (kg).
+                        const countable = isCountableItem(item)
+                        const n = parseFloat(String((countable ? (item.unit_pack_size ?? item.pack_size) : item.pack_size) ?? '0')) || 0
+                        if (n === 0) return 'N/A'
+                        return countable
+                          ? n.toLocaleString('en-IN')
+                          : n.toLocaleString('en-IN', { minimumFractionDigits: 3, maximumFractionDigits: 3 })
+                      })()}
                     </td>
                     <td style={{ padding: '5px 6px', border: '1px solid #000', textAlign: 'right', fontSize: '10.5px', whiteSpace: 'nowrap' }}>
                       {Number(item.net_weight || 0).toLocaleString('en-IN', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
@@ -315,7 +334,7 @@ export default function DeliveryChallan({
                       TOTAL ({consolidatedItems.length} item{consolidatedItems.length !== 1 ? 's' : ''}):
                     </td>
                     <td style={{ padding: '8px 6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', fontSize: '10.5px', whiteSpace: 'nowrap' }}>
-                      {Number(items.length || 0).toLocaleString('en-IN')}
+                      {Number(validItems.length || 0).toLocaleString('en-IN')}
                     </td>
                     <td style={{ padding: '8px 6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', fontSize: '10.5px', whiteSpace: 'nowrap' }}>
                       {Number(totalQtyRequired || 0).toLocaleString('en-IN')}
@@ -508,7 +527,7 @@ export default function DeliveryChallan({
             <td style={{ padding: '6px', border: '1px solid #000', fontWeight: 'bold' }}>Total Items: {consolidatedItems.length}</td>
             <td style={{ padding: '6px', border: '1px solid #000' }}>&nbsp;</td>
             <td style={{ padding: '6px', border: '1px solid #000', fontWeight: 'bold' }}>Total Qty: {Number(totalQtyRequired || 0).toLocaleString('en-IN')}</td>
-            <td style={{ padding: '6px', border: '1px solid #000', fontWeight: 'bold' }}>Total Boxes: {Number(items.length || 0).toLocaleString('en-IN')}</td>
+            <td style={{ padding: '6px', border: '1px solid #000', fontWeight: 'bold' }}>Total Boxes: {Number(validItems.length || 0).toLocaleString('en-IN')}</td>
             <td style={{ padding: '6px', border: '1px solid #000', fontWeight: 'bold' }}>
               Total Kg: {Number(consolidatedItems.reduce((s, it) => s + (parseFloat(it.net_weight as unknown as string) || 0), 0)).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
             </td>

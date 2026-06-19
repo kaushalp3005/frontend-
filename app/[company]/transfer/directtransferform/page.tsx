@@ -1937,7 +1937,9 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
 
     // Build lines from scannedBoxes (manually added articles)
     // net_weight and total_weight are already in Kg (converted at add time)
-    const lines = scannedBoxes.map((box) => ({
+    const lines = scannedBoxes
+      .filter((box) => clean(box.itemDescription) !== '')
+      .map((box) => ({
       // Backend contract uses canonical DB column names:
       //   material_type→rm_pm_fg_type, item_description→item_desc_raw, quantity→qty.
       // pack_size/qty must be numbers — an empty string fails Pydantic float parsing (422).
