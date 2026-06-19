@@ -105,6 +105,8 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
   const [editingBoxIndices, setEditingBoxIndices] = useState<Set<number>>(new Set())
   const [editSnapshots, setEditSnapshots] = useState<Map<number, BoxForm>>(new Map())
   const [printingBoxIdx, setPrintingBoxIdx] = useState<number | null>(null)
+  // Article whose Print-range batch is currently running (null = idle).
+  const [printingRange, setPrintingRange] = useState<string | null>(null)
 
   // Box delete confirmation
   const [deleteBoxIdx, setDeleteBoxIdx] = useState<number | null>(null)
@@ -595,6 +597,109 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
     }
   }
 
+  // Print a set of boxes, INCLUDING ones that were never printed: any box
+  // without a box_id is upserted first (which assigns a box_id and marks it
+  // Printed), then the whole set is sent to the label printer. This is what
+  // lets Print range work on freshly-entered boxes, not just already-printed
+  // ones. Upserts run in small concurrent chunks so large ranges stay fast.
+  const printBoxSet = async (targets: { b: BoxForm; i: number }[]) => {
+    if (!data || targets.length === 0) return
+    // Persist any box that was never printed (no box_id) OR has been edited
+    // since its last print, so the printed label and the backend stay in sync.
+    // Edits to already-printed boxes are also written to the box-edit audit log,
+    // mirroring the single-box handlePrintBox path.
+    const toUpsert = targets.filter(({ b, i }) => !b.box_id || editingBoxIndices.has(i))
+    const CHUNK = 8
+    const newIds: Record<number, string> = {}
+    for (let k = 0; k < toUpsert.length; k += CHUNK) {
+      const chunk = toUpsert.slice(k, k + CHUNK)
+      const results = await Promise.all(
+        chunk.map(async ({ b, i }) => {
+          const line = lineForms.find((l) => l.item_description === b.article_description)
+          const res = await rtvApi.upsertBox(company, rtvId, {
+            article_description: b.article_description,
+            box_number: b.box_number,
+            uom: line?.uom || undefined,
+            conversion: b.conversion || undefined,
+            net_weight: b.net_weight || undefined,
+            gross_weight: b.gross_weight || undefined,
+            lot_number: b.lot_number || undefined,
+            item_mark: b.item_mark || undefined,
+            spl_remarks: b.spl_remarks || undefined,
+            vakkal: b.vakkal || undefined,
+            count: b.count ? parseInt(b.count) : undefined,
+          })
+          const wasEditing = editingBoxIndices.has(i)
+          if (wasEditing) {
+            const snap = editSnapshots.get(i)
+            if (snap) {
+              const changes: Array<{ field_name: string; old_value?: string; new_value?: string }> = []
+              if (snap.net_weight !== b.net_weight) changes.push({ field_name: "net_weight", old_value: snap.net_weight, new_value: b.net_weight })
+              if (snap.gross_weight !== b.gross_weight) changes.push({ field_name: "gross_weight", old_value: snap.gross_weight, new_value: b.gross_weight })
+              if (snap.count !== b.count) changes.push({ field_name: "count", old_value: snap.count, new_value: b.count })
+              if (changes.length > 0) {
+                await rtvApi.logBoxEdit({ email_id: user?.email || "unknown", box_id: res.box_id, rtv_id: data.rtv_id, changes })
+              }
+            }
+          }
+          return { i, box_id: res.box_id, wasEditing }
+        }),
+      )
+      // Flush this chunk to local state immediately, so a later-chunk failure
+      // doesn't leave already-saved boxes looking unprinted (recoverable retry).
+      const chunkIds: Record<number, string> = {}
+      const chunkEdited: number[] = []
+      results.forEach((r) => { newIds[r.i] = r.box_id; chunkIds[r.i] = r.box_id; if (r.wasEditing) chunkEdited.push(r.i) })
+      setBoxForms((prev) => prev.map((b, idx) => (chunkIds[idx] ? { ...b, box_id: chunkIds[idx], is_printed: true } : b)))
+      if (chunkEdited.length > 0) {
+        setEditingBoxIndices((prev) => { const n = new Set(prev); chunkEdited.forEach((idx) => n.delete(idx)); return n })
+        setEditSnapshots((prev) => { const n = new Map(prev); chunkEdited.forEach((idx) => n.delete(idx)); return n })
+      }
+    }
+
+    const boxesToPrint = targets.map(({ b, i }) => ({ ...b, box_id: newIds[i] || b.box_id }))
+    await printLabels({ company, rtvStringId: data.rtv_id || "", customer, boxes: boxesToPrint })
+  }
+
+  // Print every box of an article whose box_number is within [from, to],
+  // regardless of whether it was already printed. Defaults: from=1, to=∞.
+  const handlePrintRange = async (article: string) => {
+    const r = printRange[article]
+    const from = parseInt(r?.from || "1")
+    const to = parseInt(r?.to || "999999")
+    if (Number.isNaN(from) || Number.isNaN(to)) return
+    const targets = boxForms
+      .map((b, i) => ({ b, i }))
+      .filter(({ b }) => b.article_description === article && b.box_number >= from && b.box_number <= to)
+      .sort((x, y) => x.b.box_number - y.b.box_number)
+    if (targets.length === 0) return
+    try {
+      setPrintingRange(article)
+      await printBoxSet(targets)
+    } catch (err) {
+      console.error("Print range failed:", err)
+      setSubmitError("Failed to print the selected range. Please try again.")
+    } finally {
+      setPrintingRange(null)
+    }
+  }
+
+  // Print labels for EVERY entered box, upserting any that were never printed
+  // so they too get a box_id and Printed status (same behaviour as Print range).
+  const handlePrintAll = async () => {
+    const targets = boxForms.map((b, i) => ({ b, i }))
+    if (targets.length === 0) return
+    try {
+      setPrintingRange("__all__")
+      await printBoxSet(targets)
+    } catch (err) {
+      console.error("Print all failed:", err)
+      setSubmitError("Failed to print all labels. Please try again.")
+    } finally {
+      setPrintingRange(null)
+    }
+  }
+
   const handleEditBox = (boxIdx: number) => {
     const box = boxForms[boxIdx]
     setEditSnapshots((prev) => new Map(prev).set(boxIdx, { ...box }))
@@ -978,13 +1083,9 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
                         value={printRange[line.item_description]?.to || ""}
                         onChange={(e) => setPrintRange((p) => ({ ...p, [line.item_description]: { ...(p[line.item_description] || { from: "", to: "" }), to: e.target.value } }))} />
                       <Button type="button" variant="outline" size="sm" className="h-7 text-xs"
-                        onClick={() => {
-                          const r = printRange[line.item_description]
-                          const from = parseInt(r?.from || "1"), to = parseInt(r?.to || "999999")
-                          printLabels({ company, rtvStringId: data?.rtv_id || "", customer,
-                            boxes: boxForms.filter((b) => b.article_description === line.item_description && b.box_id && b.box_number >= from && b.box_number <= to) })
-                        }}>
-                        Print range
+                        disabled={printingRange === line.item_description}
+                        onClick={() => handlePrintRange(line.item_description)}>
+                        {printingRange === line.item_description ? "Printing…" : "Print range"}
                       </Button>
                     </div>
                   )}
@@ -1175,9 +1276,9 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
             <ArrowLeft className="h-4 w-4" /> Cancel
           </Button>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" className="gap-1.5" disabled={!boxesUnlocked}
-              onClick={() => printLabels({ company, rtvStringId: data?.rtv_id || "", customer, boxes: boxForms.filter((b) => b.box_id) })}>
-              <Printer className="h-4 w-4" /> Print all labels
+            <Button variant="outline" size="sm" className="gap-1.5" disabled={!boxesUnlocked || printingRange === "__all__"}
+              onClick={handlePrintAll}>
+              <Printer className="h-4 w-4" /> {printingRange === "__all__" ? "Printing…" : "Print all labels"}
             </Button>
           <Button
             size="sm"
