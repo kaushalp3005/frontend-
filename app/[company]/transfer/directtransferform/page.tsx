@@ -1012,6 +1012,20 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       }
       return article
     }))
+
+    // Propagate an article-level Vakkal entry to every scanned/loaded box of the
+    // same article, so entering it once fills the per-box Vakkal column (e.g. when
+    // editing a multi-box cold transfer). Per-box inputs can still override afterwards.
+    if (field === "vakkal") {
+      const desc = (articles.find(a => a.id === id)?.item_description || "").trim().toUpperCase()
+      if (desc) {
+        setScannedBoxes(prevBoxes => prevBoxes.map(box =>
+          (box.itemDescription || "").trim().toUpperCase() === desc
+            ? { ...box, vakkal: value }
+            : box
+        ))
+      }
+    }
   }
 
   const handleTransferInfoChange = (field: string, value: string) => {
