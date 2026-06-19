@@ -65,8 +65,8 @@ export const SALES_POC_OPTIONS: SalesPOC[] = [
 export const SALES_POC_OTHER = "Other" as const
 
 export const SALES_POC_DROPDOWN_OPTIONS: (SalesPOC | typeof SALES_POC_OTHER)[] = [
-  ...SALES_POC_OPTIONS,
-  SALES_POC_OTHER,
+  ...[...SALES_POC_OPTIONS].sort((a, b) => a.localeCompare(b)),
+  SALES_POC_OTHER, // keep "Other" pinned to the bottom
 ]
 
 // ─── Header ────────────────────────────────────────────────────────
