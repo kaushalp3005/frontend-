@@ -130,7 +130,7 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
   const [showDiscrepancy, setShowDiscrepancy] = useState(false)
 
   // Box-wise entry unlocks only after the mail ("first") approval.
-  const boxesUnlocked = data?.status === "Approved"
+  const boxesUnlocked = data?.status === "Approved" || data?.status === "Submitted"
 
   useEffect(() => {
     if (isNaN(rtvId)) {
@@ -780,6 +780,9 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
         transporter_name: transporterName || undefined,
         driver_name: driverName || undefined,
         inward_manager: inwardManager || undefined,
+        // NOTE: status -> "Submitted" is set server-side by bulkSaveBoxes (which
+        // only transitions from Approved/Submitted). We deliberately do NOT set it
+        // here, so this header update can't flip a Pending/Rejected CR to Submitted.
       })
 
       // 2. Persist line edits (state-aware merge — no destructive wipe).
@@ -860,8 +863,6 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
     )
   }
 
-  const isApproved = data.status === "Approved"
-
   return (
     <PermissionGuard module="reordering" action="view">
       <div className="p-3 sm:p-4 md:p-6 max-w-[1100px] mx-auto space-y-3 sm:space-y-4">
@@ -873,7 +874,7 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-lg sm:text-xl font-bold tracking-tight break-all">{data.rtv_id}</h1>
-              <Badge variant="outline" className={isApproved
+              <Badge variant="outline" className={boxesUnlocked
                 ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                 : "bg-amber-50 text-amber-700 border-amber-200"
               }>
@@ -881,7 +882,7 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
               </Badge>
             </div>
             <p className="text-xs text-muted-foreground mt-0.5">
-              {isApproved ? "Enter box weights & print QR labels" : "Box entry is locked until mail approval"}
+              {boxesUnlocked ? "Enter box weights & print QR labels" : "Box entry is locked until mail approval"}
             </p>
           </div>
         </div>

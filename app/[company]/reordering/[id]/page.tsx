@@ -11,7 +11,7 @@ import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import Link from "next/link"
 import {
-  ArrowLeft, Edit, CheckCircle2, Clock, Trash2, X,
+  ArrowLeft, Edit, CheckCircle2, CheckCheck, Clock, Trash2, X,
   Package, Box, AlertCircle, Loader2, FileText, Printer, Lock,
 } from "lucide-react"
 import {
@@ -77,6 +77,7 @@ function StatusBadge({ status }: { status: RTVStatus }) {
   const config: Record<string, { label: string; icon: React.ElementType; className: string }> = {
     Pending: { label: "Pending", icon: Clock, className: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300" },
     Approved: { label: "Approved", icon: CheckCircle2, className: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300" },
+    Submitted: { label: "Submitted", icon: CheckCheck, className: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300" },
   }
   const c = config[status] || config.Pending
   const Icon = c.icon
@@ -521,6 +522,10 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
 
   const isPending = data.status === "Pending"
   const isApproved = data.status === "Approved"
+  const isSubmitted = data.status === "Submitted"
+  // Box entry / edit actions are available once approved, and remain available
+  // after the final submit so corrections are still possible.
+  const boxEntryAvailable = isApproved || isSubmitted
   const isCold = isColdWarehouse(normalizeWarehouseName(data.factory_unit))
   const hasBoxes = data.boxes.length > 0
 
@@ -545,7 +550,7 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 pl-10 sm:pl-11">
-            {isApproved && !editing && (
+            {boxEntryAvailable && !editing && (
               <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs sm:text-sm" onClick={enterEditMode}>
                 <Edit className="h-3.5 w-3.5" /> Edit details
               </Button>
@@ -566,21 +571,21 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
                 </Button>
               </>
             )}
-            {isApproved && !editing && (
+            {boxEntryAvailable && !editing && (
               <Button variant="default" size="sm" className="gap-1.5 h-8 text-xs sm:text-sm" asChild>
                 <Link href={`/${company}/reordering/${rtvId}/approve`}>
                   <Box className="h-3.5 w-3.5" /> Enter / Edit Box Weights
                 </Link>
               </Button>
             )}
-            {!isApproved && (
+            {!boxEntryAvailable && (
               <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs sm:text-sm" asChild>
                 <Link href={`/${company}/reordering/${rtvId}/approve`}>
                   <FileText className="h-3.5 w-3.5" /> Review
                 </Link>
               </Button>
             )}
-            {!isApproved && (
+            {!boxEntryAvailable && (
               <span className="inline-flex items-center gap-1 text-[11px] text-amber-700">
                 <Lock className="h-3 w-3" /> Box entry unlocks after mail approval
               </span>

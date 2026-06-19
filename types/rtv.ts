@@ -1,7 +1,10 @@
 // types/rtv.ts — RTV (Return to Vendor) module types
 // Matches backend API spec: /rtv/{company}
 
-export type RTVStatus = "Pending" | "Approved"
+// Pending  = created, awaiting business-head approval (email)
+// Approved = business head approved (boxes can now be entered)
+// Submitted = warehouse finished box entry and ran the final Save (entry complete)
+export type RTVStatus = "Pending" | "Approved" | "Submitted"
 
 // Backend matches by name, case-insensitive. Empty/null = no business head.
 // Keep in sync with BUSINESS_HEAD_EMAILS in backend/shared/email_notifier.py.
@@ -40,6 +43,8 @@ export type SalesPOC =
   | "R M Patil"
   | "Satyendra Garg"
   | "Prashant Pal"
+  | "Suresh Luthra"
+  | "Swadhin Joshi"
 
 export const SALES_POC_OPTIONS: SalesPOC[] = [
   "Shubham Shivekar",
@@ -56,6 +61,8 @@ export const SALES_POC_OPTIONS: SalesPOC[] = [
   "R M Patil",
   "Satyendra Garg",
   "Prashant Pal",
+  "Suresh Luthra",
+  "Swadhin Joshi",
 ]
 
 // "Other" sentinel for the Sales POC dropdown. When the user picks this, the

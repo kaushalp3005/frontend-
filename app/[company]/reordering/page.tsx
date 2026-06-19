@@ -14,7 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import Link from "next/link"
 import {
   Plus, Eye, Edit, Trash2, Search, X, ChevronLeft, ChevronRight,
-  RotateCcw, Clock, CheckCircle2, Loader2, Download, BarChart3,
+  RotateCcw, Clock, CheckCircle2, CheckCheck, Loader2, Download, BarChart3,
 } from "lucide-react"
 import { format } from "date-fns"
 import { rtvApi } from "@/lib/api/rtvApiService"
@@ -32,12 +32,14 @@ const STATUS_TABS: { label: string; value: RTVStatus | "all"; icon: React.Elemen
   { label: "All", value: "all", icon: RotateCcw, color: "text-foreground" },
   { label: "Pending", value: "Pending", icon: Clock, color: "text-amber-600" },
   { label: "Approved", value: "Approved", icon: CheckCircle2, color: "text-emerald-600" },
+  { label: "Submitted", value: "Submitted", icon: CheckCheck, color: "text-blue-600" },
 ]
 
 function StatusBadge({ status }: { status: RTVStatus }) {
   const config: Record<string, { label: string; className: string }> = {
     Pending: { label: "Pending", className: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-800" },
     Approved: { label: "Approved", className: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-800" },
+    Submitted: { label: "Submitted", className: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-800" },
   }
   const c = config[status] || config.Pending
   return <Badge variant="outline" className={c.className}>{c.label}</Badge>
@@ -155,7 +157,7 @@ export default function RTVListPage({ params }: RTVListPageProps) {
         {/* Header */}
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <h1 className="text-lg sm:text-xl md:text-2xl font-bold tracking-tight">CR / Rejection</h1>
+            <h1 className="text-lg sm:text-xl md:text-2xl font-bold tracking-tight">Customer Returns</h1>
             <p className="text-xs sm:text-sm text-muted-foreground mt-0.5 hidden sm:block">
               Manage customer return entries and approvals
             </p>
