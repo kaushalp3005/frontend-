@@ -73,7 +73,7 @@ export const SALES_POC_DROPDOWN_OPTIONS: (SalesPOC | typeof SALES_POC_OTHER)[] =
 
 export interface RTVHeader {
   id: number
-  rtv_id: string              // Format: RTV-YYYYMMDDHHmmSS
+  rtv_id: string              // Format: CR-YYYYMMDDHHmmSS (legacy records may be RTV-…)
   rtv_date: string | null
   factory_unit: string
   customer: string
@@ -292,6 +292,8 @@ export interface RTVListItem {
   boxes_count: number
   // total_qty is now a true SUM(l.qty) — backend bug-fix noted in spec.
   total_qty: number
+  // Actual returned net weight (kg) = Σ box net weights (fan-out-free subquery).
+  total_net_weight: number
 }
 
 export interface RTVListResponse {
@@ -489,7 +491,7 @@ export interface RTVBoxEditChange {
 export interface RTVBoxEditLogRequest {
   email_id: string
   box_id: string
-  rtv_id: string              // The RTV-YYYYMMDD... string
+  rtv_id: string              // The CR-YYYYMMDD… string (legacy: RTV-…)
   changes: RTVBoxEditChange[]
 }
 

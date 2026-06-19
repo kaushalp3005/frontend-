@@ -280,7 +280,7 @@ export default function RTVListPage({ params }: RTVListPageProps) {
                         <th className="text-left font-medium px-4 py-2.5 hidden lg:table-cell">Business Head</th>
                         <th className="text-left font-medium px-4 py-2.5 hidden lg:table-cell">Factory Unit</th>
                         <th className="text-left font-medium px-4 py-2.5 hidden lg:table-cell">Items</th>
-                        <th className="text-left font-medium px-4 py-2.5 hidden lg:table-cell">Total Qty</th>
+                        <th className="text-left font-medium px-4 py-2.5 hidden lg:table-cell">Net Wt (kg)</th>
                         <th className="text-right font-medium px-4 py-2.5">Actions</th>
                       </tr>
                     </thead>
@@ -298,7 +298,7 @@ export default function RTVListPage({ params }: RTVListPageProps) {
                           <td className="px-4 py-3 hidden lg:table-cell">
                             <Badge variant="secondary" className="text-xs">{item.items_count} items</Badge>
                           </td>
-                          <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">{item.total_qty}</td>
+                          <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">{item.total_net_weight} kg</td>
                           <td className="px-4 py-3">
                             <div className="flex items-center justify-end gap-1">
                               <Button variant="ghost" size="icon" className="h-7 w-7" asChild>
@@ -349,7 +349,7 @@ export default function RTVListPage({ params }: RTVListPageProps) {
                       <div className="flex flex-wrap gap-1 text-xs text-muted-foreground">
                         <span>{item.items_count} items</span>
                         <span>\u00b7</span>
-                        <span>Qty: {item.total_qty}</span>
+                        <span>Net Wt: {item.total_net_weight} kg</span>
                         {item.factory_unit && (<><span>\u00b7</span><span>{getDisplayWarehouseName(item.factory_unit)}</span></>)}
                       </div>
                       <div className="flex items-center gap-1 pt-1">
