@@ -22,6 +22,7 @@ import { useFormPersistence } from "@/hooks/useFormPersistence"
 import HighPerformanceQRScanner from "@/components/transfer/high-performance-qr-scanner"
 import { BoxScrollContainer } from "@/components/modules/inward/BoxScrollContainer"
 import { isColdWarehouse, normalizeWarehouseName } from "@/lib/constants/warehouses"
+import { ColdStorageApiService } from "@/lib/api/coldStorageApiService"
 
 interface NewTransferRequestPageProps {
   params: {
@@ -850,6 +851,43 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
           title: "Transfer Loaded",
           description: `Editing transfer ${transfer.challan_no}`,
         })
+
+        // Item mark lives in the cold records (not on the transfer line), so it is
+        // lost when a cold transfer is reloaded for edit. Re-fetch it by item
+        // description — the same source used on initial entry — so the cold-storage
+        // summary popup (and any item-mark display) keeps it on update.
+        if (isColdWarehouse(normalizeWarehouseName(transfer.to_warehouse || transfer.to_site || ""))) {
+          const uniqueDescs = Array.from(new Set(
+            (transfer.lines || [])
+              .map((l: any) => (l.item_description || "").trim())
+              .filter(Boolean)
+          )) as string[]
+          const markByDesc: Record<string, string> = {}
+          await Promise.all(uniqueDescs.map(async (desc) => {
+            try {
+              const res = await ColdStorageApiService.searchColdStorageStocks({
+                item_description: desc,
+                limit: "1",
+              })
+              const mark = res.results?.[0]?.item_mark
+              if (mark) markByDesc[desc.toUpperCase()] = mark
+            } catch (e) {
+              console.warn(`Cold item-mark lookup failed for "${desc}":`, e)
+            }
+          }))
+          if (Object.keys(markByDesc).length > 0) {
+            setScannedBoxes(prev => prev.map(box =>
+              box.itemMark
+                ? box
+                : { ...box, itemMark: markByDesc[(box.itemDescription || "").trim().toUpperCase()] || "" }
+            ))
+            setArticles(prev => prev.map(a =>
+              a.cs_item_mark
+                ? a
+                : { ...a, cs_item_mark: markByDesc[(a.item_description || "").trim().toUpperCase()] || a.cs_item_mark }
+            ))
+          }
+        }
       } catch (error: any) {
         console.error("Failed to load transfer for editing:", error)
         toast({
