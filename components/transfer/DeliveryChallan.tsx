@@ -203,11 +203,11 @@ export default function DeliveryChallan({
         <td style={{ padding: '6px 8px', border: '1px solid #000', fontWeight: 'bold', fontSize: '10.5px' }}>Item Description</td>
         <td style={{ padding: '6px 8px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', fontSize: '10.5px', whiteSpace: 'nowrap' }}>Vakkal</td>
         <td style={{ padding: '6px 6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', fontSize: '10.5px', whiteSpace: 'nowrap' }}>Category</td>
-        <td style={{ padding: '6px 6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', fontSize: '10.5px', whiteSpace: 'nowrap' }}>No. of Boxes</td>
+        <td style={{ padding: '6px 6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', fontSize: '10.5px' }}>No. of Boxes</td>
         <td style={{ padding: '6px 6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', fontSize: '10.5px', whiteSpace: 'nowrap' }}>Qty</td>
         <td style={{ padding: '6px 6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', fontSize: '10.5px', whiteSpace: 'nowrap' }}>UOM</td>
-        <td style={{ padding: '6px 6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', fontSize: '10.5px', whiteSpace: 'nowrap' }}>Pack Size (kg)</td>
-        <td style={{ padding: '6px 6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'right', fontSize: '10.5px', whiteSpace: 'nowrap' }}>Net Wt (kg)</td>
+        <td style={{ padding: '6px 6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', fontSize: '10.5px' }}>Pack Size (kg)</td>
+        <td style={{ padding: '6px 6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'right', fontSize: '10.5px' }}>Net Wt (kg)</td>
         {showCountColumn && (
           <td style={{ padding: '6px 6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'right', fontSize: '10.5px', whiteSpace: 'nowrap' }}>Count</td>
         )}
@@ -274,7 +274,7 @@ export default function DeliveryChallan({
                     <td style={{ padding: '5px 8px', border: '1px solid #000', fontSize: '10.5px', wordBreak: 'break-word' }}>
                       {item.item_desc_raw || item.item_description || 'N/A'}
                     </td>
-                    <td style={{ padding: '5px 8px', border: '1px solid #000', textAlign: 'center', fontSize: '10.5px', whiteSpace: 'nowrap' }}>
+                    <td style={{ padding: '5px 8px', border: '1px solid #000', textAlign: 'center', fontSize: '10.5px', wordBreak: 'break-word' }}>
                       {item.vakkal || '—'}
                     </td>
                     <td style={{ padding: '5px 8px', border: '1px solid #000', textAlign: 'center', fontSize: '10.5px', whiteSpace: 'nowrap' }}>
@@ -398,13 +398,13 @@ export default function DeliveryChallan({
         tableLayout: 'fixed'
       }}>
         <colgroup>
-          <col style={{ width: hasPMItems ? '6%' : '7%' }} />
-          <col style={{ width: hasPMItems ? '26%' : '33%' }} />
-          <col style={{ width: '13%' }} />
-          <col style={{ width: '11%' }} />
-          <col style={{ width: '11%' }} />
-          <col style={{ width: hasPMItems ? '14%' : '25%' }} />
-          {hasPMItems && <col style={{ width: '18%' }} />}
+          <col style={{ width: '6%' }} />
+          <col style={{ width: hasPMItems ? '31%' : '38%' }} />
+          <col style={{ width: hasPMItems ? '17%' : '19%' }} />
+          <col style={{ width: hasPMItems ? '11%' : '12%' }} />
+          <col style={{ width: hasPMItems ? '11%' : '12%' }} />
+          <col style={{ width: hasPMItems ? '12%' : '13%' }} />
+          {hasPMItems && <col style={{ width: '12%' }} />}
         </colgroup>
         <thead>
           <tr>
