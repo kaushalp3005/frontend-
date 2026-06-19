@@ -956,11 +956,28 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
                         onClick={() => {
                           const v = bulkFill[line.item_description]
                           if (!v) return
-                          setBoxForms((prev) => bulkFillBoxes(prev as ColdBox[], line.item_description, {
-                            ...(v.net ? { net_weight: v.net } : {}),
-                            ...(v.gross ? { gross_weight: v.gross } : {}),
-                            ...(v.count ? { count: v.count } : {}),
-                          }) as BoxForm[])
+                          const uomNum = parseFloat(line.uom || "") || 0
+                          const cartonNum = parseFloat(line.carton_weight || "") || 0
+                          setBoxForms((prev) => {
+                            const filled = bulkFillBoxes(prev as ColdBox[], line.item_description, {
+                              ...(v.net ? { net_weight: v.net } : {}),
+                              ...(v.gross ? { gross_weight: v.gross } : {}),
+                              ...(v.count ? { count: v.count } : {}),
+                            }) as BoxForm[]
+                            // Mirror per-box auto-calc: conversion = count×UOM, and
+                            // net = gross−carton when gross was bulk-set (and net wasn't).
+                            return filled.map((b) => {
+                              if (b.article_description !== line.item_description) return b
+                              const next = { ...b }
+                              const cnt = parseFloat(next.count) || 0
+                              if (uomNum > 0 && cnt > 0) next.conversion = String(parseFloat((cnt * uomNum).toFixed(3)))
+                              if (v.gross && !v.net && cartonNum > 0) {
+                                const g = parseFloat(next.gross_weight) || 0
+                                next.net_weight = String(parseFloat(Math.max(0, g - cartonNum).toFixed(3)))
+                              }
+                              return next
+                            })
+                          })
                         }}>
                         Apply to all
                       </Button>

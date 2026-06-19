@@ -278,6 +278,8 @@ export interface RTVListItem {
   boxes_count: number
   // total_qty is now a true SUM(l.qty) — backend bug-fix noted in spec.
   total_qty: number
+  // Actual returned net weight (kg) = Σ box net weights (fan-out-free subquery).
+  total_net_weight: number
 }
 
 export interface RTVListResponse {
