@@ -2819,15 +2819,24 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                                 <td className="py-2.5 px-3">
                                   {(() => {
                                     const artName = line.item_desc_raw || line.item_description || ""
-                                    const effective = lineLotOverrides[index] !== undefined
-                                      ? lineLotOverrides[index]
-                                      : (coldStorageItems[artName]?.lot_no?.trim() || (line.lot_number ? String(line.lot_number) : ""))
+                                    // Field shows the explicit override; the default lot (per-article
+                                    // cold lot → original) shows as the placeholder and is what saves
+                                    // when no override is set. Clearing removes the override → default.
+                                    const defaultLot = coldStorageItems[artName]?.lot_no?.trim() || (line.lot_number ? String(line.lot_number) : "")
                                     return (
                                       <Input
                                         type="text"
-                                        value={effective}
-                                        onChange={(e) => setLineLotOverrides(prev => ({ ...prev, [index]: e.target.value }))}
-                                        placeholder="Lot"
+                                        value={lineLotOverrides[index] ?? ""}
+                                        onChange={(e) => {
+                                          const v = e.target.value
+                                          setLineLotOverrides(prev => {
+                                            const next = { ...prev }
+                                            if (v === "") delete next[index]
+                                            else next[index] = v
+                                            return next
+                                          })
+                                        }}
+                                        placeholder={defaultLot || "Lot"}
                                         className="h-7 w-[90px] text-xs font-mono px-1.5"
                                       />
                                     )
