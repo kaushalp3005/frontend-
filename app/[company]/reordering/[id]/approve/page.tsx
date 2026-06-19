@@ -23,7 +23,14 @@ import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
 } from "@/components/ui/dropdown-menu"
 import { rtvApi } from "@/lib/api/rtvApiService"
-import { BUSINESS_HEAD_OPTIONS, type BusinessHead, type RTVWithDetails } from "@/types/rtv"
+import {
+  BUSINESS_HEAD_OPTIONS,
+  SALES_POC_OPTIONS,
+  SALES_POC_DROPDOWN_OPTIONS,
+  SALES_POC_OTHER,
+  type BusinessHead,
+  type RTVWithDetails,
+} from "@/types/rtv"
 import type { RTVLineForm } from "@/components/modules/rtv/RTVLineEditor"
 import { BoxScrollContainer } from "@/components/modules/inward/BoxScrollContainer"
 import { LotRangeDedicator, type LotRange } from "@/components/modules/inward/LotRangeDedicator"
@@ -84,6 +91,8 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
   const [challanNo, setChallanNo] = useState("")
   const [dnNo, setDnNo] = useState("")
   const [salesPoc, setSalesPoc] = useState("")
+  const [salesPocOtherName, setSalesPocOtherName] = useState("")
+  const [salesPocOtherEmail, setSalesPocOtherEmail] = useState("")
   const [businessHead, setBusinessHead] = useState<BusinessHead | "">("")
   const [remark, setRemark] = useState("")
   const [vehicleNumber, setVehicleNumber] = useState("")
@@ -141,7 +150,19 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
         setInvoiceNumber(detail.invoice_number || "")
         setChallanNo(detail.challan_no || "")
         setDnNo(detail.dn_no || "")
-        setSalesPoc(detail.sales_poc || "")
+        {
+          // Hydrate Sales POC. A persisted manual email (or a name not in the
+          // dropdown) means it was entered via "Other"; show it in the manual fields.
+          const poc = detail.sales_poc || ""
+          const pocEmail = detail.sales_poc_email || ""
+          if (poc && !pocEmail && (SALES_POC_OPTIONS as string[]).includes(poc)) {
+            setSalesPoc(poc)
+          } else if (poc || pocEmail) {
+            setSalesPoc(SALES_POC_OTHER)
+            setSalesPocOtherName(poc)
+            setSalesPocOtherEmail(pocEmail)
+          }
+        }
         setBusinessHead((detail.business_head as BusinessHead) || "")
         setRemark(detail.remark || "")
         setVehicleNumber(detail.vehicle_number || "")
@@ -751,7 +772,8 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
         invoice_number: invoiceNumber || undefined,
         challan_no: challanNo || undefined,
         dn_no: dnNo || undefined,
-        sales_poc: salesPoc || undefined,
+        sales_poc: (salesPoc === SALES_POC_OTHER ? salesPocOtherName : salesPoc) || undefined,
+        sales_poc_email: (salesPoc === SALES_POC_OTHER ? salesPocOtherEmail : "") || undefined,
         business_head: businessHead || undefined,
         remark: remark || undefined,
         vehicle_number: vehicleNumber || undefined,
@@ -903,7 +925,33 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Sales POC</Label>
-                <Input value={salesPoc} onChange={(e) => setSalesPoc(e.target.value)} className="h-9" />
+                <Select value={salesPoc || undefined} onValueChange={setSalesPoc}>
+                  <SelectTrigger className="h-9">
+                    <SelectValue placeholder="Select sales POC" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SALES_POC_DROPDOWN_OPTIONS.map((poc) => (
+                      <SelectItem key={poc} value={poc}>{poc}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {salesPoc === SALES_POC_OTHER && (
+                  <div className="space-y-1 pt-1">
+                    <Input
+                      value={salesPocOtherName}
+                      onChange={(e) => setSalesPocOtherName(e.target.value)}
+                      placeholder="POC name"
+                      className="h-9"
+                    />
+                    <Input
+                      type="email"
+                      value={salesPocOtherEmail}
+                      onChange={(e) => setSalesPocOtherEmail(e.target.value)}
+                      placeholder="poc@example.com (added to mail CC)"
+                      className="h-9"
+                    />
+                  </div>
+                )}
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Business Head</Label>

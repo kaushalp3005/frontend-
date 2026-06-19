@@ -58,6 +58,17 @@ export const SALES_POC_OPTIONS: SalesPOC[] = [
   "Prashant Pal",
 ]
 
+// "Other" sentinel for the Sales POC dropdown. When the user picks this, the
+// form should reveal two manual inputs (name + email) and send the typed name
+// as `sales_poc` and the typed email as `sales_poc_email`; the backend adds that
+// email to the mail CC. The dropdown should render SALES_POC_DROPDOWN_OPTIONS.
+export const SALES_POC_OTHER = "Other" as const
+
+export const SALES_POC_DROPDOWN_OPTIONS: (SalesPOC | typeof SALES_POC_OTHER)[] = [
+  ...SALES_POC_OPTIONS,
+  SALES_POC_OTHER,
+]
+
 // ─── Header ────────────────────────────────────────────────────────
 
 export interface RTVHeader {
@@ -71,6 +82,7 @@ export interface RTVHeader {
   dn_no: string | null
   conversion: string | null
   sales_poc: string | null
+  sales_poc_email: string | null   // set when Sales POC = "Other" (manual entry); added to mail CC
   business_head: BusinessHead | string | null
   remark: string | null
   // Dispatch / logistics fields (backend addition)
@@ -92,6 +104,7 @@ export interface RTVHeaderCreate {
   dn_no?: string
   conversion?: string
   sales_poc?: string
+  sales_poc_email?: string   // only when Sales POC = "Other" (manual entry); added to mail CC
   business_head?: BusinessHead | string | null
   remark?: string
   vehicle_number?: string
@@ -108,6 +121,7 @@ export interface RTVHeaderUpdate {
   dn_no?: string
   conversion?: string
   sales_poc?: string
+  sales_poc_email?: string   // only when Sales POC = "Other" (manual entry); added to mail CC
   business_head?: BusinessHead | string | null
   remark?: string
   vehicle_number?: string
@@ -326,6 +340,7 @@ export interface RTVApprovalHeaderFields {
   dn_no?: string
   conversion?: string
   sales_poc?: string
+  sales_poc_email?: string   // only when Sales POC = "Other" (manual entry); added to mail CC
   business_head?: BusinessHead | string | null
   remark?: string
   vehicle_number?: string
