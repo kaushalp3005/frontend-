@@ -63,8 +63,18 @@ export default function DeliveryChallan({
     return mt === "PM" || cat === "PACKAGING"
   }
 
+  // Drop phantom/empty lines (no item description) so they never render as N/A rows
+  // and don't inflate the box / item / count totals.
+  const validItems = React.useMemo(
+    () => (items || []).filter((it: any) => {
+      const d = (it.item_description || it.item_desc_raw || '').trim()
+      return d !== '' && d.toUpperCase() !== 'N/A'
+    }),
+    [items]
+  )
+
   // Check if any line has PM material type (kept for Gate Pass display)
-  const hasPMItems = items.some(isCountableItem)
+  const hasPMItems = validItems.some(isCountableItem)
 
   // Show the Count column in the DC when PM/packaging items exist OR origin is A-68
   const fromWarehouseIsA68 =
@@ -73,7 +83,7 @@ export default function DeliveryChallan({
   const showCountColumn = hasPMItems || fromWarehouseIsA68
 
   // Compute total count (sum of unit_pack_size × qty for PM/packaging items)
-  const totalPMCount = items
+  const totalPMCount = validItems
     .filter(isCountableItem)
     .reduce((sum: number, item: any) => {
       const packSize = parseFloat(String(item.unit_pack_size || item.pack_size || "0")) || 0
@@ -91,16 +101,6 @@ export default function DeliveryChallan({
 
   // Total column count for colSpan computations (default 8, +1 when Count column is visible)
   const DC_COLS = showCountColumn ? 10 : 9
-
-  // Drop phantom/empty lines (no item description) so they never render as N/A rows
-  // and don't inflate the box/item totals.
-  const validItems = React.useMemo(
-    () => (items || []).filter((it: any) => {
-      const d = (it.item_description || it.item_desc_raw || '').trim()
-      return d !== '' && d.toUpperCase() !== 'N/A'
-    }),
-    [items]
-  )
 
   // Consolidate items: group by item description and sum quantities/weights
   const consolidatedItems = React.useMemo(() => {
@@ -489,8 +489,8 @@ export default function DeliveryChallan({
             {hasPMItems && <td style={{ padding: '6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center' }}>Count</td>}
           </tr>
           {consolidatedItems.map((item, index) => {
-            const isPM = (item.material_type || item.rm_pm_fg_type || "").toUpperCase() === "PM"
-            const itemCount = isPM
+            const countable = isCountableItem(item)
+            const itemCount = countable
               ? (parseFloat(String(item.unit_pack_size || item.pack_size || "0")) || 0) * (parseFloat(String(item.qty || "1")) || 1)
               : 0
             return (
@@ -513,7 +513,7 @@ export default function DeliveryChallan({
                 </td>
                 {hasPMItems && (
                   <td style={{ padding: '5px', border: '1px solid #000', textAlign: 'right', fontWeight: 'bold' }}>
-                    {isPM && itemCount > 0
+                    {countable && itemCount > 0
                       ? itemCount.toLocaleString('en-IN')
                       : <span style={{ color: '#aaa', fontWeight: 'normal' }}>—</span>}
                   </td>

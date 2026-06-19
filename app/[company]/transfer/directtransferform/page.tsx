@@ -884,7 +884,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
             setArticles(prev => prev.map(a =>
               a.cs_item_mark
                 ? a
-                : { ...a, cs_item_mark: markByDesc[(a.item_description || "").trim().toUpperCase()] || a.cs_item_mark }
+                : { ...a, cs_item_mark: markByDesc[(a.item_description || "").trim().toUpperCase()] || null }
             ))
           }
         }
@@ -1904,6 +1904,8 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     if (isColdWarehouse(normalizeWarehouseName(formData.toWarehouse))) {
       const missingVakkal = new Set<string>()
       scannedBoxes.forEach((box) => {
+        const desc = (box.itemDescription || '').trim()
+        if (desc === '' || desc.toUpperCase() === 'N/A') return  // phantom box — filtered out of saved lines anyway
         if (!box.vakkal || !String(box.vakkal).trim()) {
           missingVakkal.add(box.itemDescription || 'Unknown item')
         }

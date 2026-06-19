@@ -1014,7 +1014,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
           box_id: generatedBoxIds[idx] || targetLine.box_id || targetBoxRef.box_id || `ART-${idx + 1}`,
           article: targetArticle,
           batch_number: targetLine.batch_number || null,
-          lot_number: dedicatedLot(targetLine?._box_origin) || getColdLotNo(targetArticle) || targetLine.lot_number || null,
+          lot_number: resolveLineLot(idx, targetArticle, targetLine.lot_number),
           transaction_no: targetBoxRef.transaction_no || targetLine.transaction_no || inwardTransactionNo || null,
           net_weight: issueNetWt ? Number(issueNetWt) : (targetLine.net_weight ? Number(targetLine.net_weight) : null),
           gross_weight: issueTotalWt ? Number(issueTotalWt) : (targetLine.total_weight ? Number(targetLine.total_weight) : null),
@@ -1517,7 +1517,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
       console.error("QR generation failed:", err)
       toast.error("Failed to generate QR code")
     }
-  }, [lines, lineBoxDataMap, lineWeights, transferData, company, toast, inwardTransactionNo, generatedBoxIds, linesIssueMap])
+  }, [lines, lineBoxDataMap, lineWeights, transferData, company, toast, inwardTransactionNo, generatedBoxIds, linesIssueMap, lineLotOverrides, coldStorageItems])
 
   // ── Generate & print QR codes for all acknowledged boxes (bulk inward QR generation) ──
   const handleGenerateQRs = useCallback(async () => {
