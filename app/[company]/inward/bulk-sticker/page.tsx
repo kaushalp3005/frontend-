@@ -157,6 +157,15 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
   const [addMoreGrossWeight, setAddMoreGrossWeight] = useState("")
   const [addingBoxes, setAddingBoxes] = useState(false)
 
+  // Per-article box pagination for the result list — render only a window so a
+  // 1000+ box submission doesn't render every row and freeze/crash the page.
+  const BOX_PAGE_SIZE = 200
+  const [boxPageMap, setBoxPageMap] = useState<Record<string, number>>({})
+  const [highlightBoxMap, setHighlightBoxMap] = useState<Record<string, { boxNumber: number; key: number } | null>>({})
+  const getBoxPage = (articleDesc: string) => boxPageMap[articleDesc] ?? 1
+  const setBoxPage = (articleDesc: string, page: number) =>
+    setBoxPageMap((prev) => ({ ...prev, [articleDesc]: page }))
+
   // Discard dialog
   const [showDiscard, setShowDiscard] = useState(false)
 
@@ -775,11 +784,26 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
                 </div>
               </CardHeader>
               <CardContent className="px-3 sm:px-6">
+                {(() => {
+                  const artPage = getBoxPage(articleGroup.article_description)
+                  const artTotalPages = Math.max(1, Math.ceil(articleGroup.boxes.length / BOX_PAGE_SIZE))
+                  const pageStart = (artPage - 1) * BOX_PAGE_SIZE
+                  const pageBoxes = articleGroup.boxes.slice(pageStart, pageStart + BOX_PAGE_SIZE)
+                  return (
                 <BoxScrollContainer
                   boxCount={articleGroup.boxes.length}
+                  currentPage={artPage}
+                  totalPages={artTotalPages}
+                  onPageChange={(page) => setBoxPage(articleGroup.article_description, page)}
+                  onNavigate={(boxNum) => {
+                    const targetPage = Math.ceil(boxNum / BOX_PAGE_SIZE)
+                    setBoxPage(articleGroup.article_description, targetPage)
+                    setHighlightBoxMap((prev) => ({ ...prev, [articleGroup.article_description]: { boxNumber: boxNum, key: Date.now() } }))
+                  }}
+                  highlightBox={highlightBoxMap[articleGroup.article_description] ?? null}
                   boxForms={articleGroup.boxes.map((b) => ({ box_number: b.box_number, lot_number: b.lot_number, article_description: b.article_description }))}
                 >
-                  {(registerRef) => articleGroup.boxes.map((box) => (
+                  {(registerRef) => pageBoxes.map((box) => (
                     <div
                       key={box.box_id}
                       ref={(el) => registerRef(box.box_number, el)}
@@ -822,6 +846,8 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
                     </div>
                   ))}
                 </BoxScrollContainer>
+                  )
+                })()}
 
                 {/* Add More Boxes Form */}
                 {addMoreIdx === aIdx && (

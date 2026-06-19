@@ -30,6 +30,7 @@ import type {
 } from "@/types/cold-storage"
 import { PermissionGuard } from "@/components/auth/permission-gate"
 import { ArticleEditor, type ArticleFields } from "@/components/modules/inward/ArticleEditor"
+import { BoxScrollContainer } from "@/components/modules/inward/BoxScrollContainer"
 import { dropdownApi } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { useToast } from "@/hooks/use-toast"
@@ -153,6 +154,15 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
   const [addMoreNetWeight, setAddMoreNetWeight] = useState("")
   const [addMoreGrossWeight, setAddMoreGrossWeight] = useState("")
   const [addingBoxes, setAddingBoxes] = useState(false)
+
+  // Per-article box pagination for the result list — render only a window so a
+  // 1000+ box submission doesn't render every row and freeze/crash the page.
+  const BOX_PAGE_SIZE = 200
+  const [boxPageMap, setBoxPageMap] = useState<Record<string, number>>({})
+  const [highlightBoxMap, setHighlightBoxMap] = useState<Record<string, { boxNumber: number; key: number } | null>>({})
+  const getBoxPage = (articleDesc: string) => boxPageMap[articleDesc] ?? 1
+  const setBoxPage = (articleDesc: string, page: number) =>
+    setBoxPageMap((prev) => ({ ...prev, [articleDesc]: page }))
 
   // Discard dialog
   const [showDiscard, setShowDiscard] = useState(false)
@@ -739,9 +749,27 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
                 </div>
               </CardHeader>
               <CardContent className="px-3 sm:px-6">
-                <div className="space-y-2">
-                  {articleGroup.boxes.map((box) => (
-                    <div key={box.box_id} className="flex items-center justify-between p-2 border rounded text-sm">
+                {(() => {
+                  const artPage = getBoxPage(articleGroup.article_description)
+                  const artTotalPages = Math.max(1, Math.ceil(articleGroup.boxes.length / BOX_PAGE_SIZE))
+                  const pageStart = (artPage - 1) * BOX_PAGE_SIZE
+                  const pageBoxes = articleGroup.boxes.slice(pageStart, pageStart + BOX_PAGE_SIZE)
+                  return (
+                <BoxScrollContainer
+                  boxCount={articleGroup.boxes.length}
+                  currentPage={artPage}
+                  totalPages={artTotalPages}
+                  onPageChange={(page) => setBoxPage(articleGroup.article_description, page)}
+                  onNavigate={(boxNum) => {
+                    const targetPage = Math.ceil(boxNum / BOX_PAGE_SIZE)
+                    setBoxPage(articleGroup.article_description, targetPage)
+                    setHighlightBoxMap((prev) => ({ ...prev, [articleGroup.article_description]: { boxNumber: boxNum, key: Date.now() } }))
+                  }}
+                  highlightBox={highlightBoxMap[articleGroup.article_description] ?? null}
+                  boxForms={articleGroup.boxes.map((b) => ({ box_number: b.box_number, lot_number: b.lot_number, article_description: b.article_description }))}
+                >
+                  {(registerRef) => pageBoxes.map((box) => (
+                    <div key={box.box_id} ref={(el) => registerRef(box.box_number, el)} className="flex items-center justify-between p-2 border rounded text-sm">
                       <div className="flex items-center gap-3">
                         <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center">
                           <span className="text-xs font-medium">{box.box_number}</span>
@@ -778,7 +806,9 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
                       </div>
                     </div>
                   ))}
-                </div>
+                </BoxScrollContainer>
+                  )
+                })()}
 
                 {/* Add More Boxes Form */}
                 {addMoreIdx === aIdx && (
