@@ -123,6 +123,7 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
   // Per-article print range (From/To).
   const [printRange, setPrintRange] = useState<Record<string, { from: string; to: string }>>({})
   const [printingAll, setPrintingAll] = useState(false)
+  const [boxPage, setBoxPage] = useState(1)
 
   useEffect(() => {
     if (isNaN(rtvId)) {
@@ -529,6 +530,12 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
   const isCold = isColdWarehouse(normalizeWarehouseName(data.factory_unit))
   const hasBoxes = data.boxes.length > 0
 
+  // Window the box list (200/page) so large CRs stay fast to open — same as inward.
+  const BOX_PAGE_SIZE = 200
+  const totalBoxPages = Math.max(1, Math.ceil(data.boxes.length / BOX_PAGE_SIZE))
+  const safeBoxPage = Math.min(Math.max(1, boxPage), totalBoxPages)
+  const pageBoxes = data.boxes.slice((safeBoxPage - 1) * BOX_PAGE_SIZE, safeBoxPage * BOX_PAGE_SIZE)
+
   return (
     <PermissionGuard module="reordering" action="view">
       <div className="p-3 sm:p-4 md:p-6 max-w-[1100px] mx-auto space-y-3 sm:space-y-4">
@@ -789,7 +796,7 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
                         </tr>
                       </thead>
                       <tbody>
-                        {data.boxes.map((box) => (
+                        {pageBoxes.map((box) => (
                           <tr key={box.id || `${box.article_description}-${box.box_number}`} className="border-b last:border-0">
                             <td className="px-3 py-2 text-muted-foreground truncate max-w-[150px]">{box.article_description}</td>
                             <td className="px-3 py-2">{box.box_number}</td>
@@ -825,7 +832,7 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
                   </div>
                   {/* Mobile cards */}
                   <div className="sm:hidden space-y-2">
-                    {data.boxes.map((box) => (
+                    {pageBoxes.map((box) => (
                       <div key={box.id || `${box.article_description}-${box.box_number}`} className="p-2.5 border rounded-lg bg-muted/20 space-y-1.5">
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
@@ -859,6 +866,18 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
                       </div>
                     ))}
                   </div>
+                  {totalBoxPages > 1 && (
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-3 mt-2 border-t text-xs">
+                      <span className="text-muted-foreground">
+                        Showing {(safeBoxPage - 1) * BOX_PAGE_SIZE + 1}–{Math.min(safeBoxPage * BOX_PAGE_SIZE, data.boxes.length)} of {data.boxes.length} boxes
+                      </span>
+                      <div className="flex items-center gap-1">
+                        <Button variant="outline" size="sm" className="h-7 px-2" disabled={safeBoxPage <= 1} onClick={() => setBoxPage(safeBoxPage - 1)}>Prev</Button>
+                        <span className="px-2 text-muted-foreground">Page {safeBoxPage} / {totalBoxPages}</span>
+                        <Button variant="outline" size="sm" className="h-7 px-2" disabled={safeBoxPage >= totalBoxPages} onClick={() => setBoxPage(safeBoxPage + 1)}>Next</Button>
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             )}
