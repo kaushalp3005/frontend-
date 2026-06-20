@@ -559,10 +559,11 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
           html, body { width: 4in; height: 2in; overflow: hidden; background: white; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           * { visibility: visible; }
         }
-        .label { width: 4in; height: 2in; background: white; border: 1px solid #000; display: flex; font-family: Arial, sans-serif; page-break-after: avoid; page-break-inside: avoid; }
-        .qr { width: 2in; height: 2in; display: flex; align-items: center; justify-content: center; padding: 0.1in; }
+        .label { width: 4in; height: 2in; background: white; border: 1px solid #000; display: flex; font-family: Arial, sans-serif; overflow: hidden; page-break-after: always; page-break-inside: avoid; }
+        .label:last-child { page-break-after: auto; }
+        .qr { width: 2in; height: 100%; display: flex; align-items: center; justify-content: center; padding: 0.1in; }
         .qr img { width: 1.7in; height: 1.7in; }
-        .info { width: 2in; height: 2in; padding: 0.08in; font-size: 8pt; line-height: 1.2; display: flex; flex-direction: column; justify-content: space-between; }
+        .info { width: 2in; height: 100%; padding: 0.08in; font-size: 8pt; line-height: 1.2; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; }
         .company { font-weight: bold; font-size: 9pt; }
         .txn { font-family: monospace; font-size: 7pt; }
         .boxid { font-family: monospace; font-size: 6.5pt; color: #555; }
@@ -584,7 +585,7 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
               ${box.count ? `<div class="detail">Count: ${escapeHtml(box.count)}</div>` : ""}
               <div class="detail">Date: ${escapeHtml(formatDate(data.rtv_date))}</div>
             </div>
-            <div class="lot">${escapeHtml([box.lot_number, box.item_mark].filter(Boolean).join(" · ")) || escapeHtml(data.customer || "")}</div>
+            <div class="lot">${escapeHtml([box.lot_number, box.item_mark].filter(Boolean).join(" · "))}</div>
           </div>
         </div>
         <script>

@@ -45,7 +45,7 @@ export async function printLabels(opts: {
           <div class="detail"><b>Box #${escapeHtml(b.box_number)}</b> &nbsp; Net: ${escapeHtml(b.net_weight || "—")}kg &nbsp; Gross: ${escapeHtml(b.gross_weight || "—")}kg</div>
           ${b.count ? `<div class="detail">Count: ${escapeHtml(b.count)}</div>` : ""}
         </div>
-        <div class="lot">${escapeHtml([b.lot_number, b.item_mark].filter(Boolean).join(" · ")) || escapeHtml(customer || "")}</div>
+        <div class="lot">${escapeHtml([b.lot_number, b.item_mark].filter(Boolean).join(" · "))}</div>
       </div>
     </div>`,
     )
@@ -59,10 +59,12 @@ export async function printLabels(opts: {
   doc.write(`<!DOCTYPE html><html><head><title>Labels</title><style>
     * { margin:0; padding:0; box-sizing:border-box; }
     @page { size: 4in 2in; margin: 0; }
-    .label { width:4in; height:2in; background:#fff; border:1px solid #000; display:flex; font-family:Arial, sans-serif; page-break-after:always; }
-    .qr { width:2in; height:2in; display:flex; align-items:center; justify-content:center; padding:0.1in; }
+    html, body { width: 4in; background: #fff; }
+    .label { width:4in; height:2in; background:#fff; border:1px solid #000; display:flex; font-family:Arial, sans-serif; overflow: hidden; page-break-inside: avoid; page-break-after:always; }
+    .label:last-child { page-break-after: auto; }
+    .qr { width:2in; height:100%; display:flex; align-items:center; justify-content:center; padding:0.1in; }
     .qr img { width:1.7in; height:1.7in; }
-    .info { width:2in; height:2in; padding:0.08in; font-size:8pt; line-height:1.2; display:flex; flex-direction:column; justify-content:space-between; }
+    .info { width:2in; height:100%; padding:0.08in; font-size:8pt; line-height:1.2; display:flex; flex-direction:column; justify-content:space-between; overflow: hidden; }
     .company { font-weight:bold; font-size:9pt; } .txn { font-family:monospace; font-size:7pt; }
     .boxid { font-family:monospace; font-size:6.5pt; color:#555; }
     .item { font-weight:bold; font-size:7.5pt; } .detail { font-size:7pt; }

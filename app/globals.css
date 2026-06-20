@@ -145,11 +145,17 @@ input[type="number"] {
   .label {
     width: 4in !important;
     height: 2in !important;
+    overflow: hidden !important;
     break-inside: avoid;
     page-break-inside: avoid;
+    page-break-after: always !important;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
     color-adjust: exact;
+  }
+
+  .label:last-child {
+    page-break-after: auto !important;
   }
 
   body {

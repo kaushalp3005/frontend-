@@ -129,9 +129,10 @@ const LABEL_STYLES = `
   * { visibility: visible; }
 }
 .label { width: 4in; height: 2in; background: white; border: 1px solid #000; display: flex; font-family: Arial, sans-serif; overflow: hidden; page-break-after: always; page-break-inside: avoid; }
-.qr { width: 1.5in; height: 2in; display: flex; align-items: center; justify-content: center; padding: 0.08in; flex-shrink: 0; }
+.label:last-child { page-break-after: auto; }
+.qr { width: 1.5in; height: 100%; display: flex; align-items: center; justify-content: center; padding: 0.08in; flex-shrink: 0; }
 .qr img { width: 1.3in; height: 1.3in; }
-.info { width: 2.5in; height: 2in; padding: 0.1in 0.12in; font-size: 7.5pt; line-height: 1.3; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; border-left: 1px solid #ccc; }
+.info { width: 2.5in; height: 100%; padding: 0.1in 0.12in; font-size: 7.5pt; line-height: 1.3; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; border-left: 1px solid #ccc; }
 .company { font-weight: bold; font-size: 8.5pt; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .txn { font-family: monospace; font-size: 6.5pt; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .boxid { font-family: monospace; font-size: 6pt; color: #555; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
