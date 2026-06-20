@@ -150,7 +150,7 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
     try {
       setDeleting(true)
       await rtvApi.deleteRTV(company, rtvId, user?.email || undefined)
-      router.push(`/${company}/reordering`)
+      router.push(`/${company}/customer-returns`)
     } catch (err) {
       console.error("Delete failed:", err)
     } finally {
@@ -514,7 +514,7 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
           <AlertCircle className="h-4 w-4" />
           <span className="text-sm">{error || "CR not found"}</span>
         </div>
-        <Button variant="outline" className="mt-4 gap-1.5" onClick={() => router.push(`/${company}/reordering`)}>
+        <Button variant="outline" className="mt-4 gap-1.5" onClick={() => router.push(`/${company}/customer-returns`)}>
           <ArrowLeft className="h-4 w-4" /> Back to list
         </Button>
       </div>
@@ -542,7 +542,7 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
         {/* Header */}
         <div className="space-y-3">
           <div className="flex items-start gap-2 sm:gap-3">
-            <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0 mt-0.5" onClick={() => router.push(`/${company}/reordering`)}>
+            <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0 mt-0.5" onClick={() => router.push(`/${company}/customer-returns`)}>
               <ArrowLeft className="h-4 w-4" />
             </Button>
             <div className="min-w-0 flex-1">
@@ -580,14 +580,14 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
             )}
             {boxEntryAvailable && !editing && (
               <Button variant="default" size="sm" className="gap-1.5 h-8 text-xs sm:text-sm" asChild>
-                <Link href={`/${company}/reordering/${rtvId}/approve`}>
+                <Link href={`/${company}/customer-returns/${rtvId}/approve`}>
                   <Box className="h-3.5 w-3.5" /> Enter / Edit Box Weights
                 </Link>
               </Button>
             )}
             {!boxEntryAvailable && (
               <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs sm:text-sm" asChild>
-                <Link href={`/${company}/reordering/${rtvId}/approve`}>
+                <Link href={`/${company}/customer-returns/${rtvId}/approve`}>
                   <FileText className="h-3.5 w-3.5" /> Review
                 </Link>
               </Button>
