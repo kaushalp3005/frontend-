@@ -10,6 +10,7 @@ import type {
   RTVHeaderUpdate,
   RTVLinesUpdateRequest,
   RTVLinesUpdateResponse,
+  RTVSaveRequest,
   RTVBoxUpsertRequest,
   RTVBoxUpsertResponse,
   RTVBulkBoxUpdateRequest,
@@ -219,6 +220,21 @@ export const rtvApi = {
       }
     )
     return handleResponse<RTVBulkBoxUpdateResponse>(response)
+  },
+
+  // ─── Consolidated save (header + lines + boxes -> one mail) ─────
+
+  async saveRTV(
+    company: string,
+    rtvId: number,
+    data: RTVSaveRequest
+  ): Promise<RTVWithDetails> {
+    const response = await fetch(`${API_URL}/rtv/${company}/${rtvId}/save`, {
+      method: "PUT",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    })
+    return handleResponse<RTVWithDetails>(response)
   },
 
   // ─── Approve RTV ───────────────────────────────────────────────

@@ -764,29 +764,25 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
       setSubmitError(null)
       setShowDiscrepancy(false)
 
-      // 1. Persist header edits. (vehicle/transporter/driver/inward_manager are
-      //    sent but not yet stored server-side — known drift, out of scope.)
-      await rtvApi.updateRTVHeader(company, rtvId, {
-        factory_unit: factoryUnit || undefined,
-        customer: customer || undefined,
-        invoice_number: invoiceNumber || undefined,
-        challan_no: challanNo || undefined,
-        dn_no: dnNo || undefined,
-        sales_poc: (salesPoc === SALES_POC_OTHER ? salesPocOtherName : salesPoc) || undefined,
-        sales_poc_email: (salesPoc === SALES_POC_OTHER ? salesPocOtherEmail : "") || undefined,
-        business_head: businessHead || undefined,
-        remark: remark || undefined,
-        vehicle_number: vehicleNumber || undefined,
-        transporter_name: transporterName || undefined,
-        driver_name: driverName || undefined,
-        inward_manager: inwardManager || undefined,
-        // NOTE: status -> "Submitted" is set server-side by bulkSaveBoxes (which
-        // only transitions from Approved/Submitted). We deliberately do NOT set it
-        // here, so this header update can't flip a Pending/Rejected CR to Submitted.
-      })
-
-      // 2. Persist line edits (state-aware merge — no destructive wipe).
-      await rtvApi.updateRTVLines(company, rtvId, {
+      // Single consolidated save (header + lines + boxes) -> ONE "Updated" mail
+      // with a change summary, highlights and short-weight flags. (Status ->
+      // Submitted is still set server-side inside the box-save step.)
+      await rtvApi.saveRTV(company, rtvId, {
+        header: {
+          factory_unit: factoryUnit || undefined,
+          customer: customer || undefined,
+          invoice_number: invoiceNumber || undefined,
+          challan_no: challanNo || undefined,
+          dn_no: dnNo || undefined,
+          sales_poc: (salesPoc === SALES_POC_OTHER ? salesPocOtherName : salesPoc) || undefined,
+          sales_poc_email: (salesPoc === SALES_POC_OTHER ? salesPocOtherEmail : "") || undefined,
+          business_head: businessHead || undefined,
+          remark: remark || undefined,
+          vehicle_number: vehicleNumber || undefined,
+          transporter_name: transporterName || undefined,
+          driver_name: driverName || undefined,
+          inward_manager: inwardManager || undefined,
+        },
         lines: lineForms.map((l) => ({
           material_type: l.material_type || "RM",
           item_category: l.item_category,
@@ -805,22 +801,20 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
           spl_remarks: l.spl_remarks || undefined,
           vakkal: l.vakkal || undefined,
         })),
-      })
-
-      // 3. Persist the full box set (state-aware sync). The backend sends the
-      //    net-weight discrepancy summary email after the sync.
-      await rtvApi.bulkSaveBoxes(company, rtvId, {
         boxes: boxForms.map((b) => {
           const parentLine = lineForms.find((l) => l.item_description === b.article_description)
           return {
             article_description: b.article_description,
             box_number: b.box_number,
             uom: parentLine?.uom || undefined,
-            conversion: b.conversion || undefined,
-            lot_number: b.lot_number || undefined,
-            item_mark: b.item_mark || undefined,
-            spl_remarks: b.spl_remarks || undefined,
-            vakkal: b.vakkal || undefined,
+            // Text fields use ?? (not ||) so a cleared "" is sent rather than
+            // dropped to undefined; the backend COALESCE then writes "" and the
+            // field actually clears (|| would JSON-omit it and keep the old value).
+            conversion: b.conversion ?? undefined,
+            lot_number: b.lot_number ?? undefined,
+            item_mark: b.item_mark ?? undefined,
+            spl_remarks: b.spl_remarks ?? undefined,
+            vakkal: b.vakkal ?? undefined,
             net_weight: b.net_weight || undefined,
             gross_weight: b.gross_weight || undefined,
             count: b.count ? parseInt(b.count) : undefined,
