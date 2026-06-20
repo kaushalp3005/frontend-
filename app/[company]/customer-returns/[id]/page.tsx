@@ -460,7 +460,7 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
               ${box.count ? `<div class="detail">Count: ${escapeHtml(box.count)}</div>` : ""}
               <div class="detail">Date: ${escapeHtml(formatDate(data.rtv_date))}</div>
             </div>
-            <div class="lot">${escapeHtml([box.lot_number, box.item_mark].filter(Boolean).join(" · ")) || escapeHtml(data.customer || "")}</div>
+            <div class="lot">${escapeHtml([box.lot_number, box.item_mark].filter(Boolean).join(" · "))}</div>
           </div>
         </div>
         <script>

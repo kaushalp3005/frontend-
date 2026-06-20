@@ -536,7 +536,7 @@ export default function NewRTVPage({ params }: NewRTVPageProps) {
               ${box.count ? `<div class="detail">Count: ${box.count}</div>` : ""}
               <div class="detail">Date: ${formatDate()}</div>
             </div>
-            <div class="lot">${customer || ""}</div>
+            <div class="lot"></div>
           </div>
         </div>
         <script>

@@ -45,7 +45,7 @@ export async function printLabels(opts: {
           <div class="detail"><b>Box #${escapeHtml(b.box_number)}</b> &nbsp; Net: ${escapeHtml(b.net_weight || "—")}kg &nbsp; Gross: ${escapeHtml(b.gross_weight || "—")}kg</div>
           ${b.count ? `<div class="detail">Count: ${escapeHtml(b.count)}</div>` : ""}
         </div>
-        <div class="lot">${escapeHtml([b.lot_number, b.item_mark].filter(Boolean).join(" · ")) || escapeHtml(customer || "")}</div>
+        <div class="lot">${escapeHtml([b.lot_number, b.item_mark].filter(Boolean).join(" · "))}</div>
       </div>
     </div>`,
     )
