@@ -159,6 +159,7 @@ export interface InterUnitTransferLine {
   total_weight: number
   batch_number: string
   lot_number?: string
+  vakkal?: string
   created_at: string
   updated_at: string
 }
@@ -178,6 +179,7 @@ export interface InterUnitTransferLineCreate {
   total_weight: number
   batch_number: string
   lot_number?: string
+  vakkal?: string
 }
 
 export interface InterUnitTransferCreate {

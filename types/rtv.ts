@@ -1,23 +1,86 @@
 // types/rtv.ts — RTV (Return to Vendor) module types
 // Matches backend API spec: /rtv/{company}
 
-export type RTVStatus = "Pending" | "Approved"
+// Pending  = created, awaiting business-head approval (email)
+// Approved = business head approved (boxes can now be entered)
+// Submitted = warehouse finished box entry and ran the final Save (entry complete)
+export type RTVStatus = "Pending" | "Approved" | "Submitted"
 
 // Backend matches by name, case-insensitive. Empty/null = no business head.
-export type BusinessHead = "Prashant Pal" | "Ajay Bajaj" | "Rakesh Ratra" | "Yash Gawdi"
+// Keep in sync with BUSINESS_HEAD_EMAILS in backend/shared/email_notifier.py.
+export type BusinessHead =
+  | "Prashant Pal"
+  | "Ajay Bajaj"
+  | "Rakesh Ratra"
+  | "Yash Gawdi"
+  | "Satyendra Garg"
+  | "R M Patil"
 
 export const BUSINESS_HEAD_OPTIONS: BusinessHead[] = [
   "Prashant Pal",
   "Ajay Bajaj",
   "Rakesh Ratra",
   "Yash Gawdi",
+  "Satyendra Garg",
+  "R M Patil",
+]
+
+// Sales POC dropdown. When one is selected, the backend adds their email to the
+// RTV mail CC. Keep in sync with SALES_POC_EMAILS in
+// backend/shared/email_notifier.py.
+export type SalesPOC =
+  | "Shubham Shivekar"
+  | "Shubham Seth"
+  | "Mayuresh Mahadik"
+  | "Suraj Salunkhe"
+  | "B Hrithik"
+  | "Sachin More"
+  | "Dashrath Birajdar"
+  | "Ashwin Baghul"
+  | "Rakesh Ratra"
+  | "Ajay Bajaj"
+  | "Yash Gawdi"
+  | "R M Patil"
+  | "Satyendra Garg"
+  | "Prashant Pal"
+  | "Suresh Luthra"
+  | "Swadhin Joshi"
+
+export const SALES_POC_OPTIONS: SalesPOC[] = [
+  "Shubham Shivekar",
+  "Shubham Seth",
+  "Mayuresh Mahadik",
+  "Suraj Salunkhe",
+  "B Hrithik",
+  "Sachin More",
+  "Dashrath Birajdar",
+  "Ashwin Baghul",
+  "Rakesh Ratra",
+  "Ajay Bajaj",
+  "Yash Gawdi",
+  "R M Patil",
+  "Satyendra Garg",
+  "Prashant Pal",
+  "Suresh Luthra",
+  "Swadhin Joshi",
+]
+
+// "Other" sentinel for the Sales POC dropdown. When the user picks this, the
+// form should reveal two manual inputs (name + email) and send the typed name
+// as `sales_poc` and the typed email as `sales_poc_email`; the backend adds that
+// email to the mail CC. The dropdown should render SALES_POC_DROPDOWN_OPTIONS.
+export const SALES_POC_OTHER = "Other" as const
+
+export const SALES_POC_DROPDOWN_OPTIONS: (SalesPOC | typeof SALES_POC_OTHER)[] = [
+  ...[...SALES_POC_OPTIONS].sort((a, b) => a.localeCompare(b)),
+  SALES_POC_OTHER, // keep "Other" pinned to the bottom
 ]
 
 // ─── Header ────────────────────────────────────────────────────────
 
 export interface RTVHeader {
   id: number
-  rtv_id: string              // Format: RTV-YYYYMMDDHHmmSS
+  rtv_id: string              // Format: CR-YYYYMMDDHHmmSS (legacy records may be RTV-…)
   rtv_date: string | null
   factory_unit: string
   customer: string
@@ -26,6 +89,7 @@ export interface RTVHeader {
   dn_no: string | null
   conversion: string | null
   sales_poc: string | null
+  sales_poc_email: string | null   // set when Sales POC = "Other" (manual entry); added to mail CC
   business_head: BusinessHead | string | null
   remark: string | null
   // Dispatch / logistics fields (backend addition)
@@ -47,6 +111,7 @@ export interface RTVHeaderCreate {
   dn_no?: string
   conversion?: string
   sales_poc?: string
+  sales_poc_email?: string   // only when Sales POC = "Other" (manual entry); added to mail CC
   business_head?: BusinessHead | string | null
   remark?: string
   vehicle_number?: string
@@ -63,6 +128,7 @@ export interface RTVHeaderUpdate {
   dn_no?: string
   conversion?: string
   sales_poc?: string
+  sales_poc_email?: string   // only when Sales POC = "Other" (manual entry); added to mail CC
   business_head?: BusinessHead | string | null
   remark?: string
   vehicle_number?: string
@@ -89,6 +155,10 @@ export interface RTVLine {
   conversion: string | null
   carton_weight: string | null
   net_weight: string | null
+  lot_number?: string | null
+  item_mark?: string | null
+  spl_remarks?: string | null
+  vakkal?: string | null
   created_at: string | null
   updated_at: string | null
 }
@@ -106,6 +176,10 @@ export interface RTVLineCreate {
   conversion?: string
   carton_weight?: string
   net_weight?: string
+  lot_number?: string
+  item_mark?: string
+  spl_remarks?: string
+  vakkal?: string
 }
 
 // ─── Boxes ─────────────────────────────────────────────────────────
@@ -118,6 +192,9 @@ export interface RTVBox {
   box_id: string | null       // NULL until printed
   article_description: string
   lot_number: string | null
+  item_mark?: string | null
+  spl_remarks?: string | null
+  vakkal?: string | null
   uom: string | null
   conversion: string | null
   net_weight: string
@@ -135,6 +212,9 @@ export interface RTVBoxUpsertRequest {
   net_weight?: string
   gross_weight?: string
   lot_number?: string
+  item_mark?: string
+  spl_remarks?: string
+  vakkal?: string
   count?: number
 }
 
@@ -158,6 +238,9 @@ export interface RTVBulkBoxItem {
   uom?: string
   conversion?: string
   lot_number?: string
+  item_mark?: string
+  spl_remarks?: string
+  vakkal?: string
   net_weight?: string
   gross_weight?: string
   count?: number
@@ -216,6 +299,8 @@ export interface RTVListItem {
   boxes_count: number
   // total_qty is now a true SUM(l.qty) — backend bug-fix noted in spec.
   total_qty: number
+  // Actual returned net weight (kg) = Σ box net weights (fan-out-free subquery).
+  total_net_weight: number
 }
 
 export interface RTVListResponse {
@@ -264,6 +349,7 @@ export interface RTVApprovalHeaderFields {
   dn_no?: string
   conversion?: string
   sales_poc?: string
+  sales_poc_email?: string   // only when Sales POC = "Other" (manual entry); added to mail CC
   business_head?: BusinessHead | string | null
   remark?: string
   vehicle_number?: string
@@ -285,6 +371,10 @@ export interface RTVApprovalLineFields {
   item_category?: string
   sub_category?: string
   sale_group?: string
+  lot_number?: string
+  item_mark?: string
+  spl_remarks?: string
+  vakkal?: string
 }
 
 export interface RTVApprovalBoxFields {
@@ -295,6 +385,9 @@ export interface RTVApprovalBoxFields {
   net_weight?: string
   gross_weight?: string
   lot_number?: string
+  item_mark?: string
+  spl_remarks?: string
+  vakkal?: string
   count?: number
 }
 
@@ -405,7 +498,7 @@ export interface RTVBoxEditChange {
 export interface RTVBoxEditLogRequest {
   email_id: string
   box_id: string
-  rtv_id: string              // The RTV-YYYYMMDD... string
+  rtv_id: string              // The CR-YYYYMMDD… string (legacy: RTV-…)
   changes: RTVBoxEditChange[]
 }
 

@@ -213,6 +213,15 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
   const [articleApprovalForms, setArticleApprovalForms] = useState<ArticleApprovalForm[]>([])
   const [boxForms, setBoxForms] = useState<BoxForm[]>([])
 
+  // Per-article box pagination — only render a window of boxes at a time so large
+  // entries (e.g. 1000+ boxes) don't render thousands of inputs and freeze/crash.
+  const BOX_PAGE_SIZE = 200
+  const [boxPageMap, setBoxPageMap] = useState<Record<string, number>>({})
+  const [highlightBoxMap, setHighlightBoxMap] = useState<Record<string, { boxNumber: number; key: number } | null>>({})
+  const getBoxPage = (articleDesc: string) => boxPageMap[articleDesc] ?? 1
+  const setBoxPage = (articleDesc: string, page: number) =>
+    setBoxPageMap((prev) => ({ ...prev, [articleDesc]: page }))
+
   // Box delete confirmation, edit tracking, printing
   const [deleteBoxIdx, setDeleteBoxIdx] = useState<number | null>(null)
   const [editingBoxIndices, setEditingBoxIndices] = useState<Set<number>>(new Set())
@@ -2483,16 +2492,29 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
                             onApply={(ranges) => applyLotRanges(approvalForm.item_description, ranges)}
                           />
 
+                          {(() => {
+                            const allArticleBoxes = boxForms.filter((b) => b.article_description === approvalForm.item_description)
+                            const artPage = getBoxPage(approvalForm.item_description)
+                            const artTotalPages = Math.max(1, Math.ceil(allArticleBoxes.length / BOX_PAGE_SIZE))
+                            const pageStart = (artPage - 1) * BOX_PAGE_SIZE
+                            const pageBoxes = allArticleBoxes.slice(pageStart, pageStart + BOX_PAGE_SIZE)
+                            return (
                           <BoxScrollContainer
-                            boxCount={boxForms.filter((b) => b.article_description === approvalForm.item_description).length}
+                            boxCount={allArticleBoxes.length}
+                            currentPage={artPage}
+                            totalPages={artTotalPages}
+                            onPageChange={(page) => setBoxPage(approvalForm.item_description, page)}
+                            onNavigate={(boxNum) => {
+                              const targetPage = Math.ceil(boxNum / BOX_PAGE_SIZE)
+                              setBoxPage(approvalForm.item_description, targetPage)
+                              setHighlightBoxMap((prev) => ({ ...prev, [approvalForm.item_description]: { boxNumber: boxNum, key: Date.now() } }))
+                            }}
+                            highlightBox={highlightBoxMap[approvalForm.item_description] ?? null}
                             onAddBox={() => addBox(approvalForm.item_description)}
-                            boxForms={boxForms
-                              .filter((b) => b.article_description === approvalForm.item_description)
-                              .map((b) => ({ box_number: b.box_number, lot_number: b.lot_number, article_description: b.article_description }))}
+                            boxForms={allArticleBoxes.map((b) => ({ box_number: b.box_number, lot_number: b.lot_number, article_description: b.article_description }))}
                           >
-                            {(registerRef) => boxForms
-                              .map((box, boxIdx) => ({ box, boxIdx }))
-                              .filter(({ box }) => box.article_description === approvalForm.item_description)
+                            {(registerRef) => pageBoxes
+                              .map((box) => ({ box, boxIdx: boxForms.indexOf(box) }))
                               .map(({ box, boxIdx }) => {
                                 const isLocked = box.is_printed && !editingBoxIndices.has(boxIdx)
                                 const isPrinting = printingBoxIdx === boxIdx
@@ -2637,6 +2659,8 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
                                 )
                               })}
                           </BoxScrollContainer>
+                            )
+                          })()}
                         </>
                       )}
                     </div>

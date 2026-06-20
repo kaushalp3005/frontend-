@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
+import { BoxScrollContainer } from "@/components/modules/inward/BoxScrollContainer"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -70,6 +71,15 @@ export default function BulkEntryEditPage({ params }: BulkEntryEditPageProps) {
   const [bulkAddNetWeight, setBulkAddNetWeight] = useState("")
   const [bulkAddGrossWeight, setBulkAddGrossWeight] = useState("")
   const [addingBulkBoxes, setAddingBulkBoxes] = useState(false)
+
+  // Per-article box pagination — render only a window so entries with thousands
+  // of boxes don't render every row at once and freeze the page.
+  const BOX_PAGE_SIZE = 200
+  const [boxPageMap, setBoxPageMap] = useState<Record<string, number>>({})
+  const [highlightBoxMap, setHighlightBoxMap] = useState<Record<string, { boxNumber: number; key: number } | null>>({})
+  const getBoxPage = (articleDesc: string) => boxPageMap[articleDesc] ?? 1
+  const setBoxPage = (articleDesc: string, page: number) =>
+    setBoxPageMap((prev) => ({ ...prev, [articleDesc]: page }))
 
   // Print state
   const [printProgress, setPrintProgress] = useState("")
@@ -770,9 +780,28 @@ export default function BulkEntryEditPage({ params }: BulkEntryEditPageProps) {
                 )}
 
                 {/* Box rows */}
-                <div className="divide-y">
-                  {articleBoxes.map((box) => (
-                    <div key={box.box_id} className="flex items-center justify-between p-2 px-3 text-sm">
+                <div className="p-2">
+                {(() => {
+                  const artPage = getBoxPage(articleDesc)
+                  const artTotalPages = Math.max(1, Math.ceil(articleBoxes.length / BOX_PAGE_SIZE))
+                  const pageStart = (artPage - 1) * BOX_PAGE_SIZE
+                  const pageBoxes = articleBoxes.slice(pageStart, pageStart + BOX_PAGE_SIZE)
+                  return (
+                <BoxScrollContainer
+                  boxCount={articleBoxes.length}
+                  currentPage={artPage}
+                  totalPages={artTotalPages}
+                  onPageChange={(page) => setBoxPage(articleDesc, page)}
+                  onNavigate={(boxNum) => {
+                    const targetPage = Math.ceil(boxNum / BOX_PAGE_SIZE)
+                    setBoxPage(articleDesc, targetPage)
+                    setHighlightBoxMap((prev) => ({ ...prev, [articleDesc]: { boxNumber: boxNum, key: Date.now() } }))
+                  }}
+                  highlightBox={highlightBoxMap[articleDesc] ?? null}
+                  boxForms={articleBoxes.map((b) => ({ box_number: b.box_number, lot_number: b.lot_number, article_description: articleDesc }))}
+                >
+                  {(registerRef) => pageBoxes.map((box) => (
+                    <div key={box.box_id} ref={(el) => registerRef(box.box_number, el)} className="flex items-center justify-between p-2 px-3 text-sm border rounded">
                       <div className="flex items-center gap-3">
                         <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center">
                           <span className="text-xs font-medium">{box.box_number}</span>
@@ -802,6 +831,9 @@ export default function BulkEntryEditPage({ params }: BulkEntryEditPageProps) {
                       </div>
                     </div>
                   ))}
+                </BoxScrollContainer>
+                  )
+                })()}
                 </div>
               </div>
             ))}

@@ -123,6 +123,32 @@ export default function TransferInPage({ params }: TransferInPageProps) {
     return r ? r.lot : null
   }
 
+  // Per-line lot overrides (keyed by index in `lines`). Both the per-article range
+  // tool and the per-box inline edit write here; display + line save-paths read here.
+  const [lineLotOverrides, setLineLotOverrides] = useState<Record<number, string>>({})
+
+  // Effective lot for a line index: inline/range override → per-article cold lot → original.
+  const resolveLineLot = (lineIndex: number, articleName: string, originalLot: any): string | null => {
+    const ov = lineLotOverrides[lineIndex]
+    if (ov && ov.trim()) return ov.trim()
+    return getColdLotNo(articleName) || (originalLot ? String(originalLot) : null)
+  }
+
+  // Apply a per-article set of box-range→lot assignments into lineLotOverrides.
+  const applyArticleLotRanges = (artName: string, ranges: LotRange[]) => {
+    const indices = articleLineGroups[artName] || []
+    setLineLotOverrides(prev => {
+      const next = { ...prev }
+      ranges.forEach(r => {
+        for (let pos = r.from; pos <= r.to; pos++) {
+          const lineIdx = indices[pos - 1] // pos is 1-based per-article box number
+          if (lineIdx !== undefined) next[lineIdx] = r.lot
+        }
+      })
+      return next
+    })
+  }
+
   // ── Authorized users for acknowledge / print QR / issue actions ──
   const AUTHORIZED_ACKNOWLEDGE_USERS = ["yash@candorfoods.in", "b.hrithik@candorfoods.in", "sunil.jasoria@candorfoods.in"]
   const isAuthorizedUser = AUTHORIZED_ACKNOWLEDGE_USERS.includes(user?.email?.toLowerCase() || "")
@@ -471,7 +497,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
         if (!seenItems.has(name)) {
           seenItems.add(name)
           coldMap[name] = {
-            inward_dt: today, vakkal: "", lot_no: "", rate: "",
+            inward_dt: today, vakkal: line.vakkal || "", lot_no: "", rate: "",
             exporter: "", storage_location: toWarehouse, item_mark: "",
             group_name: line.item_category || "",
             item_subgroup: line.sub_category || "",
@@ -855,7 +881,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
         box_id: sentBoxId,
         article: articleName,
         batch_number: line.batch_number || null,
-        lot_number: dedicatedLot(line?._box_origin) || getColdLotNo(articleName) || line.lot_number || null,
+        lot_number: resolveLineLot(lineIndex, articleName, line.lot_number),
         transaction_no: scanned.transaction_no || inwardTransactionNo || line.transaction_no || boxRef.transaction_no || null,
         net_weight: w.net_weight ? Number(w.net_weight) : (line.net_weight ? Number(line.net_weight) : null),
         gross_weight: w.total_weight ? Number(w.total_weight) : (line.total_weight ? Number(line.total_weight) : null),
@@ -988,7 +1014,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
           box_id: generatedBoxIds[idx] || targetLine.box_id || targetBoxRef.box_id || `ART-${idx + 1}`,
           article: targetArticle,
           batch_number: targetLine.batch_number || null,
-          lot_number: dedicatedLot(targetLine?._box_origin) || getColdLotNo(targetArticle) || targetLine.lot_number || null,
+          lot_number: resolveLineLot(idx, targetArticle, targetLine.lot_number),
           transaction_no: targetBoxRef.transaction_no || targetLine.transaction_no || inwardTransactionNo || null,
           net_weight: issueNetWt ? Number(issueNetWt) : (targetLine.net_weight ? Number(targetLine.net_weight) : null),
           gross_weight: issueTotalWt ? Number(issueTotalWt) : (targetLine.total_weight ? Number(targetLine.total_weight) : null),
@@ -1054,7 +1080,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
           box_id: generatedBoxIds[i] || line.box_id || boxRef.box_id || `ART-${i + 1}`,
           article: articleName,
           batch_number: line.batch_number || null,
-          lot_number: dedicatedLot(line?._box_origin) || getColdLotNo(articleName) || line.lot_number || null,
+          lot_number: resolveLineLot(i, articleName, line.lot_number),
           transaction_no: boxRef.transaction_no || line.transaction_no || inwardTransactionNo || null,
           net_weight: w.net_weight ? Number(w.net_weight) : (line.net_weight ? Number(line.net_weight) : null),
           gross_weight: w.total_weight ? Number(w.total_weight) : (line.total_weight ? Number(line.total_weight) : null),
@@ -1128,7 +1154,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
           box_id: generatedBoxIds[i] || line.box_id || boxRef.box_id || `ART-${i + 1}`,
           article: articleName,
           batch_number: line.batch_number || null,
-          lot_number: dedicatedLot(line?._box_origin) || getColdLotNo(articleName) || line.lot_number || null,
+          lot_number: resolveLineLot(i, articleName, line.lot_number),
           transaction_no: boxRef.transaction_no || line.transaction_no || inwardTransactionNo || null,
           net_weight: w.net_weight ? Number(w.net_weight) : (line.net_weight ? Number(line.net_weight) : null),
           gross_weight: w.total_weight ? Number(w.total_weight) : (line.total_weight ? Number(line.total_weight) : null),
@@ -1353,7 +1379,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
             box_id: generatedBoxIds[lineIndex] || line.box_id || boxRef.box_id || `ART-${lineIndex + 1}`,
             article: articleName,
             batch_number: line.batch_number || null,
-            lot_number: dedicatedLot(line?._box_origin) || getColdLotNo(articleName) || line.lot_number || null,
+            lot_number: resolveLineLot(lineIndex, articleName, line.lot_number),
             transaction_no: boxRef.transaction_no || line.transaction_no || inwardTransactionNo || null,
             net_weight: w.net_weight ? Number(w.net_weight) : (line.net_weight ? Number(line.net_weight) : null),
             gross_weight: w.total_weight ? Number(w.total_weight) : (line.total_weight ? Number(line.total_weight) : null),
@@ -1491,7 +1517,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
       console.error("QR generation failed:", err)
       toast.error("Failed to generate QR code")
     }
-  }, [lines, lineBoxDataMap, lineWeights, transferData, company, toast, inwardTransactionNo, generatedBoxIds, linesIssueMap])
+  }, [lines, lineBoxDataMap, lineWeights, transferData, company, toast, inwardTransactionNo, generatedBoxIds, linesIssueMap, lineLotOverrides, coldStorageItems])
 
   // ── Generate & print QR codes for all acknowledged boxes (bulk inward QR generation) ──
   const handleGenerateQRs = useCallback(async () => {
@@ -1717,7 +1743,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
         box_id: boxId,
         article: articleName,
         batch_number: line.batch_number || null,
-        lot_number: dedicatedLot(line?._box_origin) || getColdLotNo(articleName) || line.lot_number || null,
+        lot_number: resolveLineLot(i, articleName, line.lot_number),
         transaction_no: txNo || null,
         net_weight: netWt,
         gross_weight: calculatedGrossWt,
@@ -1984,7 +2010,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
             box_id: generatedBoxIds[i] || line.box_id || boxRef.box_id || `ART-${i + 1}`,
             article: articleName,
             batch_number: line.batch_number || null,
-            lot_number: dedicatedLot(line?._box_origin) || getColdLotNo(articleName) || line.lot_number || null,
+            lot_number: resolveLineLot(i, articleName, line.lot_number),
             transaction_no: boxRef.transaction_no || line.transaction_no || inwardTransactionNo || null,
             net_weight: issue?.net_weight
               ? Number(issue.net_weight)
@@ -2086,7 +2112,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
               transfer_out_box_id: null,
               article: articleName,
               batch_number: line.batch_number || null,
-              lot_number: dedicatedLot(line?._box_origin) || getColdLotNo(articleName) || line.lot_number || null,
+              lot_number: resolveLineLot(i, articleName, line.lot_number),
               transaction_no: boxRef.transaction_no || line.transaction_no || inwardTransactionNo || null,
               net_weight: w.net_weight ? Number(w.net_weight) : (line.net_weight ? Number(line.net_weight) : null),
               gross_weight: w.total_weight ? Number(w.total_weight) : (line.total_weight ? Number(line.total_weight) : null),
@@ -2107,7 +2133,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
               transfer_out_box_id: null,
               article: articleName,
               batch_number: line.batch_number || null,
-              lot_number: dedicatedLot(line?._box_origin) || getColdLotNo(articleName) || line.lot_number || null,
+              lot_number: resolveLineLot(i, articleName, line.lot_number),
               transaction_no: boxRef.transaction_no || line.transaction_no || inwardTransactionNo || null,
               net_weight: w.net_weight ? Number(w.net_weight) : (line.net_weight ? Number(line.net_weight) : null),
               gross_weight: w.total_weight ? Number(w.total_weight) : (line.total_weight ? Number(line.total_weight) : null),
@@ -2314,20 +2340,6 @@ export default function TransferInPage({ params }: TransferInPageProps) {
           </Card>
 
           {/* ══════ Cold Storage Fields (Savla / Rishi) ══════ */}
-          {isColdStorageTransfer && boxes.length > 0 && (
-            <Card className="border-0 shadow-sm overflow-hidden">
-              <CardHeader className="pb-2 pt-3 px-4 bg-gradient-to-r from-amber-50 to-orange-50 border-b">
-                <CardTitle className="text-sm font-semibold text-gray-800 flex items-center gap-2">
-                  <Hash className="h-4 w-4 text-amber-600" />
-                  Lot Dedicator
-                </CardTitle>
-                <p className="text-xs text-muted-foreground mt-0.5">Assign a lot number to a range of box numbers — overrides the per-item lot for those boxes on acknowledge.</p>
-              </CardHeader>
-              <CardContent className="p-3 sm:p-4">
-                <LotRangeDedicator warehouse={toWarehouse} totalBoxes={boxes.length} onApply={(ranges) => setBoxLotRanges(ranges)} />
-              </CardContent>
-            </Card>
-          )}
           {isColdStorageTransfer && (
             <Card className="border-0 shadow-sm overflow-hidden">
               <CardHeader className="pb-3 bg-gradient-to-r from-blue-50 to-indigo-50 border-b">
@@ -2700,6 +2712,13 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                             {artIssues > 0 && <Badge variant="outline" className="text-[11px] bg-red-50 text-red-600 border-red-200">{artIssues} issue{artIssues !== 1 ? "s" : ""}</Badge>}
                           </span>
                         </div>
+                        <div className="px-3 py-2 border-b border-violet-50 bg-amber-50/20">
+                          <LotRangeDedicator
+                            warehouse={toWarehouse}
+                            totalBoxes={(articleLineGroups[artName] || []).length}
+                            onApply={(ranges) => applyArticleLotRanges(artName, ranges)}
+                          />
+                        </div>
                         {/* Height-capped: ~10 rows visible, the rest scrolls inside this box (header stays pinned) */}
                         <div className="overflow-auto max-h-[460px]">
                     <table className="w-full min-w-[1050px] text-sm">
@@ -2797,7 +2816,32 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                                 <td className={`py-2.5 px-3 text-right tabular-nums ${issued && linesIssueMap[index]?.net_weight ? "text-red-600 font-bold" : "text-gray-600"}`}>{(issued && linesIssueMap[index]?.net_weight) || (lineIsScanned(line) ? (boxData.net_weight ?? line.net_weight) : (lineWeights[index]?.net_weight || line.net_weight)) || "-"}</td>
                                 <td className={`py-2.5 px-3 text-right tabular-nums ${issued && linesIssueMap[index]?.total_weight ? "text-red-600 font-bold" : "text-gray-600"}`}>{(issued && linesIssueMap[index]?.total_weight) || (lineIsScanned(line) ? (boxData.gross_weight ?? line.total_weight) : (lineWeights[index]?.total_weight || line.total_weight)) || "-"}</td>
                                 {hasBatchData && <td className="py-2.5 px-3 text-gray-600 font-mono text-xs truncate">{line.batch_number || "-"}</td>}
-                                <td className="py-2.5 px-3 text-gray-600 font-mono text-xs truncate">{coldStorageItems[line.item_desc_raw || line.item_description || ""]?.lot_no?.trim() || line.lot_number || "-"}</td>
+                                <td className="py-2.5 px-3">
+                                  {(() => {
+                                    const artName = line.item_desc_raw || line.item_description || ""
+                                    // Field shows the explicit override; the default lot (per-article
+                                    // cold lot → original) shows as the placeholder and is what saves
+                                    // when no override is set. Clearing removes the override → default.
+                                    const defaultLot = coldStorageItems[artName]?.lot_no?.trim() || (line.lot_number ? String(line.lot_number) : "")
+                                    return (
+                                      <Input
+                                        type="text"
+                                        value={lineLotOverrides[index] ?? ""}
+                                        onChange={(e) => {
+                                          const v = e.target.value
+                                          setLineLotOverrides(prev => {
+                                            const next = { ...prev }
+                                            if (v === "") delete next[index]
+                                            else next[index] = v
+                                            return next
+                                          })
+                                        }}
+                                        placeholder={defaultLot || "Lot"}
+                                        className="h-7 w-[90px] text-xs font-mono px-1.5"
+                                      />
+                                    )
+                                  })()}
+                                </td>
                                 <td className="py-2.5 px-3 sticky right-0 bg-inherit">
                                   <div className="flex items-center justify-end gap-1.5">
                                     {!hasExistingQRData ? (

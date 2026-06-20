@@ -24,6 +24,10 @@ export interface RTVLineForm {
   value: string
   carton_weight: string
   net_weight: string
+  lot_number?: string
+  item_mark?: string
+  spl_remarks?: string
+  vakkal?: string
 }
 
 interface SearchResult {

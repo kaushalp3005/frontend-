@@ -23,7 +23,14 @@ import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
 } from "@/components/ui/dropdown-menu"
 import { rtvApi } from "@/lib/api/rtvApiService"
-import { BUSINESS_HEAD_OPTIONS, type BusinessHead, type RTVWithDetails } from "@/types/rtv"
+import {
+  BUSINESS_HEAD_OPTIONS,
+  SALES_POC_OPTIONS,
+  SALES_POC_DROPDOWN_OPTIONS,
+  SALES_POC_OTHER,
+  type BusinessHead,
+  type RTVWithDetails,
+} from "@/types/rtv"
 import type { RTVLineForm } from "@/components/modules/rtv/RTVLineEditor"
 import { BoxScrollContainer } from "@/components/modules/inward/BoxScrollContainer"
 import { LotRangeDedicator, type LotRange } from "@/components/modules/inward/LotRangeDedicator"
@@ -34,6 +41,10 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import QRCode from "qrcode"
+import { WarehouseSelect } from "@/components/modules/warehouse/WarehouseSelect"
+import { isColdWarehouse, normalizeWarehouseName } from "@/lib/constants/warehouses"
+import { cascadeArticleField, applyLotRanges as applyLotRangesHelper, bulkFillBoxes, type ColdBox } from "@/lib/utils/rtvCold"
+import { printLabels, escapeHtml } from "@/lib/utils/rtvPrint"
 
 interface ApprovePageProps {
   params: { company: string; id: string }
@@ -49,6 +60,9 @@ interface BoxForm {
   gross_weight: string
   count: string
   lot_number: string
+  item_mark: string
+  spl_remarks: string
+  vakkal: string
   box_id?: string
   is_printed: boolean
 }
@@ -77,6 +91,8 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
   const [challanNo, setChallanNo] = useState("")
   const [dnNo, setDnNo] = useState("")
   const [salesPoc, setSalesPoc] = useState("")
+  const [salesPocOtherName, setSalesPocOtherName] = useState("")
+  const [salesPocOtherEmail, setSalesPocOtherEmail] = useState("")
   const [businessHead, setBusinessHead] = useState<BusinessHead | "">("")
   const [remark, setRemark] = useState("")
   const [vehicleNumber, setVehicleNumber] = useState("")
@@ -90,10 +106,16 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
   // Boxes
   const [boxForms, setBoxForms] = useState<BoxForm[]>([])
 
+  // Per-article bulk fill + print range (cold box entry helpers)
+  const [bulkFill, setBulkFill] = useState<Record<string, { net: string; gross: string; count: string }>>({})
+  const [printRange, setPrintRange] = useState<Record<string, { from: string; to: string }>>({})
+
   // Box edit tracking (for printed boxes)
   const [editingBoxIndices, setEditingBoxIndices] = useState<Set<number>>(new Set())
   const [editSnapshots, setEditSnapshots] = useState<Map<number, BoxForm>>(new Map())
   const [printingBoxIdx, setPrintingBoxIdx] = useState<number | null>(null)
+  // Article whose Print-range batch is currently running (null = idle).
+  const [printingRange, setPrintingRange] = useState<string | null>(null)
 
   // Box delete confirmation
   const [deleteBoxIdx, setDeleteBoxIdx] = useState<number | null>(null)
@@ -108,7 +130,7 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
   const [showDiscrepancy, setShowDiscrepancy] = useState(false)
 
   // Box-wise entry unlocks only after the mail ("first") approval.
-  const boxesUnlocked = data?.status === "Approved"
+  const boxesUnlocked = data?.status === "Approved" || data?.status === "Submitted"
 
   useEffect(() => {
     if (isNaN(rtvId)) {
@@ -128,7 +150,19 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
         setInvoiceNumber(detail.invoice_number || "")
         setChallanNo(detail.challan_no || "")
         setDnNo(detail.dn_no || "")
-        setSalesPoc(detail.sales_poc || "")
+        {
+          // Hydrate Sales POC. A persisted manual email (or a name not in the
+          // dropdown) means it was entered via "Other"; show it in the manual fields.
+          const poc = detail.sales_poc || ""
+          const pocEmail = detail.sales_poc_email || ""
+          if (poc && !pocEmail && (SALES_POC_OPTIONS as string[]).includes(poc)) {
+            setSalesPoc(poc)
+          } else if (poc || pocEmail) {
+            setSalesPoc(SALES_POC_OTHER)
+            setSalesPocOtherName(poc)
+            setSalesPocOtherEmail(pocEmail)
+          }
+        }
         setBusinessHead((detail.business_head as BusinessHead) || "")
         setRemark(detail.remark || "")
         setVehicleNumber(detail.vehicle_number || "")
@@ -150,6 +184,10 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
             value: l.value?.toString() || "",
             carton_weight: l.carton_weight?.toString() || "",
             net_weight: l.net_weight?.toString() || "",
+            lot_number: l.lot_number || "",
+            item_mark: l.item_mark || "",
+            spl_remarks: l.spl_remarks || "",
+            vakkal: l.vakkal || "",
           }))
         )
 
@@ -166,6 +204,9 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
             gross_weight: b.gross_weight?.toString() || "",
             count: b.count?.toString() || "1",
             lot_number: b.lot_number?.toString() || "",
+            item_mark: b.item_mark?.toString() || "",
+            spl_remarks: b.spl_remarks?.toString() || "",
+            vakkal: b.vakkal?.toString() || "",
             box_id: b.box_id || undefined,
             is_printed: !!b.box_id,
           }
@@ -184,6 +225,9 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
             gross_weight: "",
             count: "1",
             lot_number: "",
+            item_mark: "",
+            spl_remarks: "",
+            vakkal: "",
             box_id: undefined,
             is_printed: false,
           }
@@ -271,14 +315,19 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
   const recomputeLineFromBoxes = (_boxes: BoxForm[], _articleDesc: string) => {}
 
   // Apply lot-number ranges (from the Lot Allocator) to a single article's boxes.
-  const applyLotRanges = (articleDesc: string, ranges: LotRange[]) => {
-    setBoxForms((prev) =>
-      prev.map((box) => {
-        if (box.article_description !== articleDesc) return box
-        const match = ranges.find((r) => box.box_number >= r.from && box.box_number <= r.to)
-        return match ? { ...box, lot_number: match.lot } : box
-      })
-    )
+  const applyLotRanges = (article: string, ranges: LotRange[]) => {
+    setBoxForms((prev) => applyLotRangesHelper(prev as ColdBox[], article, ranges) as BoxForm[])
+  }
+
+  // Cascade a cold article field to the line + all of that article's boxes.
+  const updateColdArticleField = (
+    idx: number,
+    field: "lot_number" | "item_mark" | "spl_remarks" | "vakkal",
+    value: string,
+  ) => {
+    updateLine(idx, field, value)
+    const art = lineForms[idx]?.item_description
+    if (art) setBoxForms((prev) => cascadeArticleField(prev as ColdBox[], art, field, value) as BoxForm[])
   }
 
   // ─── Quantity Units change — controls box count (identical to inward) ──
@@ -308,6 +357,9 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
           gross_weight: "",
           count: "1",
           lot_number: "",
+          item_mark: "",
+          spl_remarks: "",
+          vakkal: "",
           box_id: undefined,
           is_printed: false,
         })
@@ -351,6 +403,9 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
         gross_weight: "",
         count: "1",
         lot_number: "",
+        item_mark: "",
+        spl_remarks: "",
+        vakkal: "",
         box_id: undefined,
         is_printed: false,
       },
@@ -433,6 +488,9 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
         net_weight: box.net_weight || undefined,
         gross_weight: box.gross_weight || undefined,
         lot_number: box.lot_number || undefined,
+        item_mark: box.item_mark || undefined,
+        spl_remarks: box.spl_remarks || undefined,
+        vakkal: box.vakkal || undefined,
         count: box.count ? parseInt(box.count) : undefined,
       })
 
@@ -516,17 +574,17 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
           <div class="qr"><img src="${qrCodeDataURL}" /></div>
           <div class="info">
             <div>
-              <div class="company">${company}</div>
-              <div class="txn">${data.rtv_id}</div>
-              <div class="boxid">ID: ${boxId}</div>
+              <div class="company">${escapeHtml(company)}</div>
+              <div class="txn">${escapeHtml(data.rtv_id)}</div>
+              <div class="boxid">ID: ${escapeHtml(boxId)}</div>
             </div>
-            <div class="item">${box.article_description}</div>
+            <div class="item">${escapeHtml(box.article_description)}</div>
             <div>
-              <div class="detail"><b>Box #${box.box_number}</b> &nbsp; Net: ${box.net_weight || "\u2014"}kg &nbsp; Gross: ${box.gross_weight || "\u2014"}kg</div>
-              ${box.count ? `<div class="detail">Count: ${box.count}</div>` : ""}
-              <div class="detail">Date: ${formatDate(data.rtv_date)}</div>
+              <div class="detail"><b>Box #${escapeHtml(box.box_number)}</b> &nbsp; Net: ${escapeHtml(box.net_weight || "\u2014")}kg &nbsp; Gross: ${escapeHtml(box.gross_weight || "\u2014")}kg</div>
+              ${box.count ? `<div class="detail">Count: ${escapeHtml(box.count)}</div>` : ""}
+              <div class="detail">Date: ${escapeHtml(formatDate(data.rtv_date))}</div>
             </div>
-            <div class="lot">${data.customer || ""}</div>
+            <div class="lot">${escapeHtml([box.lot_number, box.item_mark].filter(Boolean).join(" · ")) || escapeHtml(data.customer || "")}</div>
           </div>
         </div>
         <script>
@@ -557,6 +615,109 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
       console.error("Print failed:", err)
     } finally {
       setPrintingBoxIdx(null)
+    }
+  }
+
+  // Print a set of boxes, INCLUDING ones that were never printed: any box
+  // without a box_id is upserted first (which assigns a box_id and marks it
+  // Printed), then the whole set is sent to the label printer. This is what
+  // lets Print range work on freshly-entered boxes, not just already-printed
+  // ones. Upserts run in small concurrent chunks so large ranges stay fast.
+  const printBoxSet = async (targets: { b: BoxForm; i: number }[]) => {
+    if (!data || targets.length === 0) return
+    // Persist any box that was never printed (no box_id) OR has been edited
+    // since its last print, so the printed label and the backend stay in sync.
+    // Edits to already-printed boxes are also written to the box-edit audit log,
+    // mirroring the single-box handlePrintBox path.
+    const toUpsert = targets.filter(({ b, i }) => !b.box_id || editingBoxIndices.has(i))
+    const CHUNK = 8
+    const newIds: Record<number, string> = {}
+    for (let k = 0; k < toUpsert.length; k += CHUNK) {
+      const chunk = toUpsert.slice(k, k + CHUNK)
+      const results = await Promise.all(
+        chunk.map(async ({ b, i }) => {
+          const line = lineForms.find((l) => l.item_description === b.article_description)
+          const res = await rtvApi.upsertBox(company, rtvId, {
+            article_description: b.article_description,
+            box_number: b.box_number,
+            uom: line?.uom || undefined,
+            conversion: b.conversion || undefined,
+            net_weight: b.net_weight || undefined,
+            gross_weight: b.gross_weight || undefined,
+            lot_number: b.lot_number || undefined,
+            item_mark: b.item_mark || undefined,
+            spl_remarks: b.spl_remarks || undefined,
+            vakkal: b.vakkal || undefined,
+            count: b.count ? parseInt(b.count) : undefined,
+          })
+          const wasEditing = editingBoxIndices.has(i)
+          if (wasEditing) {
+            const snap = editSnapshots.get(i)
+            if (snap) {
+              const changes: Array<{ field_name: string; old_value?: string; new_value?: string }> = []
+              if (snap.net_weight !== b.net_weight) changes.push({ field_name: "net_weight", old_value: snap.net_weight, new_value: b.net_weight })
+              if (snap.gross_weight !== b.gross_weight) changes.push({ field_name: "gross_weight", old_value: snap.gross_weight, new_value: b.gross_weight })
+              if (snap.count !== b.count) changes.push({ field_name: "count", old_value: snap.count, new_value: b.count })
+              if (changes.length > 0) {
+                await rtvApi.logBoxEdit({ email_id: user?.email || "unknown", box_id: res.box_id, rtv_id: data.rtv_id, changes })
+              }
+            }
+          }
+          return { i, box_id: res.box_id, wasEditing }
+        }),
+      )
+      // Flush this chunk to local state immediately, so a later-chunk failure
+      // doesn't leave already-saved boxes looking unprinted (recoverable retry).
+      const chunkIds: Record<number, string> = {}
+      const chunkEdited: number[] = []
+      results.forEach((r) => { newIds[r.i] = r.box_id; chunkIds[r.i] = r.box_id; if (r.wasEditing) chunkEdited.push(r.i) })
+      setBoxForms((prev) => prev.map((b, idx) => (chunkIds[idx] ? { ...b, box_id: chunkIds[idx], is_printed: true } : b)))
+      if (chunkEdited.length > 0) {
+        setEditingBoxIndices((prev) => { const n = new Set(prev); chunkEdited.forEach((idx) => n.delete(idx)); return n })
+        setEditSnapshots((prev) => { const n = new Map(prev); chunkEdited.forEach((idx) => n.delete(idx)); return n })
+      }
+    }
+
+    const boxesToPrint = targets.map(({ b, i }) => ({ ...b, box_id: newIds[i] || b.box_id }))
+    await printLabels({ company, rtvStringId: data.rtv_id || "", customer, boxes: boxesToPrint })
+  }
+
+  // Print every box of an article whose box_number is within [from, to],
+  // regardless of whether it was already printed. Defaults: from=1, to=∞.
+  const handlePrintRange = async (article: string) => {
+    const r = printRange[article]
+    const from = parseInt(r?.from || "1")
+    const to = parseInt(r?.to || "999999")
+    if (Number.isNaN(from) || Number.isNaN(to)) return
+    const targets = boxForms
+      .map((b, i) => ({ b, i }))
+      .filter(({ b }) => b.article_description === article && b.box_number >= from && b.box_number <= to)
+      .sort((x, y) => x.b.box_number - y.b.box_number)
+    if (targets.length === 0) return
+    try {
+      setPrintingRange(article)
+      await printBoxSet(targets)
+    } catch (err) {
+      console.error("Print range failed:", err)
+      setSubmitError("Failed to print the selected range. Please try again.")
+    } finally {
+      setPrintingRange(null)
+    }
+  }
+
+  // Print labels for EVERY entered box, upserting any that were never printed
+  // so they too get a box_id and Printed status (same behaviour as Print range).
+  const handlePrintAll = async () => {
+    const targets = boxForms.map((b, i) => ({ b, i }))
+    if (targets.length === 0) return
+    try {
+      setPrintingRange("__all__")
+      await printBoxSet(targets)
+    } catch (err) {
+      console.error("Print all failed:", err)
+      setSubmitError("Failed to print all labels. Please try again.")
+    } finally {
+      setPrintingRange(null)
     }
   }
 
@@ -611,13 +772,17 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
         invoice_number: invoiceNumber || undefined,
         challan_no: challanNo || undefined,
         dn_no: dnNo || undefined,
-        sales_poc: salesPoc || undefined,
+        sales_poc: (salesPoc === SALES_POC_OTHER ? salesPocOtherName : salesPoc) || undefined,
+        sales_poc_email: (salesPoc === SALES_POC_OTHER ? salesPocOtherEmail : "") || undefined,
         business_head: businessHead || undefined,
         remark: remark || undefined,
         vehicle_number: vehicleNumber || undefined,
         transporter_name: transporterName || undefined,
         driver_name: driverName || undefined,
         inward_manager: inwardManager || undefined,
+        // NOTE: status -> "Submitted" is set server-side by bulkSaveBoxes (which
+        // only transitions from Approved/Submitted). We deliberately do NOT set it
+        // here, so this header update can't flip a Pending/Rejected CR to Submitted.
       })
 
       // 2. Persist line edits (state-aware merge — no destructive wipe).
@@ -635,6 +800,10 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
           conversion: l.uom || undefined,
           carton_weight: l.carton_weight || undefined,
           net_weight: l.net_weight || "0",
+          lot_number: l.lot_number || undefined,
+          item_mark: l.item_mark || undefined,
+          spl_remarks: l.spl_remarks || undefined,
+          vakkal: l.vakkal || undefined,
         })),
       })
 
@@ -649,6 +818,9 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
             uom: parentLine?.uom || undefined,
             conversion: b.conversion || undefined,
             lot_number: b.lot_number || undefined,
+            item_mark: b.item_mark || undefined,
+            spl_remarks: b.spl_remarks || undefined,
+            vakkal: b.vakkal || undefined,
             net_weight: b.net_weight || undefined,
             gross_weight: b.gross_weight || undefined,
             count: b.count ? parseInt(b.count) : undefined,
@@ -691,8 +863,6 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
     )
   }
 
-  const isApproved = data.status === "Approved"
-
   return (
     <PermissionGuard module="reordering" action="view">
       <div className="p-3 sm:p-4 md:p-6 max-w-[1100px] mx-auto space-y-3 sm:space-y-4">
@@ -704,7 +874,7 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-lg sm:text-xl font-bold tracking-tight break-all">{data.rtv_id}</h1>
-              <Badge variant="outline" className={isApproved
+              <Badge variant="outline" className={boxesUnlocked
                 ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                 : "bg-amber-50 text-amber-700 border-amber-200"
               }>
@@ -712,7 +882,7 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
               </Badge>
             </div>
             <p className="text-xs text-muted-foreground mt-0.5">
-              {isApproved ? "Enter box weights & print QR labels" : "Box entry is locked until mail approval"}
+              {boxesUnlocked ? "Enter box weights & print QR labels" : "Box entry is locked until mail approval"}
             </p>
           </div>
         </div>
@@ -736,16 +906,7 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
               <div className="space-y-1">
                 <Label className="text-xs">Factory Unit</Label>
-                <Select value={factoryUnit} onValueChange={setFactoryUnit}>
-                  <SelectTrigger className="h-9">
-                    <SelectValue placeholder="Select factory" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {["W202", "A185", "A68", "A101", "F53", "Savla", "New Savla", "Rishi"].map((f) => (
-                      <SelectItem key={f} value={f}>{f}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <WarehouseSelect value={factoryUnit} onChange={setFactoryUnit} />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Customer</Label>
@@ -765,7 +926,33 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Sales POC</Label>
-                <Input value={salesPoc} onChange={(e) => setSalesPoc(e.target.value)} className="h-9" />
+                <Select value={salesPoc || undefined} onValueChange={setSalesPoc}>
+                  <SelectTrigger className="h-9">
+                    <SelectValue placeholder="Select sales POC" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SALES_POC_DROPDOWN_OPTIONS.map((poc) => (
+                      <SelectItem key={poc} value={poc}>{poc}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {salesPoc === SALES_POC_OTHER && (
+                  <div className="space-y-1 pt-1">
+                    <Input
+                      value={salesPocOtherName}
+                      onChange={(e) => setSalesPocOtherName(e.target.value)}
+                      placeholder="POC name"
+                      className="h-9"
+                    />
+                    <Input
+                      type="email"
+                      value={salesPocOtherEmail}
+                      onChange={(e) => setSalesPocOtherEmail(e.target.value)}
+                      placeholder="poc@example.com (added to mail CC)"
+                      className="h-9"
+                    />
+                  </div>
+                )}
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Business Head</Label>
@@ -863,6 +1050,26 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
                     <Label className="text-[11px]">Net Wt <span className="text-muted-foreground text-[9px]">(box sum)</span></Label>
                     <Input type="number" value={articleNetSum(line.item_description) || ""} readOnly className="h-8 text-xs bg-muted" />
                   </div>
+                  {isColdWarehouse(normalizeWarehouseName(factoryUnit)) && (
+                    <>
+                      <div className="space-y-1">
+                        <Label className="text-[11px]">Lot No</Label>
+                        <Input value={line.lot_number || ""} onChange={(e) => updateColdArticleField(idx, "lot_number", e.target.value)} className="h-8 text-xs" placeholder="Lot no" />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[11px]">Item Mark</Label>
+                        <Input value={line.item_mark || ""} onChange={(e) => updateColdArticleField(idx, "item_mark", e.target.value)} className="h-8 text-xs" placeholder="Item mark" />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[11px]">Spl. Remarks</Label>
+                        <Input value={line.spl_remarks || ""} onChange={(e) => updateColdArticleField(idx, "spl_remarks", e.target.value)} className="h-8 text-xs" placeholder="Special remarks" />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[11px]">Vakkal</Label>
+                        <Input value={line.vakkal || ""} onChange={(e) => updateColdArticleField(idx, "vakkal", e.target.value)} className="h-8 text-xs" placeholder="Vakkal" />
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 {/* Boxes for this article */}
@@ -880,10 +1087,73 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
                   {/* Lot Allocator — bulk-assign lot numbers to box ranges */}
                   {boxesUnlocked && (
                     <LotRangeDedicator
-                      warehouse={factoryUnit}
+                      warehouse={normalizeWarehouseName(factoryUnit)}
                       totalBoxes={boxForms.filter((b) => b.article_description === line.item_description).length}
                       onApply={(ranges) => applyLotRanges(line.item_description, ranges)}
                     />
+                  )}
+
+                  {/* Bulk fill all boxes of this article */}
+                  {boxesUnlocked && (
+                    <div className="flex flex-wrap items-end gap-2 rounded-md border border-dashed p-2">
+                      <span className="text-[11px] font-medium text-muted-foreground">Bulk fill boxes:</span>
+                      <Input type="number" step="0.001" placeholder="Net wt" className="h-7 w-24 text-xs"
+                        value={bulkFill[line.item_description]?.net || ""}
+                        onChange={(e) => setBulkFill((p) => ({ ...p, [line.item_description]: { ...(p[line.item_description] || { net: "", gross: "", count: "" }), net: e.target.value } }))} />
+                      <Input type="number" step="0.001" placeholder="Gross wt" className="h-7 w-24 text-xs"
+                        value={bulkFill[line.item_description]?.gross || ""}
+                        onChange={(e) => setBulkFill((p) => ({ ...p, [line.item_description]: { ...(p[line.item_description] || { net: "", gross: "", count: "" }), gross: e.target.value } }))} />
+                      <Input type="number" placeholder="Count" className="h-7 w-20 text-xs"
+                        value={bulkFill[line.item_description]?.count || ""}
+                        onChange={(e) => setBulkFill((p) => ({ ...p, [line.item_description]: { ...(p[line.item_description] || { net: "", gross: "", count: "" }), count: e.target.value } }))} />
+                      <Button type="button" variant="outline" size="sm" className="h-7 text-xs"
+                        onClick={() => {
+                          const v = bulkFill[line.item_description]
+                          if (!v) return
+                          const uomNum = parseFloat(line.uom || "") || 0
+                          const cartonNum = parseFloat(line.carton_weight || "") || 0
+                          setBoxForms((prev) => {
+                            const filled = bulkFillBoxes(prev as ColdBox[], line.item_description, {
+                              ...(v.net ? { net_weight: v.net } : {}),
+                              ...(v.gross ? { gross_weight: v.gross } : {}),
+                              ...(v.count ? { count: v.count } : {}),
+                            }) as BoxForm[]
+                            // Mirror per-box auto-calc: conversion = count×UOM, and
+                            // net = gross−carton when gross was bulk-set (and net wasn't).
+                            return filled.map((b) => {
+                              if (b.article_description !== line.item_description) return b
+                              const next = { ...b }
+                              const cnt = parseFloat(next.count) || 0
+                              if (uomNum > 0 && cnt > 0) next.conversion = String(parseFloat((cnt * uomNum).toFixed(3)))
+                              if (v.gross && !v.net && cartonNum > 0) {
+                                const g = parseFloat(next.gross_weight) || 0
+                                next.net_weight = String(parseFloat(Math.max(0, g - cartonNum).toFixed(3)))
+                              }
+                              return next
+                            })
+                          })
+                        }}>
+                        Apply to all
+                      </Button>
+                    </div>
+                  )}
+
+                  {/* Print a range of box labels for this article */}
+                  {boxesUnlocked && (
+                    <div className="flex flex-wrap items-end gap-2">
+                      <span className="text-[11px] font-medium text-muted-foreground">Print range:</span>
+                      <Input type="number" min="1" placeholder="From" className="h-7 w-20 text-xs"
+                        value={printRange[line.item_description]?.from || ""}
+                        onChange={(e) => setPrintRange((p) => ({ ...p, [line.item_description]: { ...(p[line.item_description] || { from: "", to: "" }), from: e.target.value } }))} />
+                      <Input type="number" min="1" placeholder="To" className="h-7 w-20 text-xs"
+                        value={printRange[line.item_description]?.to || ""}
+                        onChange={(e) => setPrintRange((p) => ({ ...p, [line.item_description]: { ...(p[line.item_description] || { from: "", to: "" }), to: e.target.value } }))} />
+                      <Button type="button" variant="outline" size="sm" className="h-7 text-xs"
+                        disabled={printingRange === line.item_description}
+                        onClick={() => handlePrintRange(line.item_description)}>
+                        {printingRange === line.item_description ? "Printing…" : "Print range"}
+                      </Button>
+                    </div>
                   )}
 
                   {/* Go-to-box navigation + scrollable box list */}
@@ -1071,6 +1341,11 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
           <Button variant="outline" size="sm" onClick={() => setShowDiscard(true)} className="gap-1.5">
             <ArrowLeft className="h-4 w-4" /> Cancel
           </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" className="gap-1.5" disabled={!boxesUnlocked || printingRange === "__all__"}
+              onClick={handlePrintAll}>
+              <Printer className="h-4 w-4" /> {printingRange === "__all__" ? "Printing…" : "Print all labels"}
+            </Button>
           <Button
             size="sm"
             onClick={handleSave}
@@ -1081,6 +1356,7 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
             {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
             Save
           </Button>
+          </div>
         </div>
 
         {/* Net-weight discrepancy confirm (warn but allow) */}

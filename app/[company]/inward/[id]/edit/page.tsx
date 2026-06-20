@@ -79,6 +79,15 @@ export default function EditInwardPage({ params }: EditInwardPageProps) {
   const [bulkAddGrossWeight, setBulkAddGrossWeight] = useState("")
   const [addingBulkBoxes, setAddingBulkBoxes] = useState(false)
 
+  // Per-article box pagination — render only a window of boxes so transactions
+  // with thousands of boxes don't render all rows at once and freeze the page.
+  const BOX_PAGE_SIZE = 200
+  const [boxPageMap, setBoxPageMap] = useState<Record<string, number>>({})
+  const [highlightBoxMap, setHighlightBoxMap] = useState<Record<string, { boxNumber: number; key: number } | null>>({})
+  const getBoxPage = (articleDesc: string) => boxPageMap[articleDesc] ?? 1
+  const setBoxPage = (articleDesc: string, page: number) =>
+    setBoxPageMap((prev) => ({ ...prev, [articleDesc]: page }))
+
   // Submit
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -650,12 +659,26 @@ export default function EditInwardPage({ params }: EditInwardPageProps) {
                   </div>
 
                   {/* Existing boxes summary */}
-                  {articleBoxes.length > 0 && (
+                  {articleBoxes.length > 0 && (() => {
+                    const artPage = getBoxPage(article.item_description)
+                    const artTotalPages = Math.max(1, Math.ceil(articleBoxes.length / BOX_PAGE_SIZE))
+                    const pageStart = (artPage - 1) * BOX_PAGE_SIZE
+                    const pageBoxes = articleBoxes.slice(pageStart, pageStart + BOX_PAGE_SIZE)
+                    return (
                     <BoxScrollContainer
                       boxCount={articleBoxes.length}
+                      currentPage={artPage}
+                      totalPages={artTotalPages}
+                      onPageChange={(page) => setBoxPage(article.item_description, page)}
+                      onNavigate={(boxNum) => {
+                        const targetPage = Math.ceil(boxNum / BOX_PAGE_SIZE)
+                        setBoxPage(article.item_description, targetPage)
+                        setHighlightBoxMap((prev) => ({ ...prev, [article.item_description]: { boxNumber: boxNum, key: Date.now() } }))
+                      }}
+                      highlightBox={highlightBoxMap[article.item_description] ?? null}
                       boxForms={articleBoxes.map((b) => ({ box_number: b.box_number, lot_number: b.lot_number, article_description: b.article_description }))}
                     >
-                      {(registerRef) => articleBoxes.map((box) => (
+                      {(registerRef) => pageBoxes.map((box) => (
                         <span
                           key={`${box.article_description}-${box.box_number}`}
                           ref={(el) => registerRef(box.box_number, el)}
@@ -668,7 +691,8 @@ export default function EditInwardPage({ params }: EditInwardPageProps) {
                         </span>
                       ))}
                     </BoxScrollContainer>
-                  )}
+                    )
+                  })()}
 
                   {/* Bulk Add Form */}
                   {bulkAddArticle === article.item_description && (

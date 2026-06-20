@@ -14,13 +14,14 @@ import { Skeleton } from "@/components/ui/skeleton"
 import Link from "next/link"
 import {
   Plus, Eye, Edit, Trash2, Search, X, ChevronLeft, ChevronRight,
-  RotateCcw, Clock, CheckCircle2, Loader2, Download, BarChart3,
+  RotateCcw, Clock, CheckCircle2, CheckCheck, Loader2, Download, BarChart3,
 } from "lucide-react"
 import { format } from "date-fns"
 import { rtvApi } from "@/lib/api/rtvApiService"
 import type { RTVListItem, RTVStatus } from "@/types/rtv"
 import { PermissionGuard } from "@/components/auth/permission-gate"
 import { useAuthStore } from "@/lib/stores/auth"
+import { getDisplayWarehouseName } from "@/lib/constants/warehouses"
 import { cn } from "@/lib/utils"
 
 interface RTVListPageProps {
@@ -31,12 +32,14 @@ const STATUS_TABS: { label: string; value: RTVStatus | "all"; icon: React.Elemen
   { label: "All", value: "all", icon: RotateCcw, color: "text-foreground" },
   { label: "Pending", value: "Pending", icon: Clock, color: "text-amber-600" },
   { label: "Approved", value: "Approved", icon: CheckCircle2, color: "text-emerald-600" },
+  { label: "Submitted", value: "Submitted", icon: CheckCheck, color: "text-blue-600" },
 ]
 
 function StatusBadge({ status }: { status: RTVStatus }) {
   const config: Record<string, { label: string; className: string }> = {
     Pending: { label: "Pending", className: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-800" },
     Approved: { label: "Approved", className: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-800" },
+    Submitted: { label: "Submitted", className: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-800" },
   }
   const c = config[status] || config.Pending
   return <Badge variant="outline" className={c.className}>{c.label}</Badge>
@@ -154,7 +157,7 @@ export default function RTVListPage({ params }: RTVListPageProps) {
         {/* Header */}
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <h1 className="text-lg sm:text-xl md:text-2xl font-bold tracking-tight">CR / Rejection</h1>
+            <h1 className="text-lg sm:text-xl md:text-2xl font-bold tracking-tight">Customer Returns</h1>
             <p className="text-xs sm:text-sm text-muted-foreground mt-0.5 hidden sm:block">
               Manage customer return entries and approvals
             </p>
@@ -279,7 +282,7 @@ export default function RTVListPage({ params }: RTVListPageProps) {
                         <th className="text-left font-medium px-4 py-2.5 hidden lg:table-cell">Business Head</th>
                         <th className="text-left font-medium px-4 py-2.5 hidden lg:table-cell">Factory Unit</th>
                         <th className="text-left font-medium px-4 py-2.5 hidden lg:table-cell">Items</th>
-                        <th className="text-left font-medium px-4 py-2.5 hidden lg:table-cell">Total Qty</th>
+                        <th className="text-left font-medium px-4 py-2.5 hidden lg:table-cell">Net Wt (kg)</th>
                         <th className="text-right font-medium px-4 py-2.5">Actions</th>
                       </tr>
                     </thead>
@@ -293,11 +296,11 @@ export default function RTVListPage({ params }: RTVListPageProps) {
                           <td className="px-4 py-3"><StatusBadge status={item.status} /></td>
                           <td className="px-4 py-3 text-muted-foreground truncate max-w-[200px]">{item.customer || "\u2014"}</td>
                           <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">{item.business_head || "\u2014"}</td>
-                          <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">{item.factory_unit || "\u2014"}</td>
+                          <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">{getDisplayWarehouseName(item.factory_unit) || "\u2014"}</td>
                           <td className="px-4 py-3 hidden lg:table-cell">
                             <Badge variant="secondary" className="text-xs">{item.items_count} items</Badge>
                           </td>
-                          <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">{item.total_qty}</td>
+                          <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">{item.total_net_weight} kg</td>
                           <td className="px-4 py-3">
                             <div className="flex items-center justify-end gap-1">
                               <Button variant="ghost" size="icon" className="h-7 w-7" asChild>
@@ -348,8 +351,8 @@ export default function RTVListPage({ params }: RTVListPageProps) {
                       <div className="flex flex-wrap gap-1 text-xs text-muted-foreground">
                         <span>{item.items_count} items</span>
                         <span>\u00b7</span>
-                        <span>Qty: {item.total_qty}</span>
-                        {item.factory_unit && (<><span>\u00b7</span><span>{item.factory_unit}</span></>)}
+                        <span>Net Wt: {item.total_net_weight} kg</span>
+                        {item.factory_unit && (<><span>\u00b7</span><span>{getDisplayWarehouseName(item.factory_unit)}</span></>)}
                       </div>
                       <div className="flex items-center gap-1 pt-1">
                         <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 flex-1" asChild>

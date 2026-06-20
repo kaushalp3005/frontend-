@@ -71,6 +71,7 @@ export interface TransferLine {
   total_weight: number
   batch_number: string
   lot_number: string
+  vakkal?: string
 }
 
 export type TransferStatus = "Pending" | "Approved" | "Cancelled" | "Accept"

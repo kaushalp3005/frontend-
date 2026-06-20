@@ -22,8 +22,16 @@ import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
 } from "@/components/ui/dropdown-menu"
 import { rtvApi } from "@/lib/api/rtvApiService"
-import { BUSINESS_HEAD_OPTIONS, type BusinessHead, type RTVLineCreate } from "@/types/rtv"
+import {
+  BUSINESS_HEAD_OPTIONS,
+  SALES_POC_DROPDOWN_OPTIONS,
+  SALES_POC_OTHER,
+  type BusinessHead,
+  type RTVLineCreate,
+} from "@/types/rtv"
 import { RTVLineEditor, type RTVLineForm } from "@/components/modules/rtv/RTVLineEditor"
+import { WarehouseSelect } from "@/components/modules/warehouse/WarehouseSelect"
+import { isColdWarehouse } from "@/lib/constants/warehouses"
 import { PermissionGuard } from "@/components/auth/permission-gate"
 import { useAuthStore } from "@/lib/stores/auth"
 import { useToast } from "@/hooks/use-toast"
@@ -60,6 +68,10 @@ const emptyLine = (): RTVLineForm => ({
   value: "",
   carton_weight: "",
   net_weight: "",
+  lot_number: "",
+  item_mark: "",
+  spl_remarks: "",
+  vakkal: "",
 })
 
 export default function NewRTVPage({ params }: NewRTVPageProps) {
@@ -75,6 +87,8 @@ export default function NewRTVPage({ params }: NewRTVPageProps) {
   const [challanNo, setChallanNo] = useState("")
   const [dnNo, setDnNo] = useState("")
   const [salesPoc, setSalesPoc] = useState("")
+  const [salesPocOtherName, setSalesPocOtherName] = useState("")
+  const [salesPocOtherEmail, setSalesPocOtherEmail] = useState("")
   const [businessHead, setBusinessHead] = useState<BusinessHead | "">("")
   const [remark, setRemark] = useState("")
   // Dispatch / logistics (new backend fields)
@@ -133,7 +147,8 @@ export default function NewRTVPage({ params }: NewRTVPageProps) {
         invoice_number: invoiceNumber || undefined,
         challan_no: challanNo || undefined,
         dn_no: dnNo || undefined,
-        sales_poc: salesPoc || undefined,
+        sales_poc: (salesPoc === SALES_POC_OTHER ? salesPocOtherName : salesPoc) || undefined,
+        sales_poc_email: (salesPoc === SALES_POC_OTHER ? salesPocOtherEmail : "") || undefined,
         business_head: businessHead || undefined,
         remark: remark || undefined,
         vehicle_number: vehicleNumber || undefined,
@@ -154,6 +169,10 @@ export default function NewRTVPage({ params }: NewRTVPageProps) {
         conversion: l.uom || undefined,
         carton_weight: l.carton_weight || undefined,
         net_weight: l.net_weight || "0",
+        lot_number: l.lot_number || undefined,
+        item_mark: l.item_mark || undefined,
+        spl_remarks: l.spl_remarks || undefined,
+        vakkal: l.vakkal || undefined,
       })),
     }
 
@@ -644,16 +663,7 @@ export default function NewRTVPage({ params }: NewRTVPageProps) {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
               <div className="space-y-1">
                 <Label className="text-xs">Factory Unit <span className="text-destructive">*</span></Label>
-                <Select value={factoryUnit} onValueChange={setFactoryUnit}>
-                  <SelectTrigger className="h-9">
-                    <SelectValue placeholder="Select factory" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {["W202", "A185", "A68", "A101", "F53", "Savla", "New Savla", "Rishi"].map((f) => (
-                      <SelectItem key={f} value={f}>{f}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <WarehouseSelect value={factoryUnit} onChange={setFactoryUnit} />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Customer <span className="text-destructive">*</span></Label>
@@ -684,7 +694,33 @@ export default function NewRTVPage({ params }: NewRTVPageProps) {
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Sales POC</Label>
-                <Input value={salesPoc} onChange={(e) => setSalesPoc(e.target.value)} placeholder="John Doe" className="h-9" />
+                <Select value={salesPoc || undefined} onValueChange={setSalesPoc}>
+                  <SelectTrigger className="h-9">
+                    <SelectValue placeholder="Select sales POC" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SALES_POC_DROPDOWN_OPTIONS.map((poc) => (
+                      <SelectItem key={poc} value={poc}>{poc}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {salesPoc === SALES_POC_OTHER && (
+                  <div className="space-y-1 pt-1">
+                    <Input
+                      value={salesPocOtherName}
+                      onChange={(e) => setSalesPocOtherName(e.target.value)}
+                      placeholder="POC name"
+                      className="h-9"
+                    />
+                    <Input
+                      type="email"
+                      value={salesPocOtherEmail}
+                      onChange={(e) => setSalesPocOtherEmail(e.target.value)}
+                      placeholder="poc@example.com (added to mail CC)"
+                      className="h-9"
+                    />
+                  </div>
+                )}
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Business Head</Label>
@@ -792,6 +828,26 @@ export default function NewRTVPage({ params }: NewRTVPageProps) {
                         <Label className="text-[11px]">Net Wt <span className="text-muted-foreground text-[9px]">(box sum)</span></Label>
                         <Input type="number" value={articleNetSum(line.item_description) || ""} readOnly className="h-8 text-xs bg-muted" />
                       </div>
+                      {isColdWarehouse(factoryUnit) && (
+                        <>
+                          <div className="space-y-1">
+                            <Label className="text-[11px]">Lot No</Label>
+                            <Input value={line.lot_number || ""} onChange={(e) => updateLine(idx, "lot_number", e.target.value)} className="h-8 text-xs" placeholder="Lot no" />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-[11px]">Item Mark</Label>
+                            <Input value={line.item_mark || ""} onChange={(e) => updateLine(idx, "item_mark", e.target.value)} className="h-8 text-xs" placeholder="Item mark" />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-[11px]">Spl. Remarks</Label>
+                            <Input value={line.spl_remarks || ""} onChange={(e) => updateLine(idx, "spl_remarks", e.target.value)} className="h-8 text-xs" placeholder="Special remarks" />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-[11px]">Vakkal</Label>
+                            <Input value={line.vakkal || ""} onChange={(e) => updateLine(idx, "vakkal", e.target.value)} className="h-8 text-xs" placeholder="Vakkal" />
+                          </div>
+                        </>
+                      )}
                     </div>
 
                     {/* Boxes for this article — LOCKED until approval */}
