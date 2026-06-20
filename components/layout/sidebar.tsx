@@ -62,7 +62,7 @@ const navItems: NavItem[] = [
   { title: "Consumption", href: "/consumption", icon: Utensils, module: "consumption" },
   { title: "Inventory", href: "/inventory-ledger", icon: Package, module: "inventory-ledger" },
   { title: "Cold Storage", href: "/cold-storage", icon: Snowflake, module: "cold-storage" },
-  { title: "Customer Returns", href: "/reordering", icon: RotateCcw, module: "reordering" },
+  { title: "Customer Returns", href: "/customer-returns", icon: RotateCcw, module: "reordering" },
   { title: "Outward", href: "/outward", icon: ArrowUpFromLine, module: "outward" },
   { title: "Reports", href: "/reports", icon: FileText, module: "reports" },
   { title: "Settings", href: "/settings", icon: Settings, module: "settings" },
