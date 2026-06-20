@@ -250,6 +250,13 @@ export interface RTVBulkBoxUpdateRequest {
   boxes: RTVBulkBoxItem[]
 }
 
+// Consolidated save (header + lines + boxes) -> one "Updated" mail.
+export interface RTVSaveRequest {
+  header?: RTVHeaderUpdate
+  lines?: RTVLineCreate[]
+  boxes?: RTVBulkBoxItem[]
+}
+
 export interface RTVBulkBoxUpdateResponse {
   status: string
   rtv_id: string

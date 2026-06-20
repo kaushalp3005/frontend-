@@ -245,8 +245,9 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
     try {
       setSaving(true)
 
-      // 1. Persist line edits (include the 4 cold fields).
-      await rtvApi.updateRTVLines(company, rtvId, {
+      // 1+2. Single consolidated save (lines + boxes) -> ONE "Updated" mail with
+      //       a change summary, highlights and short-weight flags.
+      await rtvApi.saveRTV(company, rtvId, {
         lines: lineForms.map((l) => ({
           material_type: l.material_type || "RM",
           item_category: l.item_category,
@@ -265,21 +266,20 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
           spl_remarks: l.spl_remarks || undefined,
           vakkal: l.vakkal || undefined,
         })),
-      })
-
-      // 2. Persist the full box set (include cold fields + weights).
-      await rtvApi.bulkSaveBoxes(company, rtvId, {
         boxes: boxForms.map((b) => {
           const parentLine = lineForms.find((l) => l.item_description === b.article_description)
           return {
             article_description: b.article_description,
             box_number: b.box_number,
             uom: parentLine?.uom || undefined,
-            conversion: b.conversion || undefined,
-            lot_number: b.lot_number || undefined,
-            item_mark: b.item_mark || undefined,
-            spl_remarks: b.spl_remarks || undefined,
-            vakkal: b.vakkal || undefined,
+            // Text fields use ?? (not ||) so a cleared "" is sent rather than
+            // dropped to undefined; the backend COALESCE then writes "" and the
+            // field actually clears (|| would JSON-omit it and keep the old value).
+            conversion: b.conversion ?? undefined,
+            lot_number: b.lot_number ?? undefined,
+            item_mark: b.item_mark ?? undefined,
+            spl_remarks: b.spl_remarks ?? undefined,
+            vakkal: b.vakkal ?? undefined,
             net_weight: b.net_weight || undefined,
             gross_weight: b.gross_weight || undefined,
             count: b.count ? parseInt(b.count) : undefined,
