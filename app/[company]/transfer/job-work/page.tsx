@@ -104,6 +104,7 @@ interface JobWorkRecord {
   item_descriptions: string
   total_qty: number
   total_weight: number
+  total_net_weight: number
   created_by: string
   created_at: string
 }
@@ -118,6 +119,7 @@ interface PriorIR {
   ir_number: string
   receipt_date: string
   receipt_type: string
+  inward_warehouse: string
   total_fg_kgs: number
   total_waste_kgs: number
   total_rejection_kgs: number
@@ -302,6 +304,7 @@ function StatusReceiveHover({ rec, children }: { rec: JobWorkRecord; children: R
                       </span>
                     </div>
                     <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-slate-600">
+                      {ir.inward_warehouse && <span>WH: <span className="font-semibold text-indigo-700">{getDisplayWarehouseName(ir.inward_warehouse)}</span></span>}
                       <span>FG: <span className="font-semibold text-slate-800">{(ir.total_fg_kgs ?? 0).toFixed(2)} kg</span></span>
                       {ir.total_waste_kgs > 0 && <span>Waste: {ir.total_waste_kgs.toFixed(2)}</span>}
                       {ir.total_rejection_kgs > 0 && <span>Rej: {ir.total_rejection_kgs.toFixed(2)}</span>}
@@ -1084,6 +1087,8 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
   const isWithinFinalTolerance = totals.sent_kgs > 0 && Math.abs(overallUnaccountedLossPct) > 0.01 && Math.abs(overallUnaccountedLossPct) <= 0.2
   const canSubmitFinal = isFullyAccounted || isWithinFinalTolerance
   const toleranceStatus = getLossToleranceStatus()
+  // % of dispatched (sent) for the Material In dashboard cells
+  const pctOf = (v: number, base: number) => (base > 0 ? ((v / base) * 100).toFixed(1) : "0.0")
 
   // Cold storage detection — any warehouse flagged as "cold" in constants
   // (Savla D-39, Savla D-514, Rishi, Supreme) triggers the Cold Storage Details panel.
@@ -1358,9 +1363,9 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                                 </Badge>
                               </td>
                               <td className="px-3 py-2.5 text-xs truncate max-w-[120px]" title={rec.to_party}>{rec.to_party || "-"}</td>
-                              <td className="px-3 py-2.5 text-right text-xs font-medium text-emerald-700">{rec.total_fg_kgs.toFixed(2)}</td>
-                              <td className="px-3 py-2.5 text-right text-xs font-medium text-orange-700">{rec.total_waste_kgs.toFixed(2)}</td>
-                              <td className="px-3 py-2.5 text-right text-xs font-medium text-rose-700">{rec.total_rejection_kgs.toFixed(2)}</td>
+                              <td className="px-3 py-2.5 text-right text-xs font-medium text-emerald-700">{rec.total_fg_kgs.toFixed(2)} <span className="text-[10px] text-gray-400 font-normal">({pctOf(rec.total_fg_kgs, rec.total_sent_kgs)}%)</span></td>
+                              <td className="px-3 py-2.5 text-right text-xs font-medium text-orange-700">{rec.total_waste_kgs.toFixed(2)} <span className="text-[10px] text-gray-400 font-normal">({pctOf(rec.total_waste_kgs, rec.total_sent_kgs)}%)</span></td>
+                              <td className="px-3 py-2.5 text-right text-xs font-medium text-rose-700">{rec.total_rejection_kgs.toFixed(2)} <span className="text-[10px] text-gray-400 font-normal">({pctOf(rec.total_rejection_kgs, rec.total_sent_kgs)}%)</span></td>
                               <td className="px-3 py-2.5 text-center">
                                 <div className="flex items-center justify-center gap-1">
                                   <Button variant="ghost" size="sm" title="View Details"
@@ -2221,9 +2226,10 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                 setMiFoundRecord(null); setMiInwardWarehouse(""); setMiItems([]); setExpandedLossRows(new Set()); setMiSearchChallan(""); setMiChallanNo(""); setMiLossConfig(null); setMiReceiveCount(0); setMiPriorIRs([])
               }} className="h-10 px-5 text-sm">Clear</Button>
               <div className="flex items-center gap-3">
-                <Button type="button" disabled={miSubmitting}
+                <Button type="button" disabled={miSubmitting || canSubmitFinal}
                   onClick={(e) => handleSubmitMaterialIn(e as any, "partial")}
-                  className="h-10 px-5 text-sm shadow-sm bg-teal-600 hover:bg-teal-700 text-white">
+                  className="h-10 px-5 text-sm shadow-sm bg-teal-600 hover:bg-teal-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={canSubmitFinal ? "Accounting complete — use Submit Final to close this receipt" : ""}>
                   {miSubmitting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Submitting...</> :
                     <><Inbox className="h-4 w-4 mr-2" />Submit Partial</>}
                 </Button>
@@ -2344,7 +2350,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                         <th className="px-4 py-3 text-left font-medium text-gray-600 text-xs">Item Description</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600 text-xs hidden lg:table-cell">Date</th>
                         <th className="px-4 py-3 text-right font-medium text-gray-600 text-xs hidden lg:table-cell">Total Qty</th>
-                        <th className="px-4 py-3 text-right font-medium text-gray-600 text-xs">Total Wt (Kg)</th>
+                        <th className="px-4 py-3 text-right font-medium text-gray-600 text-xs">Net Wt (Kg)</th>
                         <th className="px-4 py-3 text-center font-medium text-gray-600 text-xs">Actions</th>
                       </tr>
                     </thead>
@@ -2366,7 +2372,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                                   <div><span className="font-semibold text-indigo-700">Status:</span> <span className="text-slate-700">{rec.status}</span></div>
                                   <div><span className="font-semibold text-indigo-700">From → To:</span> <span className="text-slate-700">{getDisplayWarehouseName(rec.from_warehouse)} → {rec.to_party}</span></div>
                                   <div><span className="font-semibold text-indigo-700">Date:</span> <span className="text-slate-700">{rec.job_work_date}</span></div>
-                                  <div><span className="font-semibold text-indigo-700">Qty / Wt:</span> <span className="text-slate-700">{rec.total_qty} pcs · {rec.total_weight?.toFixed(2)} Kg</span></div>
+                                  <div><span className="font-semibold text-indigo-700">Qty / Net Wt:</span> <span className="text-slate-700">{rec.total_qty} pcs · {(rec.total_net_weight || rec.total_weight)?.toFixed(2)} Kg</span></div>
                                   {(rec as any).sub_category && (
                                     <div><span className="font-semibold text-indigo-700">Process:</span> <span className="text-slate-700">{(rec as any).sub_category}</span></div>
                                   )}
@@ -2385,7 +2391,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                           <td className="px-4 py-3 text-xs max-w-[250px] truncate" title={rec.item_descriptions}>{rec.item_descriptions || "-"}</td>
                           <td className="px-4 py-3 text-xs whitespace-nowrap hidden lg:table-cell">{rec.job_work_date}</td>
                           <td className="px-4 py-3 text-right text-xs font-medium hidden lg:table-cell">{rec.total_qty}</td>
-                          <td className="px-4 py-3 text-right text-xs font-medium">{rec.total_weight.toFixed(2)}</td>
+                          <td className="px-4 py-3 text-right text-xs font-medium">{(rec.total_net_weight || rec.total_weight).toFixed(2)}</td>
                           <td className="px-4 py-3 text-center">
                             <div className="flex items-center justify-center gap-1">
                               {(rec.status === 'sent' || rec.status === 'partially_received') && (
@@ -2434,7 +2440,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                       )}
                       <div className="flex items-center justify-between text-xs text-gray-500">
                         <span>{rec.job_work_date}</span>
-                        <span>Qty: {rec.total_qty} | Wt: {rec.total_weight.toFixed(2)} kg</span>
+                        <span>Qty: {rec.total_qty} | Net Wt: {(rec.total_net_weight || rec.total_weight).toFixed(2)} kg</span>
                       </div>
                       <div className="flex items-center gap-2 pt-1 border-t flex-wrap">
                         {(rec.status === 'sent' || rec.status === 'partially_received') && (
