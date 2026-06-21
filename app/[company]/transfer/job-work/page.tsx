@@ -363,7 +363,22 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
   const [miRemarks, setMiRemarks] = useState("")
   const [miSubmitting, setMiSubmitting] = useState(false)
   const [expandedLossRows, setExpandedLossRows] = useState<Set<number>>(new Set())
-  const [miPriorIRs, setMiPriorIRs] = useState<Array<{ ir_number: string; challan_no: string; receipt_date: string; receipt_type: string; total_fg_kgs: number; total_waste_kgs: number; total_rejection_kgs: number }>>([])
+  const [miPriorIRs, setMiPriorIRs] = useState<Array<{ id?: number; ir_number: string; challan_no: string; receipt_date: string; receipt_type: string; inward_warehouse?: string; total_fg_kgs: number; total_waste_kgs: number; total_rejection_kgs: number }>>([])
+  // Receipt-history expansion: lazy-fetch a receipt's per-SKU bifurcation + warehouse.
+  const [miHistOpen, setMiHistOpen] = useState<Set<number>>(new Set())
+  const [miHistDetail, setMiHistDetail] = useState<Record<number, { loading: boolean; warehouse: string; lines: any[] }>>({})
+  const toggleHist = async (irId?: number) => {
+    if (!irId) return
+    setMiHistOpen((prev) => { const n = new Set(prev); if (n.has(irId)) n.delete(irId); else n.add(irId); return n })
+    if (miHistDetail[irId]) return
+    setMiHistDetail((p) => ({ ...p, [irId]: { loading: true, warehouse: "", lines: [] } }))
+    try {
+      const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
+      const res = await fetch(`${base}/job-work/material-in/${irId}`, { headers: { Accept: "application/json" } })
+      const d = await res.json()
+      setMiHistDetail((p) => ({ ...p, [irId]: { loading: false, warehouse: d?.receipt?.inward_warehouse || "", lines: d?.lines || [] } }))
+    } catch { setMiHistDetail((p) => ({ ...p, [irId]: { loading: false, warehouse: "", lines: [] } })) }
+  }
 
   // ════════════════════════════════════════
   //  ARTICLE ENTRY (Box ID + QR Generation)
@@ -1152,12 +1167,13 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
   const [rptFilterProcess, setRptFilterProcess] = useState("")
   const [rptFilterVendor, setRptFilterVendor] = useState("")
   const [rptFilterItem, setRptFilterItem] = useState("")
+  const [rptFilterGroup, setRptFilterGroup] = useState("")
   const [rptFilterFrom, setRptFilterFrom] = useState("")
   const [rptFilterTo, setRptFilterTo] = useState("")
-  const [rptActiveView, setRptActiveView] = useState<"drill" | "process" | "vendor" | "item" | "trend" | "matrix">("drill")
-  const [rptGroupBy, setRptGroupBy] = useState<"process" | "vendor">("process")
+  const [rptActiveView, setRptActiveView] = useState<"group" | "drill" | "process" | "vendor" | "item" | "trend" | "matrix">("group")
+  const [rptGroupBy, setRptGroupBy] = useState<"process" | "vendor" | "group">("group")
   const [rptSearch, setRptSearch] = useState("")
-  const rptActiveFilters = [rptFilterProcess, rptFilterVendor, rptFilterItem].filter((v) => !isAll(v)).length + (rptFilterFrom || rptFilterTo ? 1 : 0)
+  const rptActiveFilters = [rptFilterProcess, rptFilterVendor, rptFilterItem, rptFilterGroup].filter((v) => !isAll(v)).length + (rptFilterFrom || rptFilterTo ? 1 : 0)
   // Drill-down tree (Process -> Vendor -> Transaction) — all OUT records, grouped client-side.
   const [rptAllRecords, setRptAllRecords] = useState<any[]>([])
   const [rptTreeLoading, setRptTreeLoading] = useState(false)
@@ -1181,15 +1197,31 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
     setRptTxOpen((prev) => { const n = new Set(prev); if (n.has(challan)) n.delete(challan); else n.add(challan); return n })
     loadTxReceipts(challan)
   }
+  // Clicking a transaction opens the latest receipt's Inward Receipt Details card.
+  // If the JWO has no receipts yet, fall back to the Material In flow.
+  const openLatestReceipt = async (challan: string, receiptCount: number) => {
+    if (!receiptCount) { handleAddStock(challan); return }
+    const cached = rptReceipts[challan]?.rows
+    if (cached && cached.length && cached[cached.length - 1].id) { handleViewIR(cached[cached.length - 1].id); return }
+    try {
+      const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
+      const res = await fetch(`${base}/job-work/out/search?challan_no=${encodeURIComponent(challan)}`, { headers: { Accept: "application/json" } })
+      const d = await res.json()
+      const irs = d.prior_irs || []
+      if (irs.length && irs[irs.length - 1].id) handleViewIR(irs[irs.length - 1].id)
+      else handleAddStock(challan)
+    } catch { handleAddStock(challan) }
+  }
   const ymdLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
 
-  const loadReportWithParams = async (filterProcess: string, filterVendor: string, filterItem: string, from: string, to: string) => {
+  const loadReportWithParams = async (filterProcess: string, filterVendor: string, filterItem: string, from: string, to: string, filterGroup: string = "all") => {
     setRptLoading(true)
     try {
       const p = new URLSearchParams()
       if (filterProcess && filterProcess !== "all") p.append("sub_category", filterProcess)
       if (filterVendor && filterVendor !== "all") p.append("vendor", filterVendor)
       if (filterItem && filterItem !== "all") p.append("item", filterItem)
+      if (filterGroup && filterGroup !== "all") p.append("group", filterGroup)
       if (from) {
         const [y, m, d] = from.split('-')
         p.append("from_date", `${d}-${m}-${y}`)
@@ -1210,16 +1242,16 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
     }
   }
 
-  const loadReport = () => loadReportWithParams(rptFilterProcess, rptFilterVendor, rptFilterItem, rptFilterFrom, rptFilterTo)
+  const loadReport = () => loadReportWithParams(rptFilterProcess, rptFilterVendor, rptFilterItem, rptFilterFrom, rptFilterTo, rptFilterGroup)
 
   // Auto-reload on any filter change (debounced for date fields)
   useEffect(() => {
     if (activeTab !== "reports") return
     const timer = setTimeout(() => {
-      loadReportWithParams(rptFilterProcess, rptFilterVendor, rptFilterItem, rptFilterFrom, rptFilterTo)
+      loadReportWithParams(rptFilterProcess, rptFilterVendor, rptFilterItem, rptFilterFrom, rptFilterTo, rptFilterGroup)
     }, 100)
     return () => clearTimeout(timer)
-  }, [activeTab, rptFilterProcess, rptFilterVendor, rptFilterItem, rptFilterFrom, rptFilterTo])
+  }, [activeTab, rptFilterProcess, rptFilterVendor, rptFilterItem, rptFilterFrom, rptFilterTo, rptFilterGroup])
 
   // Fetch all OUT records once for the drill-down tree (grouped/filtered client-side).
   useEffect(() => {
@@ -1242,6 +1274,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
   const rptByProcess = rptData?.by_process || []
   const rptByVendor = rptData?.by_vendor || []
   const rptByItem = rptData?.by_item || []
+  const rptByGroup = rptData?.by_group || []
   const rptMonthly = rptData?.monthly_trend || []
   const rptVendorItem = rptData?.vendor_item_matrix || []
   // Client-side "search within results" applied to the active breakdown view.
@@ -1249,16 +1282,18 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
   const fProcess = rptQ ? rptByProcess.filter((r: any) => String(r.process || "").toLowerCase().includes(rptQ)) : rptByProcess
   const fVendor = rptQ ? rptByVendor.filter((r: any) => String(r.vendor || "").toLowerCase().includes(rptQ)) : rptByVendor
   const fItem = rptQ ? rptByItem.filter((r: any) => String(r.item || "").toLowerCase().includes(rptQ)) : rptByItem
+  const fGroup = rptQ ? rptByGroup.filter((r: any) => String(r.group || "").toLowerCase().includes(rptQ)) : rptByGroup
   const fMatrix = rptQ ? rptVendorItem.filter((r: any) => (String(r.vendor || "") + " " + String(r.item || "")).toLowerCase().includes(rptQ)) : rptVendorItem
   // Hardcoded options (same as material-out form) merged with DB options
   const PROCESS_OPTIONS = ["De seeding", "Dicing", "Cracking", "Stuffing", "Vacuum Packaging", "Slicing", "Thermopacking"]
   const VENDOR_OPTIONS = ["UNAZO CORPORATION", "Krishnat Kerba Chavan", "AL SAKHI ENTERPRISES", "MIE FOODS INDIA PRIVATE LIMITED", "HAG CORPORATION"]
 
-  const dbFilterOpts = rptData?.filter_options || { sub_categories: [], vendors: [], items: [] }
+  const dbFilterOpts = rptData?.filter_options || { sub_categories: [], vendors: [], items: [], groups: [] }
   const rptFilterOpts = {
     sub_categories: [...new Set([...PROCESS_OPTIONS, ...(dbFilterOpts.sub_categories || [])])].sort(),
     vendors: [...new Set([...VENDOR_OPTIONS, ...(dbFilterOpts.vendors || [])])].sort(),
     items: dbFilterOpts.items || [],
+    groups: dbFilterOpts.groups || [],
   }
 
   // Helper: bar width for visual bars
@@ -1620,20 +1655,74 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                         <div className="border-t border-blue-200 pt-2 mt-2">
                           <h5 className="text-[10px] font-semibold text-blue-700 mb-1.5 uppercase tracking-wide">Receipt History</h5>
                           <div className="space-y-1">
-                            {miPriorIRs.map((ir, idx) => (
-                              <div key={idx} className="flex items-center gap-3 text-[11px] bg-white/60 rounded px-2 py-1.5">
-                                <span className="font-semibold text-blue-800 min-w-[80px]">{ir.challan_no || "-"}</span>
-                                <span className="text-gray-500 min-w-[75px]">{ir.receipt_date || "-"}</span>
-                                <Badge variant="outline" className={`text-[9px] ${ir.receipt_type === 'final' ? 'border-amber-300 text-amber-700 bg-amber-50' : 'border-blue-200 text-blue-600'}`}>
-                                  {ir.receipt_type === 'final' ? 'Final' : 'Partial'}
-                                </Badge>
-                                <span className="text-gray-600 ml-auto">
-                                  FG: {ir.total_fg_kgs.toFixed(2)}
-                                  {ir.total_waste_kgs > 0 && ` | W: ${ir.total_waste_kgs.toFixed(2)}`}
-                                  {ir.total_rejection_kgs > 0 && ` | R: ${ir.total_rejection_kgs.toFixed(2)}`}
-                                </span>
-                              </div>
-                            ))}
+                            {miPriorIRs.map((ir, idx) => {
+                              const open = !!ir.id && miHistOpen.has(ir.id)
+                              const det = ir.id ? miHistDetail[ir.id] : undefined
+                              return (
+                                <div key={ir.id || idx}>
+                                  <button onClick={() => toggleHist(ir.id)} disabled={!ir.id} title="Show warehouse & item bifurcation"
+                                    className="w-full flex items-center gap-2 text-[11px] bg-white/60 rounded px-2 py-1.5 text-left hover:bg-white disabled:cursor-default">
+                                    {ir.id ? (open ? <ChevronDown className="h-3 w-3 flex-shrink-0 text-blue-500" /> : <ChevronRight className="h-3 w-3 flex-shrink-0 text-blue-500" />) : <span className="w-3" />}
+                                    <span className="font-semibold text-blue-800 min-w-[78px] truncate">{ir.ir_number || ir.challan_no || "-"}</span>
+                                    <span className="text-gray-500 min-w-[72px] hidden sm:inline">{ir.receipt_date || "-"}</span>
+                                    <Badge variant="outline" className={`text-[9px] ${ir.receipt_type === 'final' ? 'border-amber-300 text-amber-700 bg-amber-50' : 'border-blue-200 text-blue-600'}`}>
+                                      {ir.receipt_type === 'final' ? 'Final' : 'Partial'}
+                                    </Badge>
+                                    {ir.inward_warehouse && <span className="text-teal-700 whitespace-nowrap hidden sm:inline">WH {getDisplayWarehouseName(ir.inward_warehouse)}</span>}
+                                    <span className="text-gray-600 ml-auto whitespace-nowrap">
+                                      FG: {ir.total_fg_kgs.toFixed(2)}
+                                      {ir.total_waste_kgs > 0 && ` | W: ${ir.total_waste_kgs.toFixed(2)}`}
+                                      {ir.total_rejection_kgs > 0 && ` | R: ${ir.total_rejection_kgs.toFixed(2)}`}
+                                    </span>
+                                  </button>
+                                  {open && (
+                                    <div className="ml-5 mt-1 mb-1 rounded border border-blue-100 bg-white/80 p-2">
+                                      {!det || det.loading ? (
+                                        <div className="flex items-center gap-1.5 text-[10px] text-gray-400"><Loader2 className="h-3 w-3 animate-spin" /> Loading bifurcation…</div>
+                                      ) : det.lines.length === 0 ? (
+                                        <p className="text-[10px] text-gray-400 italic">No item lines.</p>
+                                      ) : (
+                                        <>
+                                          <div className="flex items-center gap-2 text-[10px] text-gray-500 mb-1">
+                                            <span className="font-semibold text-teal-700">Received at: {getDisplayWarehouseName(det.warehouse) || "—"}</span>
+                                            <span className="ml-auto">{det.lines.length} SKU{det.lines.length !== 1 ? 's' : ''}</span>
+                                          </div>
+                                          <table className="w-full text-[10px]">
+                                            <thead>
+                                              <tr className="text-gray-500 border-b border-blue-100">
+                                                <th className="text-left font-medium py-0.5">Item</th>
+                                                <th className="text-right font-medium py-0.5">Sent</th>
+                                                <th className="text-right font-medium py-0.5 text-emerald-700">FG</th>
+                                                <th className="text-right font-medium py-0.5 text-orange-700">Waste</th>
+                                                <th className="text-right font-medium py-0.5 text-rose-700">Rej</th>
+                                                <th className="text-right font-medium py-0.5 text-purple-700">Unacctd</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {det.lines.map((l: any, li: number) => {
+                                                const sent = Number(l.sent_kgs) || 0
+                                                const un = Math.max(0, sent - (Number(l.finished_goods_kgs) || 0) - (Number(l.waste_kgs) || 0) - (Number(l.rejection_kgs) || 0))
+                                                const pc = (n: number) => sent > 0 ? `${(n / sent * 100).toFixed(0)}%` : "—"
+                                                return (
+                                                  <tr key={li} className="border-b border-blue-50 last:border-0">
+                                                    <td className="py-0.5 pr-1 truncate max-w-[120px]" title={l.item_description}>{l.item_description}</td>
+                                                    <td className="py-0.5 text-right tabular-nums">{sent.toFixed(1)}</td>
+                                                    <td className="py-0.5 text-right tabular-nums text-emerald-700">{(Number(l.finished_goods_kgs) || 0).toFixed(1)} <span className="text-emerald-600">({pc(Number(l.finished_goods_kgs) || 0)})</span></td>
+                                                    <td className="py-0.5 text-right tabular-nums text-orange-700">{(Number(l.waste_kgs) || 0).toFixed(1)}</td>
+                                                    <td className="py-0.5 text-right tabular-nums text-rose-700">{(Number(l.rejection_kgs) || 0).toFixed(1)}</td>
+                                                    <td className="py-0.5 text-right tabular-nums text-purple-700">{un.toFixed(1)} <span className="text-purple-600">({pc(un)})</span></td>
+                                                  </tr>
+                                                )
+                                              })}
+                                            </tbody>
+                                          </table>
+                                        </>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              )
+                            })}
                           </div>
                         </div>
                       )}
@@ -2618,7 +2707,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                   {rptLoading && <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />}
                   {rptActiveFilters > 0 && (
                     <Button size="sm" variant="ghost" onClick={() => {
-                      setRptFilterProcess("all"); setRptFilterVendor("all"); setRptFilterItem("all"); setRptFilterFrom(""); setRptFilterTo("")
+                      setRptFilterProcess("all"); setRptFilterVendor("all"); setRptFilterItem("all"); setRptFilterGroup("all"); setRptFilterFrom(""); setRptFilterTo("")
                     }} className="h-8 px-3 text-xs text-red-500 hover:text-red-600 hover:bg-red-50">
                       Clear All
                     </Button>
@@ -2640,6 +2729,17 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                 ))}
               </div>
               <div className="space-y-2.5">
+                {/* Group chips (inventory group) — primary smart filter, applies across all tabs */}
+                <div className="flex items-start gap-2">
+                  <span className="text-[10px] font-semibold text-indigo-500 uppercase tracking-wider w-14 flex-shrink-0 pt-1.5">Group</span>
+                  <div className="flex flex-wrap gap-1.5 max-h-[88px] overflow-y-auto pr-1">
+                    <button onClick={() => setRptFilterGroup("all")} className={fchip(isAll(rptFilterGroup))}>All</button>
+                    {rptFilterOpts.groups.map((g: string) => (
+                      <button key={g} onClick={() => setRptFilterGroup(g)} title={g}
+                        className={`${fchip(rptFilterGroup === g)} ${!isAll(rptFilterGroup) && rptFilterGroup !== g ? "opacity-40 hover:opacity-100" : ""}`}>{g}</button>
+                    ))}
+                  </div>
+                </div>
                 {/* Process chips */}
                 <div className="flex items-start gap-2">
                   <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider w-14 flex-shrink-0 pt-1.5">Process</span>
@@ -2657,16 +2757,6 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                     <button onClick={() => setRptFilterVendor("all")} className={fchip(isAll(rptFilterVendor))}>All</button>
                     {rptFilterOpts.vendors.map((v: string) => (
                       <button key={v} onClick={() => setRptFilterVendor(v)} className={fchip(rptFilterVendor === v)} title={v}>{v.length > 24 ? v.slice(0, 24) + "…" : v}</button>
-                    ))}
-                  </div>
-                </div>
-                {/* Item chips */}
-                <div className="flex items-start gap-2">
-                  <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider w-14 flex-shrink-0 pt-1.5">Item</span>
-                  <div className="flex flex-wrap gap-1.5 max-h-[88px] overflow-y-auto pr-1">
-                    <button onClick={() => setRptFilterItem("all")} className={fchip(isAll(rptFilterItem))}>All</button>
-                    {rptFilterOpts.items.map((i: string) => (
-                      <button key={i} onClick={() => setRptFilterItem(i)} className={fchip(rptFilterItem === i)} title={i}>{i.length > 24 ? i.slice(0, 24) + "…" : i}</button>
                     ))}
                   </div>
                 </div>
@@ -2790,9 +2880,10 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
               <div className="flex flex-col sm:flex-row sm:items-center gap-2 justify-between">
                 <div className="flex flex-wrap gap-1.5 bg-gray-100 rounded-lg p-1">
                   {[
+                    { key: "group" as const, label: "By Group", icon: Box },
+                    { key: "vendor" as const, label: "By Vendor", icon: Users },
                     { key: "drill" as const, label: "Drill-down", icon: Layers },
                     { key: "process" as const, label: "By Process", icon: Activity },
-                    { key: "vendor" as const, label: "By Vendor", icon: Users },
                     { key: "item" as const, label: "By Item", icon: Box },
                     { key: "trend" as const, label: "Monthly Trend", icon: TrendingUp },
                     { key: "matrix" as const, label: "Vendor × Item", icon: BarChart3 },
@@ -2820,12 +2911,12 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                   <CardHeader className="pb-2 pt-4 px-4 border-b">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <CardTitle className="text-sm font-semibold text-gray-800 flex items-center gap-2">
-                        <Layers className="h-4 w-4 text-indigo-600" /> {rptGroupBy === "process" ? "Process → Vendor → Transaction" : "Vendor → Process → Transaction"}
-                        <span className="text-[10px] font-normal text-gray-400 ml-1 hidden md:inline">click a transaction → Material In · ▸ expand for receipts</span>
+                        <Layers className="h-4 w-4 text-indigo-600" /> {rptGroupBy === "process" ? "Process → Vendor → Transaction" : rptGroupBy === "vendor" ? "Vendor → Process → Transaction" : "Group → Vendor → Transaction"}
+                        <span className="text-[10px] font-normal text-gray-400 ml-1 hidden md:inline">click a transaction → receipt details · ▸ expand for receipts</span>
                       </CardTitle>
                       <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
                         <span className="text-[10px] text-gray-400 px-1.5">Group by</span>
-                        {(["process", "vendor"] as const).map((g) => (
+                        {(["group", "vendor", "process"] as const).map((g) => (
                           <button key={g} onClick={() => { setRptGroupBy(g); setRptExpanded(new Set()) }}
                             className={`px-2.5 py-1 rounded-md text-[11px] font-medium capitalize transition-colors ${rptGroupBy === g ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700"}`}>
                             {g}
@@ -2843,6 +2934,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                         if (!isAll(rptFilterProcess) && (r.sub_category || "Unknown") !== rptFilterProcess) return false
                         if (!isAll(rptFilterVendor) && (r.to_party || "—") !== rptFilterVendor) return false
                         if (!isAll(rptFilterItem) && !String(r.item_descriptions || "").includes(rptFilterItem)) return false
+                        if (!isAll(rptFilterGroup) && !String(r.item_groups || "").split(",").map((s: string) => s.trim()).includes(rptFilterGroup)) return false
                         if (rptFilterFrom && toYmd(r.job_work_date) < rptFilterFrom) return false
                         if (rptFilterTo && toYmd(r.job_work_date) > rptFilterTo) return false
                         if (q && !`${r.challan_no} ${r.to_party} ${r.sub_category} ${r.item_descriptions}`.toLowerCase().includes(q)) return false
@@ -2851,8 +2943,9 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                       if (!recs.length) return <p className="px-4 py-8 text-center text-xs text-gray-400">No transactions match the current filters.</p>
                       const procMap: Record<string, any> = {}
                       for (const r of recs) {
-                        const p = rptGroupBy === "process" ? (r.sub_category || "Unknown") : (r.to_party || "—")
-                        const v = rptGroupBy === "process" ? (r.to_party || "—") : (r.sub_category || "Unknown")
+                        const grp = (r.item_groups || "").split(",")[0].trim() || "UNGROUPED"
+                        const p = rptGroupBy === "process" ? (r.sub_category || "Unknown") : rptGroupBy === "vendor" ? (r.to_party || "—") : grp
+                        const v = rptGroupBy === "group" ? (r.to_party || "—") : rptGroupBy === "vendor" ? (r.sub_category || "Unknown") : (r.to_party || "—")
                         const disp = Number(r.total_net_weight) || Number(r.total_weight) || 0
                         const fg = Number(r.fg_received_kgs) || 0
                         const wr = (Number(r.waste_received_kgs) || 0) + (Number(r.rejection_kgs) || 0)
@@ -2908,7 +3001,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                                               <TooltipProvider delayDuration={200}>
                                                 <Tooltip>
                                                   <TooltipTrigger asChild>
-                                                    <button onClick={() => handleAddStock(r.challan_no)} className="font-mono text-indigo-700 flex-1 truncate text-left underline decoration-dotted underline-offset-2 hover:text-indigo-900">{r.challan_no}</button>
+                                                    <button onClick={() => openLatestReceipt(r.challan_no, r.receipt_count || 0)} className="font-mono text-indigo-700 flex-1 truncate text-left underline decoration-dotted underline-offset-2 hover:text-indigo-900">{r.challan_no}</button>
                                                   </TooltipTrigger>
                                                   <TooltipContent side="right" className="!bg-gradient-to-br !from-sky-50 !via-indigo-50 !to-violet-100 !text-slate-800 border border-indigo-200/70 rounded-lg max-w-xs text-xs p-3 space-y-1">
                                                     <div className="font-semibold text-indigo-900 pb-1 border-b border-indigo-200/60">{r.challan_no}</div>
@@ -2920,7 +3013,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                                                     <div><span className="text-indigo-700 font-semibold">Output:</span> {outPct(disp, fg)}% · <span className="text-indigo-700 font-semibold">Pending:</span> {pendPct(disp, fg, wr)}%</div>
                                                     <div><span className="text-indigo-700 font-semibold">Receipts:</span> {r.receipt_count || 0}</div>
                                                     {r.item_descriptions && <div className="text-slate-600 pt-0.5 border-t border-indigo-200/40">{r.item_descriptions}</div>}
-                                                    <div className="text-[10px] text-indigo-500 pt-0.5">Click → Material In · ▸ expand for receipts</div>
+                                                    <div className="text-[10px] text-indigo-500 pt-0.5">{(r.receipt_count || 0) > 0 ? "Click → Receipt details" : "Click → Material In"} · ▸ expand receipts</div>
                                                   </TooltipContent>
                                                 </Tooltip>
                                               </TooltipProvider>
@@ -2940,15 +3033,16 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                                                 ) : (
                                                   <div className="space-y-1">
                                                     {rc.rows.map((ir: any, i: number) => (
-                                                      <div key={ir.ir_number || i} className="flex items-center gap-2 text-[10px] bg-white rounded border border-slate-100 px-2 py-1">
-                                                        <span className="font-mono text-slate-600 flex-1 truncate">{ir.ir_number || ir.challan_no || "IR"}</span>
+                                                      <button key={ir.ir_number || i} onClick={() => ir.id && handleViewIR(ir.id)} title="Open receipt details"
+                                                        className="w-full flex items-center gap-2 text-[10px] bg-white rounded border border-slate-100 px-2 py-1 text-left hover:bg-indigo-50 hover:border-indigo-200 transition-colors">
+                                                        <span className="font-mono text-indigo-700 flex-1 truncate underline decoration-dotted underline-offset-2">{ir.ir_number || ir.challan_no || "IR"}</span>
                                                         <span className="text-slate-400 whitespace-nowrap hidden sm:inline">{ir.receipt_date}</span>
                                                         <span className={`px-1.5 py-0.5 rounded border whitespace-nowrap ${ir.receipt_type === "final" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-700 border-amber-200"}`}>{ir.receipt_type === "final" ? "Final" : "Partial"}</span>
                                                         {ir.inward_warehouse && <span className="text-indigo-600 whitespace-nowrap">WH {getDisplayWarehouseName(ir.inward_warehouse)}</span>}
                                                         <span className="text-emerald-700 whitespace-nowrap">FG {Math.round(Number(ir.total_fg_kgs) || 0).toLocaleString()}</span>
                                                         {Number(ir.total_waste_kgs) > 0 && <span className="text-orange-600 whitespace-nowrap">W {Math.round(Number(ir.total_waste_kgs)).toLocaleString()}</span>}
                                                         {Number(ir.total_rejection_kgs) > 0 && <span className="text-rose-600 whitespace-nowrap">R {Math.round(Number(ir.total_rejection_kgs)).toLocaleString()}</span>}
-                                                      </div>
+                                                      </button>
                                                     ))}
                                                   </div>
                                                 )}
@@ -2971,6 +3065,74 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
               )}
 
               {/* ─── By Process ─── */}
+              {rptActiveView === "group" && (
+                <Card className="border-0 shadow-sm overflow-hidden">
+                  <CardHeader className="pb-2 pt-4 px-4 border-b">
+                    <CardTitle className="text-sm font-semibold text-gray-800 flex items-center gap-2"><Box className="h-4 w-4 text-indigo-600" /> Inventory Group Breakdown
+                      <span className="text-[10px] font-normal text-gray-400 ml-1 hidden sm:inline">click a group → filter every tab · hover for items/vendors</span>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 border-b">
+                        <tr>
+                          <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-600">Group</th>
+                          <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-600">SKUs</th>
+                          <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-600">JWOs</th>
+                          <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-600">Boxes</th>
+                          <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-600">Dispatched (Kg)</th>
+                          <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-600 w-[180px]">Volume</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {fGroup.map((r: any, idx: number) => (
+                          <tr key={idx} onClick={() => setRptFilterGroup(r.group)} title={`Filter everything by group: ${r.group}`} className={`border-b last:border-0 cursor-pointer hover:bg-indigo-50 transition-colors ${rptFilterGroup === r.group ? 'bg-indigo-50' : idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
+                            <td className="px-4 py-2.5 text-xs font-semibold max-w-[220px]">
+                              <TooltipProvider delayDuration={200}><Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span className="truncate inline-block max-w-[200px] align-bottom cursor-help underline decoration-dotted underline-offset-2" title={r.group}>{r.group}</span>
+                                </TooltipTrigger>
+                                <TooltipContent side="right" className="!bg-gradient-to-br !from-sky-50 !via-indigo-50 !to-violet-100 !text-slate-800 border border-indigo-200/70 rounded-lg max-w-xs text-xs p-3 space-y-1">
+                                  {(() => {
+                                    const txs = rptAllRecords.filter((x: any) => String(x.item_groups || "").split(",").map((s: string) => s.trim()).includes(r.group))
+                                    const disp = txs.reduce((s: number, x: any) => s + (Number(x.total_net_weight) || Number(x.total_weight) || 0), 0)
+                                    const fg = txs.reduce((s: number, x: any) => s + (Number(x.fg_received_kgs) || 0), 0)
+                                    const vendors = Array.from(new Set(txs.map((x: any) => x.to_party).filter(Boolean)))
+                                    const items = Array.from(new Set(txs.flatMap((x: any) => String(x.item_descriptions || "").split(",").map((s: string) => s.trim())).filter(Boolean)))
+                                    return (<>
+                                      <div className="font-semibold text-indigo-900 pb-1 border-b border-indigo-200/60">{r.group}</div>
+                                      <div><span className="text-indigo-700 font-semibold">SKUs:</span> {r.item_count} · <span className="text-indigo-700 font-semibold">JWOs:</span> {r.jwo_count} · <span className="text-indigo-700 font-semibold">Boxes:</span> {r.total_boxes}</div>
+                                      <div><span className="text-indigo-700 font-semibold">Dispatched:</span> {Math.round(r.dispatched_kgs).toLocaleString()} kg{txs.length > 0 ? ` · Output: ${disp > 0 ? (fg / disp * 100).toFixed(1) : "0.0"}%` : ""}</div>
+                                      {items.length > 0 && <div className="text-slate-600"><span className="text-indigo-700 font-semibold">Items:</span> {items.slice(0, 4).join(", ")}{items.length > 4 ? ` +${items.length - 4}` : ""}</div>}
+                                      {vendors.length > 0 && <div className="text-slate-600"><span className="text-indigo-700 font-semibold">Vendors:</span> {vendors.slice(0, 3).join(", ")}{vendors.length > 3 ? ` +${vendors.length - 3}` : ""}</div>}
+                                      {txs.length > 0 && <div className="pt-0.5 border-t border-indigo-200/40 text-[10px] text-slate-500">Recent transactions</div>}
+                                      {txs.slice(0, 5).map((x: any, i: number) => (
+                                        <div key={i} className="flex justify-between gap-2"><span className="font-mono truncate">{x.challan_no}</span><span className="tabular-nums whitespace-nowrap">{Math.round(Number(x.total_net_weight) || Number(x.total_weight) || 0).toLocaleString()} kg</span></div>
+                                      ))}
+                                      <div className="text-[10px] text-indigo-500 pt-0.5">Click row → filter everything by this group</div>
+                                    </>)
+                                  })()}
+                                </TooltipContent>
+                              </Tooltip></TooltipProvider>
+                            </td>
+                            <td className="px-4 py-2.5 text-right text-xs">{r.item_count}</td>
+                            <td className="px-4 py-2.5 text-right text-xs">{r.jwo_count}</td>
+                            <td className="px-4 py-2.5 text-right text-xs">{r.total_boxes}</td>
+                            <td className="px-4 py-2.5 text-right text-xs font-medium">{r.dispatched_kgs.toLocaleString()}</td>
+                            <td className="px-4 py-2.5">
+                              <div className="w-full bg-gray-200 rounded-full h-2">
+                                <div className="bg-indigo-500 h-2 rounded-full transition-all" style={{ width: `${barWidth(r.dispatched_kgs, rptByGroup[0]?.dispatched_kgs || 1)}%` }} />
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                        {fGroup.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-xs text-gray-400">No data</td></tr>}
+                      </tbody>
+                    </table>
+                  </CardContent>
+                </Card>
+              )}
+
               {rptActiveView === "process" && (
                 <Card className="border-0 shadow-sm overflow-hidden">
                   <CardHeader className="pb-2 pt-4 px-4 border-b">
@@ -3327,14 +3489,14 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
               <div className="border rounded-lg overflow-hidden">
                 <table className="w-full text-[11px] table-fixed">
                   <colgroup>
-                    <col className="w-[4%]" />
-                    <col className="w-[26%]" />
-                    <col className="w-[10%]" />
-                    <col className="w-[10%]" />
-                    <col className="w-[12%]" />
-                    <col className="w-[11%]" />
+                    <col className="w-[5%]" />
+                    <col className="w-[17%]" />
                     <col className="w-[13%]" />
-                    <col className="w-[10%]" />
+                    <col className="w-[13%]" />
+                    <col className="w-[13%]" />
+                    <col className="w-[13%]" />
+                    <col className="w-[13%]" />
+                    <col className="w-[13%]" />
                   </colgroup>
                   <thead className="bg-gray-50 border-b">
                     <tr>
@@ -3359,14 +3521,14 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                           <tr className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
                             <td className="px-1.5 py-1.5 text-gray-500">{line.sl_no}</td>
                             <td className="px-1.5 py-1.5 font-medium truncate" title={line.item_description}>{line.item_description}</td>
-                            <td className="px-1.5 py-1.5 text-right font-medium">{line.sent_kgs.toFixed(2)}</td>
-                            <td className="px-1.5 py-1.5 text-right font-medium text-emerald-700">{line.finished_goods_kgs.toFixed(2)}<div className="text-[9px] text-emerald-400 font-normal leading-tight">({lpct(line.finished_goods_kgs)})</div></td>
-                            <td className="px-1.5 py-1.5 text-right font-medium text-orange-700">
+                            <td className="px-1.5 py-1.5 text-right font-medium tabular-nums whitespace-nowrap">{line.sent_kgs.toFixed(2)}</td>
+                            <td className="px-1.5 py-1.5 text-right font-semibold text-emerald-700 tabular-nums whitespace-nowrap">{line.finished_goods_kgs.toFixed(2)}<div className="text-[9px] text-emerald-600 font-medium leading-tight">({lpct(line.finished_goods_kgs)})</div></td>
+                            <td className="px-1.5 py-1.5 text-right font-semibold text-orange-700 tabular-nums whitespace-nowrap">
                               {line.waste_kgs.toFixed(2)}
-                              <div className="text-[9px] text-orange-400 font-normal leading-tight">({lpct(line.waste_kgs)}){line.waste_type ? ` · ${line.waste_type}` : ""}</div>
+                              <div className="text-[9px] text-orange-600 font-medium leading-tight">({lpct(line.waste_kgs)}){line.waste_type ? ` · ${line.waste_type}` : ""}</div>
                             </td>
-                            <td className="px-1.5 py-1.5 text-right font-medium text-rose-700">{line.rejection_kgs.toFixed(2)}<div className="text-[9px] text-rose-400 font-normal leading-tight">({lpct(line.rejection_kgs)})</div></td>
-                            <td className="px-1.5 py-1.5 text-right font-medium text-purple-700">{unaccounted.toFixed(2)}<div className="text-[9px] text-purple-400 font-normal leading-tight">({lpct(unaccounted)})</div></td>
+                            <td className="px-1.5 py-1.5 text-right font-semibold text-rose-700 tabular-nums whitespace-nowrap">{line.rejection_kgs.toFixed(2)}<div className="text-[9px] text-rose-600 font-medium leading-tight">({lpct(line.rejection_kgs)})</div></td>
+                            <td className="px-1.5 py-1.5 text-right font-semibold text-purple-700 tabular-nums whitespace-nowrap">{unaccounted.toFixed(2)}<div className="text-[9px] text-purple-600 font-medium leading-tight">({lpct(unaccounted)})</div></td>
                             <td className="px-1.5 py-1.5 text-right">
                               <span className={`font-medium ${overLimit ? 'text-red-600' : 'text-gray-700'}`}>{lossPct.toFixed(1)}%</span>
                               {(line.min_loss_pct > 0 || line.max_loss_pct > 0) && (
@@ -3394,12 +3556,12 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                         const tp = (n: number) => tSent > 0 ? `${(n / tSent * 100).toFixed(1)}%` : "—"
                         return (<>
                           <td colSpan={2} className="px-1.5 py-1.5 text-gray-700">Total</td>
-                          <td className="px-1.5 py-1.5 text-right">{tSent.toFixed(2)}</td>
-                          <td className="px-1.5 py-1.5 text-right text-emerald-700">{tFg.toFixed(2)}<div className="text-[9px] text-emerald-500 font-normal leading-tight">({tp(tFg)})</div></td>
-                          <td className="px-1.5 py-1.5 text-right text-orange-700">{tWaste.toFixed(2)}<div className="text-[9px] text-orange-500 font-normal leading-tight">({tp(tWaste)})</div></td>
-                          <td className="px-1.5 py-1.5 text-right text-rose-700">{tRej.toFixed(2)}<div className="text-[9px] text-rose-500 font-normal leading-tight">({tp(tRej)})</div></td>
-                          <td className="px-1.5 py-1.5 text-right text-purple-700">{tUn.toFixed(2)}<div className="text-[9px] text-purple-500 font-normal leading-tight">({tp(tUn)})</div></td>
-                          <td className="px-1.5 py-1.5 text-right text-gray-600">{tSent > 0 ? `${((tWaste + tRej) / tSent * 100).toFixed(1)}%` : '—'}</td>
+                          <td className="px-1.5 py-1.5 text-right tabular-nums whitespace-nowrap">{tSent.toFixed(2)}</td>
+                          <td className="px-1.5 py-1.5 text-right text-emerald-700 tabular-nums whitespace-nowrap">{tFg.toFixed(2)}<div className="text-[9px] text-emerald-700 font-medium leading-tight">({tp(tFg)})</div></td>
+                          <td className="px-1.5 py-1.5 text-right text-orange-700 tabular-nums whitespace-nowrap">{tWaste.toFixed(2)}<div className="text-[9px] text-orange-700 font-medium leading-tight">({tp(tWaste)})</div></td>
+                          <td className="px-1.5 py-1.5 text-right text-rose-700 tabular-nums whitespace-nowrap">{tRej.toFixed(2)}<div className="text-[9px] text-rose-700 font-medium leading-tight">({tp(tRej)})</div></td>
+                          <td className="px-1.5 py-1.5 text-right text-purple-700 tabular-nums whitespace-nowrap">{tUn.toFixed(2)}<div className="text-[9px] text-purple-700 font-medium leading-tight">({tp(tUn)})</div></td>
+                          <td className="px-1.5 py-1.5 text-right text-gray-600 tabular-nums whitespace-nowrap">{tSent > 0 ? `${((tWaste + tRej) / tSent * 100).toFixed(1)}%` : '—'}</td>
                         </>)
                       })()}
                     </tr>
@@ -3421,23 +3583,23 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                     </div>
                     <div className="bg-white rounded p-2 border border-emerald-100">
                       <div className="text-emerald-600 text-[10px] mb-0.5">FG Received</div>
-                      <div className="font-bold text-emerald-700">{viewIRData.cumulative.cum_fg_kgs.toFixed(2)} Kg <span className="text-[10px] font-normal text-emerald-400">{viewIRData.cumulative.dispatched_kgs > 0 ? `(${(viewIRData.cumulative.cum_fg_kgs / viewIRData.cumulative.dispatched_kgs * 100).toFixed(1)}%)` : ""}</span></div>
+                      <div className="font-bold text-emerald-700">{viewIRData.cumulative.cum_fg_kgs.toFixed(2)} Kg <span className="text-[10px] font-semibold text-emerald-600">{viewIRData.cumulative.dispatched_kgs > 0 ? `(${(viewIRData.cumulative.cum_fg_kgs / viewIRData.cumulative.dispatched_kgs * 100).toFixed(1)}%)` : ""}</span></div>
                     </div>
                     <div className="bg-white rounded p-2 border border-orange-100">
                       <div className="text-orange-600 text-[10px] mb-0.5">Total Waste</div>
-                      <div className="font-bold text-orange-700">{viewIRData.cumulative.cum_waste_kgs.toFixed(2)} Kg <span className="text-[10px] font-normal text-orange-400">{viewIRData.cumulative.dispatched_kgs > 0 ? `(${(viewIRData.cumulative.cum_waste_kgs / viewIRData.cumulative.dispatched_kgs * 100).toFixed(1)}%)` : ""}</span></div>
+                      <div className="font-bold text-orange-700">{viewIRData.cumulative.cum_waste_kgs.toFixed(2)} Kg <span className="text-[10px] font-semibold text-orange-600">{viewIRData.cumulative.dispatched_kgs > 0 ? `(${(viewIRData.cumulative.cum_waste_kgs / viewIRData.cumulative.dispatched_kgs * 100).toFixed(1)}%)` : ""}</span></div>
                     </div>
                     <div className="bg-white rounded p-2 border border-rose-100">
                       <div className="text-rose-600 text-[10px] mb-0.5">Total Rejection</div>
-                      <div className="font-bold text-rose-700">{viewIRData.cumulative.cum_rejection_kgs.toFixed(2)} Kg <span className="text-[10px] font-normal text-rose-400">{viewIRData.cumulative.dispatched_kgs > 0 ? `(${(viewIRData.cumulative.cum_rejection_kgs / viewIRData.cumulative.dispatched_kgs * 100).toFixed(1)}%)` : ""}</span></div>
+                      <div className="font-bold text-rose-700">{viewIRData.cumulative.cum_rejection_kgs.toFixed(2)} Kg <span className="text-[10px] font-semibold text-rose-600">{viewIRData.cumulative.dispatched_kgs > 0 ? `(${(viewIRData.cumulative.cum_rejection_kgs / viewIRData.cumulative.dispatched_kgs * 100).toFixed(1)}%)` : ""}</span></div>
                     </div>
                     <div className="bg-white rounded p-2 border border-purple-100">
                       <div className="text-purple-600 text-[10px] mb-0.5">Unaccounted</div>
-                      <div className="font-bold text-purple-700">{viewIRData.cumulative.cum_unaccounted_kgs.toFixed(2)} Kg <span className="text-[10px] font-normal text-purple-400">{viewIRData.cumulative.dispatched_kgs > 0 ? `(${(viewIRData.cumulative.cum_unaccounted_kgs / viewIRData.cumulative.dispatched_kgs * 100).toFixed(1)}%)` : ""}</span></div>
+                      <div className="font-bold text-purple-700">{viewIRData.cumulative.cum_unaccounted_kgs.toFixed(2)} Kg <span className="text-[10px] font-semibold text-purple-600">{viewIRData.cumulative.dispatched_kgs > 0 ? `(${(viewIRData.cumulative.cum_unaccounted_kgs / viewIRData.cumulative.dispatched_kgs * 100).toFixed(1)}%)` : ""}</span></div>
                     </div>
                     <div className="bg-white rounded p-2 border border-amber-100">
                       <div className="text-amber-600 text-[10px] mb-0.5">Remaining to Receive</div>
-                      <div className="font-bold text-amber-700">{viewIRData.cumulative.remaining_kgs.toFixed(2)} Kg <span className="text-[10px] font-normal text-amber-400">{viewIRData.cumulative.dispatched_kgs > 0 ? `(${(viewIRData.cumulative.remaining_kgs / viewIRData.cumulative.dispatched_kgs * 100).toFixed(1)}%)` : ""}</span></div>
+                      <div className="font-bold text-amber-700">{viewIRData.cumulative.remaining_kgs.toFixed(2)} Kg <span className="text-[10px] font-semibold text-amber-600">{viewIRData.cumulative.dispatched_kgs > 0 ? `(${(viewIRData.cumulative.remaining_kgs / viewIRData.cumulative.dispatched_kgs * 100).toFixed(1)}%)` : ""}</span></div>
                     </div>
                     <div className="bg-white rounded p-2 border border-gray-200 sm:col-span-2">
                       <div className="text-gray-500 text-[10px] mb-0.5">Cumulative Loss %</div>
