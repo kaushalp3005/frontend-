@@ -435,7 +435,7 @@ export default function DashboardPage({ params }: DashboardPageProps) {
                 </CardHeader>
                 <CardContent className="pt-0">
                   <Button asChild size="sm" className="w-full h-8 text-xs" variant="outline">
-                    <Link href={`/${company}/transfer/jobwork/dashboard`}>Open Dashboard</Link>
+                    <Link href={`/${company}/transfer/job-work?tab=summary`}>Open Summary</Link>
                   </Button>
                 </CardContent>
               </Card>

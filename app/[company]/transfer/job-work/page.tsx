@@ -20,6 +20,7 @@ import {
   BarChart3, TrendingUp, Filter, Download, Activity, Users, Layers, Box
 } from "lucide-react"
 import QRCode from 'qrcode'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as ReTooltip, ResponsiveContainer } from "recharts"
 import type { Company } from "@/types/auth"
 import { ChallanHoverCard, type HoverLine, type HoverMeta } from "@/components/transfer/ChallanHoverCard"
 import { useAuthStore } from "@/lib/stores/auth"
@@ -330,6 +331,16 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
   const canDelete = user?.email ? DELETE_ALLOWED_EMAILS.includes(user.email) : false
 
   const [activeTab, setActiveTab] = useState("records")
+
+  // Deep-link: ?tab=summary (or reports / material-in / records) opens that tab.
+  // Read once on mount (client-only) so the main dashboard can link straight here.
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const t = new URLSearchParams(window.location.search).get("tab")
+    if (t === "summary" || t === "reports") setActiveTab("reports")
+    else if (t === "material-in" || t === "create-in") setActiveTab("create-in")
+    else if (t === "records") setActiveTab("records")
+  }, [])
 
   const now = new Date()
   const currentDate = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}`
@@ -1216,7 +1227,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
             <Inbox className="h-3.5 w-3.5" /><span className="hidden sm:inline">Material In</span><span className="sm:hidden">In</span>
           </TabsTrigger>
           <TabsTrigger value="reports" className="text-xs sm:text-sm data-[state=active]:bg-white data-[state=active]:shadow-sm rounded-md flex items-center gap-1.5">
-            <BarChart3 className="h-3.5 w-3.5" /><span className="hidden sm:inline">Reports</span><span className="sm:hidden">Report</span>
+            <BarChart3 className="h-3.5 w-3.5" /><span className="hidden sm:inline">Summary</span><span className="sm:hidden">Summary</span>
           </TabsTrigger>
         </TabsList>
 
@@ -1332,16 +1343,21 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                                         const desc = l.item_description || "-"
                                         return {
                                           name: tail.length ? `${desc} · ${tail.join(" ")}` : desc,
-                                          qty: l.finished_goods_boxes ?? l.sent_boxes ?? undefined,
+                                          qty: (l.finished_goods_boxes || l.sent_boxes) || undefined,
                                           netWeight: fg.toFixed(2),
                                         }
                                       })
                                       const meta: HoverMeta[] = []
                                       if (recv.ir_number)        meta.push({ label: "IR", value: recv.ir_number })
                                       if (recv.receipt_type)     meta.push({ label: "Type", value: recv.receipt_type === "final" ? "Final" : "Partial", tone: recv.receipt_type === "final" ? "success" : "default" })
-                                      if (recv.inward_warehouse) meta.push({ label: "Inward WH", value: recv.inward_warehouse })
+                                      if (recv.receipt_date)     meta.push({ label: "Date", value: recv.receipt_date })
+                                      if (recv.jwo_challan)      meta.push({ label: "JWO", value: recv.jwo_challan })
+                                      if (recv.to_party)         meta.push({ label: "Party", value: recv.to_party })
+                                      if (recv.process_type)     meta.push({ label: "Process", value: recv.process_type })
+                                      if (recv.inward_warehouse) meta.push({ label: "Inward WH", value: getDisplayWarehouseName(recv.inward_warehouse) })
                                       if (recv.vehicle_no)       meta.push({ label: "Vehicle", value: recv.vehicle_no })
                                       if (recv.driver_name)      meta.push({ label: "Driver", value: recv.driver_name })
+                                      if (recv.created_by)       meta.push({ label: "By", value: recv.created_by })
                                       meta.push({ label: "FG", value: `${rec.total_fg_kgs.toFixed(2)} kg`, tone: "success" })
                                       if (rec.total_waste_kgs > 0)     meta.push({ label: "Waste", value: `${rec.total_waste_kgs.toFixed(2)} kg`, tone: "warn" })
                                       if (rec.total_rejection_kgs > 0) meta.push({ label: "Rejection", value: `${rec.total_rejection_kgs.toFixed(2)} kg`, tone: "warn" })
@@ -2596,6 +2612,62 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                     </CardContent>
                   </Card>
                 ))}
+              </div>
+
+              {/* ─── Analysis: worst-loss processes + monthly trend ─── */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                <Card className="border-0 shadow-sm">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4 text-red-500" /> Highest Loss by Process
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-4 pt-0 space-y-1.5">
+                    {(() => {
+                      const rows = (rptByProcess || [])
+                        .filter((p: any) => (p.dispatched_kgs || 0) > 0)
+                        .map((p: any) => ({ ...p, lossPct: ((p.dispatched_kgs - (p.fg_kgs || 0)) / p.dispatched_kgs) * 100 }))
+                        .sort((a: any, b: any) => b.lossPct - a.lossPct)
+                        .slice(0, 6)
+                      if (!rows.length) return <p className="text-xs text-muted-foreground italic">No process data for this filter.</p>
+                      return rows.map((p: any, i: number) => (
+                        <div key={i} className="flex items-center gap-2">
+                          <span className="text-xs text-slate-700 truncate flex-1" title={p.process}>{p.process || "—"}</span>
+                          <span className="text-[10px] text-slate-400 tabular-nums whitespace-nowrap">{(p.dispatched_kgs || 0).toLocaleString()} kg</span>
+                          <div className="w-20 h-2 bg-slate-100 rounded-full overflow-hidden flex-shrink-0">
+                            <div className="h-2 rounded-full" style={{ width: `${Math.min(100, Math.max(0, p.lossPct))}%`, background: p.lossPct > 15 ? "#ef4444" : p.lossPct > 8 ? "#f59e0b" : "#10b981" }} />
+                          </div>
+                          <span className={`text-xs font-semibold tabular-nums w-12 text-right ${p.lossPct > 15 ? "text-red-600" : p.lossPct > 8 ? "text-amber-600" : "text-emerald-600"}`}>{p.lossPct.toFixed(1)}%</span>
+                        </div>
+                      ))
+                    })()}
+                  </CardContent>
+                </Card>
+                <Card className="border-0 shadow-sm">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm flex items-center gap-2">
+                      <BarChart3 className="h-4 w-4 text-indigo-600" /> Monthly Dispatch Trend
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-4 pt-0">
+                    <div className="h-[200px]">
+                      {(rptMonthly && rptMonthly.length) ? (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={rptMonthly} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                            <XAxis dataKey="month" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
+                            <YAxis tickFormatter={(v: number) => (v >= 1000 ? (v / 1000).toFixed(0) + "K" : String(v))} tick={{ fontSize: 10 }} width={40} />
+                            <ReTooltip
+                              formatter={(v: any, _n: any, p: any) => [`${Number(v).toLocaleString()} kg · ${p.payload.jwo_count} JWOs`, "Dispatched"]}
+                              contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
+                            />
+                            <Bar dataKey="dispatched_kgs" radius={[4, 4, 0, 0]} fill="#6366f1" />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      ) : <p className="text-xs text-muted-foreground italic">No monthly data for this filter.</p>}
+                    </div>
+                  </CardContent>
+                </Card>
               </div>
 
               {/* ─── Status Distribution ─── */}
