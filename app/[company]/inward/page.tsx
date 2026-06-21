@@ -99,20 +99,19 @@ function TransactionStatusCard({ item }: { item: InwardListItem }) {
 
       <div className="px-3 py-2.5 space-y-2 overflow-y-auto flex-1">
 
-        {/* Warehouse / destination row */}
-        {(item.warehouse || item.source_location || item.destination_location) && (
+        {/* Source → Warehouse (inward direction: vendor/source into our warehouse).
+            destination_location is an onward/customer concept and is intentionally
+            not shown here — an arrow from our warehouse misrepresents a receipt. */}
+        {(item.warehouse || item.source_location) && (
           <div className="flex items-center gap-1.5 flex-wrap">
             {item.source_location && (
               <span className={toneChip("gray")}><span className="opacity-60">From:</span> {item.source_location}</span>
             )}
+            {item.source_location && item.warehouse && (
+              <ArrowRight className="h-3 w-3 text-gray-400 shrink-0" />
+            )}
             {item.warehouse && (
               <span className={toneChip("blue")}><span className="opacity-60">WH:</span> {getDisplayWarehouseName(item.warehouse)}</span>
-            )}
-            {item.destination_location && (
-              <>
-                <ArrowRight className="h-3 w-3 text-gray-400 shrink-0" />
-                <span className={toneChip("blue")}>{item.destination_location}</span>
-              </>
             )}
           </div>
         )}
