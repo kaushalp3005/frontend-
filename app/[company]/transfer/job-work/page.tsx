@@ -123,13 +123,16 @@ interface PriorIR {
   total_rejection_kgs: number
 }
 
+interface JWLine { quantity_kgs: number; prev_fg_kgs: number; prev_waste_kgs: number; prev_rejection_kgs: number }
+interface JWLossCfg { min_loss_pct: number; max_loss_pct: number }
+
 function StatusReceiveHover({ rec, children }: { rec: JobWorkRecord; children: ReactNode }) {
   const [show, setShow] = useState(false)
   const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number; maxHeight: number }>({ left: 0, maxHeight: 420 })
   const [isTouch, setIsTouch] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [data, setData] = useState<{ receive_count: number; prior_irs: PriorIR[] } | null>(null)
+  const [data, setData] = useState<{ receive_count: number; prior_irs: PriorIR[]; line_items: JWLine[]; loss_config: JWLossCfg | null } | null>(null)
   const fetched = useRef(false)
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const triggerRef = useRef<HTMLSpanElement>(null)
@@ -152,7 +155,7 @@ function StatusReceiveHover({ rec, children }: { rec: JobWorkRecord; children: R
       const res = await fetch(`${base}/job-work/out/search?challan_no=${encodeURIComponent(rec.challan_no)}`, { headers: { Accept: "application/json" } })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const d = await res.json()
-      setData({ receive_count: d.receive_count || 0, prior_irs: d.prior_irs || [] })
+      setData({ receive_count: d.receive_count || 0, prior_irs: d.prior_irs || [], line_items: d.line_items || [], loss_config: d.loss_config || null })
     } catch {
       setError("Couldn't load receipts")
       fetched.current = false // allow retry on next open
@@ -206,7 +209,26 @@ function StatusReceiveHover({ rec, children }: { rec: JobWorkRecord; children: R
 
   if (!interactive) return <>{children}</>
 
-  const totalFg = data?.prior_irs.reduce((s, ir) => s + (ir.total_fg_kgs || 0), 0) ?? 0
+  // Roll-up metrics. Sent = dispatched kgs (line_items); received/waste/rejection
+  // are cumulative across all receipts. Percentages are against total sent.
+  const sent = data?.line_items.reduce((s, l) => s + (l.quantity_kgs || 0), 0) ?? 0
+  const fg = data?.prior_irs.reduce((s, ir) => s + (ir.total_fg_kgs || 0), 0) ?? 0
+  const waste = data?.prior_irs.reduce((s, ir) => s + (ir.total_waste_kgs || 0), 0) ?? 0
+  const rej = data?.prior_irs.reduce((s, ir) => s + (ir.total_rejection_kgs || 0), 0) ?? 0
+  const unaccounted = Math.max(0, sent - fg - waste - rej)
+  const pct = (n: number) => (sent > 0 ? (n / sent) * 100 : 0)
+  const yieldPct = pct(fg)
+  const lossPct = pct(waste + rej)
+  const unaccPct = pct(unaccounted)
+  const cfg = data?.loss_config
+  const hasTol = !!cfg && (cfg.max_loss_pct > 0 || cfg.min_loss_pct > 0)
+  let lossClass = "bg-slate-50 text-slate-600 border-slate-200"
+  let toneLabel = ""
+  if (hasTol && cfg) {
+    if (lossPct > cfg.max_loss_pct + 0.001) { lossClass = "bg-red-50 text-red-700 border-red-200"; toneLabel = "Excess loss" }
+    else if (lossPct < cfg.min_loss_pct - 0.001) { lossClass = "bg-amber-50 text-amber-700 border-amber-200"; toneLabel = "Below expected" }
+    else { lossClass = "bg-emerald-50 text-emerald-700 border-emerald-200"; toneLabel = "Within range" }
+  }
 
   return (
     <>
@@ -252,6 +274,25 @@ function StatusReceiveHover({ rec, children }: { rec: JobWorkRecord; children: R
             )}
             {!loading && !error && data && data.prior_irs.length > 0 && (
               <>
+                {/* Roll-up summary with percentages */}
+                <div className="rounded border border-indigo-100 bg-white/60 px-2 py-1.5 space-y-1">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-slate-500">Sent / Received (FG)</span>
+                    <span className="font-semibold text-slate-800">{sent.toFixed(2)} / {fg.toFixed(2)} kg</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    <span className="px-1.5 py-0.5 rounded border bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px]">Yield {yieldPct.toFixed(1)}%</span>
+                    <span className={`px-1.5 py-0.5 rounded border text-[10px] ${lossClass}`}>Loss {lossPct.toFixed(1)}%</span>
+                    {unaccounted > 0.0005 && (
+                      <span className="px-1.5 py-0.5 rounded border bg-gray-50 text-gray-600 border-gray-200 text-[10px]">Unaccounted {unaccPct.toFixed(1)}%</span>
+                    )}
+                  </div>
+                  {hasTol && cfg && (
+                    <div className="text-[10px] text-slate-500">
+                      Loss tolerance {cfg.min_loss_pct}–{cfg.max_loss_pct}%{toneLabel ? ` · ${toneLabel}` : ""}
+                    </div>
+                  )}
+                </div>
                 {data.prior_irs.map((ir, i) => (
                   <div key={ir.ir_number || i} className="rounded border border-indigo-100 bg-white/70 px-2 py-1">
                     <div className="flex items-center justify-between gap-2">
@@ -267,10 +308,6 @@ function StatusReceiveHover({ rec, children }: { rec: JobWorkRecord; children: R
                     </div>
                   </div>
                 ))}
-                <div className="pt-1 mt-1 border-t border-indigo-200/60 flex items-center justify-between text-[11px]">
-                  <span className="text-slate-500">Total FG received</span>
-                  <span className="font-semibold text-slate-800">{totalFg.toFixed(2)} kg</span>
-                </div>
               </>
             )}
           </div>
