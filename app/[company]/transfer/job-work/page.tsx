@@ -1100,6 +1100,10 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
   const toleranceStatus = getLossToleranceStatus()
   // % of dispatched (sent) for the Material In dashboard cells
   const pctOf = (v: number, base: number) => (base > 0 ? ((v / base) * 100).toFixed(1) : "0.0")
+  // Summary-tab filter chip styling + "is this filter cleared" helper.
+  const isAll = (v: string) => !v || v === "all"
+  const fchip = (active: boolean) =>
+    `text-[11px] font-medium px-2.5 py-1 rounded-full border transition-all whitespace-nowrap ${active ? "bg-indigo-600 text-white border-indigo-600 shadow-sm" : "bg-white text-gray-600 border-gray-200 hover:bg-indigo-50 hover:border-indigo-200"}`
 
   // Cold storage detection — any warehouse flagged as "cold" in constants
   // (Savla D-39, Savla D-514, Rishi, Supreme) triggers the Cold Storage Details panel.
@@ -1132,6 +1136,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
   const [rptFilterTo, setRptFilterTo] = useState("")
   const [rptActiveView, setRptActiveView] = useState<"process" | "vendor" | "item" | "trend" | "matrix">("process")
   const [rptSearch, setRptSearch] = useState("")
+  const rptActiveFilters = [rptFilterProcess, rptFilterVendor, rptFilterItem].filter((v) => !isAll(v)).length + (rptFilterFrom || rptFilterTo ? 1 : 0)
   const ymdLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
 
   const loadReportWithParams = async (filterProcess: string, filterVendor: string, filterItem: string, from: string, to: string) => {
@@ -2518,14 +2523,17 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                 <CardTitle className="text-sm sm:text-base font-semibold text-gray-800 flex items-center gap-2">
                   <Filter className="h-4 w-4 text-indigo-600" />
                   Filters
+                  {rptActiveFilters > 0 && <span className="ml-1 text-[10px] font-semibold bg-indigo-600 text-white rounded-full px-1.5 py-0.5 leading-none">{rptActiveFilters}</span>}
                 </CardTitle>
                 <div className="flex items-center gap-2">
-                  <Button size="sm" variant="ghost" onClick={() => {
-                    setRptFilterProcess(""); setRptFilterVendor(""); setRptFilterItem(""); setRptFilterFrom(""); setRptFilterTo("")
-                  }} className="h-8 px-3 text-xs text-gray-500">
-                    Clear All
-                  </Button>
                   {rptLoading && <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />}
+                  {rptActiveFilters > 0 && (
+                    <Button size="sm" variant="ghost" onClick={() => {
+                      setRptFilterProcess("all"); setRptFilterVendor("all"); setRptFilterItem("all"); setRptFilterFrom(""); setRptFilterTo("")
+                    }} className="h-8 px-3 text-xs text-red-500 hover:text-red-600 hover:bg-red-50">
+                      Clear All
+                    </Button>
+                  )}
                 </div>
               </div>
             </CardHeader>
@@ -2542,44 +2550,43 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                     className={`text-xs font-medium px-3 py-1.5 rounded-lg border transition-all ${(p.label === "All Time" && !rptFilterFrom && !rptFilterTo) ? "bg-[#0f172a] text-white border-[#0f172a]" : "bg-white hover:bg-slate-100 border-slate-200"}`}>{p.label}</button>
                 ))}
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-                <div className="space-y-1">
-                  <Label className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Process</Label>
-                  <Select value={rptFilterProcess} onValueChange={setRptFilterProcess}>
-                    <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="All Processes" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Processes</SelectItem>
-                      {rptFilterOpts.sub_categories.map((s: string) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
+              <div className="space-y-2.5">
+                {/* Process chips */}
+                <div className="flex items-start gap-2">
+                  <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider w-14 flex-shrink-0 pt-1.5">Process</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    <button onClick={() => setRptFilterProcess("all")} className={fchip(isAll(rptFilterProcess))}>All</button>
+                    {rptFilterOpts.sub_categories.map((s: string) => (
+                      <button key={s} onClick={() => setRptFilterProcess(s)} className={fchip(rptFilterProcess === s)} title={s}>{s}</button>
+                    ))}
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  <Label className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Vendor</Label>
-                  <Select value={rptFilterVendor} onValueChange={setRptFilterVendor}>
-                    <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="All Vendors" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Vendors</SelectItem>
-                      {rptFilterOpts.vendors.map((v: string) => <SelectItem key={v} value={v}>{v}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
+                {/* Vendor chips */}
+                <div className="flex items-start gap-2">
+                  <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider w-14 flex-shrink-0 pt-1.5">Vendor</span>
+                  <div className="flex flex-wrap gap-1.5 max-h-[88px] overflow-y-auto pr-1">
+                    <button onClick={() => setRptFilterVendor("all")} className={fchip(isAll(rptFilterVendor))}>All</button>
+                    {rptFilterOpts.vendors.map((v: string) => (
+                      <button key={v} onClick={() => setRptFilterVendor(v)} className={fchip(rptFilterVendor === v)} title={v}>{v.length > 24 ? v.slice(0, 24) + "…" : v}</button>
+                    ))}
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  <Label className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Item</Label>
-                  <Select value={rptFilterItem} onValueChange={setRptFilterItem}>
-                    <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="All Items" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Items</SelectItem>
-                      {rptFilterOpts.items.map((i: string) => <SelectItem key={i} value={i}>{i}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
+                {/* Item chips */}
+                <div className="flex items-start gap-2">
+                  <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider w-14 flex-shrink-0 pt-1.5">Item</span>
+                  <div className="flex flex-wrap gap-1.5 max-h-[88px] overflow-y-auto pr-1">
+                    <button onClick={() => setRptFilterItem("all")} className={fchip(isAll(rptFilterItem))}>All</button>
+                    {rptFilterOpts.items.map((i: string) => (
+                      <button key={i} onClick={() => setRptFilterItem(i)} className={fchip(rptFilterItem === i)} title={i}>{i.length > 24 ? i.slice(0, 24) + "…" : i}</button>
+                    ))}
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  <Label className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">From Date</Label>
-                  <Input type="date" value={rptFilterFrom} onChange={(e) => setRptFilterFrom(e.target.value)} className="h-8 text-xs" />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">To Date</Label>
-                  <Input type="date" value={rptFilterTo} onChange={(e) => setRptFilterTo(e.target.value)} className="h-8 text-xs" />
+                {/* Date range */}
+                <div className="flex items-center gap-2 flex-wrap pt-0.5">
+                  <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider w-14 flex-shrink-0">Dates</span>
+                  <Input type="date" value={rptFilterFrom} onChange={(e) => setRptFilterFrom(e.target.value)} className="h-8 text-xs w-[150px]" />
+                  <span className="text-gray-400 text-xs">to</span>
+                  <Input type="date" value={rptFilterTo} onChange={(e) => setRptFilterTo(e.target.value)} className="h-8 text-xs w-[150px]" />
                 </div>
               </div>
             </CardContent>
@@ -2592,23 +2599,23 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
           ) : rptData ? (
             <>
               {/* ─── KPI Cards ─── */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
                 {[
-                  { label: "Total JWOs", value: `${rptSummary.total_jwo ?? 0}`, icon: ClipboardList },
-                  { label: "Dispatched", value: `${(rptSummary.total_dispatched_kgs || 0).toLocaleString()} kg`, icon: Send },
-                  { label: "FG Received", value: `${(rptSummary.total_fg_kgs || 0).toLocaleString()} kg`, icon: Package },
-                  { label: "Waste + Rejection", value: `${((rptSummary.total_waste_kgs || 0) + (rptSummary.total_rejection_kgs || 0)).toLocaleString()} kg`, icon: Trash2, amber: true },
-                  { label: "Overall Loss", value: `${rptSummary.overall_loss_pct || 0}%`, icon: TrendingUp, red: rptSummary.overall_loss_pct > 10 },
+                  { label: "Total JWOs", value: `${rptSummary.total_jwo ?? 0}`, icon: ClipboardList, color: "bg-blue-100 text-blue-600", sub: `${rptSummary.total_irs || 0} receipts` },
+                  { label: "Dispatched", value: `${(rptSummary.total_dispatched_kgs || 0).toLocaleString()} kg`, icon: Send, color: "bg-indigo-100 text-indigo-600", sub: `${rptSummary.unique_vendors || 0} vendors` },
+                  { label: "FG Received", value: `${(rptSummary.total_fg_kgs || 0).toLocaleString()} kg`, icon: Package, color: "bg-emerald-100 text-emerald-600", sub: `Yield ${pctOf(rptSummary.total_fg_kgs || 0, rptSummary.total_dispatched_kgs || 0)}%` },
+                  { label: "Waste + Rejection", value: `${((rptSummary.total_waste_kgs || 0) + (rptSummary.total_rejection_kgs || 0)).toLocaleString()} kg`, icon: Trash2, color: "bg-orange-100 text-orange-600", sub: `${pctOf((rptSummary.total_waste_kgs || 0) + (rptSummary.total_rejection_kgs || 0), rptSummary.total_dispatched_kgs || 0)}% of sent` },
+                  { label: "Unaccounted", value: `${(rptSummary.unaccounted_kgs || 0).toLocaleString()} kg`, icon: AlertTriangle, color: "bg-amber-100 text-amber-600", amber: (rptSummary.unaccounted_kgs || 0) > 0.01, sub: `${pctOf(rptSummary.unaccounted_kgs || 0, rptSummary.total_dispatched_kgs || 0)}% of sent` },
+                  { label: "Overall Loss", value: `${rptSummary.overall_loss_pct || 0}%`, icon: TrendingUp, color: "bg-red-100 text-red-600", red: (rptSummary.overall_loss_pct || 0) > 10, sub: "dispatched − FG" },
                 ].map((kpi: any, idx: number) => (
-                  <Card key={idx} className={`overflow-hidden ${kpi.red ? "border-red-300 bg-red-50 dark:bg-red-950/30" : kpi.amber ? "border-amber-200 bg-amber-50/50 dark:bg-amber-950/20" : ""}`}>
-                    <CardContent className="p-3 flex items-start gap-2 min-h-[68px]">
-                      <div className={`flex-shrink-0 mt-0.5 ${kpi.red ? "text-red-600" : kpi.amber ? "text-amber-600" : "text-muted-foreground"}`}>
+                  <Card key={idx} className={`overflow-hidden hover:shadow-md transition-shadow ${kpi.red ? "border-red-300 bg-red-50/60 dark:bg-red-950/30" : kpi.amber ? "border-amber-200 bg-amber-50/50 dark:bg-amber-950/20" : ""}`}>
+                    <CardContent className="p-3">
+                      <div className={`h-9 w-9 rounded-xl flex items-center justify-center mb-2 ${kpi.color}`}>
                         <kpi.icon className="h-4 w-4" />
                       </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-[10px] uppercase tracking-wider text-muted-foreground truncate">{kpi.label}</p>
-                        <p className={`text-sm sm:text-base font-bold tabular-nums break-all leading-tight mt-0.5 ${kpi.red ? "text-red-700 dark:text-red-400" : ""}`}>{kpi.value}</p>
-                      </div>
+                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground truncate">{kpi.label}</p>
+                      <p className={`text-base font-bold tabular-nums break-all leading-tight mt-0.5 ${kpi.red ? "text-red-700 dark:text-red-400" : ""}`}>{kpi.value}</p>
+                      {kpi.sub && <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{kpi.sub}</p>}
                     </CardContent>
                   </Card>
                 ))}
@@ -2736,7 +2743,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                       </thead>
                       <tbody>
                         {fProcess.map((r: any, idx: number) => (
-                          <tr key={idx} className={`border-b last:border-0 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
+                          <tr key={idx} onClick={() => setRptFilterProcess(r.process)} title={`Filter by process: ${r.process}`} className={`border-b last:border-0 cursor-pointer hover:bg-indigo-50 transition-colors ${rptFilterProcess === r.process ? 'bg-indigo-50' : idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
                             <td className="px-4 py-2.5 text-xs font-semibold">{r.process}</td>
                             <td className="px-4 py-2.5 text-right text-xs">{r.jwo_count}</td>
                             <td className="px-4 py-2.5 text-right text-xs font-medium">{r.dispatched_kgs.toLocaleString()}</td>
@@ -2773,7 +2780,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                       </thead>
                       <tbody>
                         {fVendor.map((r: any, idx: number) => (
-                          <tr key={idx} className={`border-b last:border-0 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
+                          <tr key={idx} onClick={() => setRptFilterVendor(r.vendor)} title={`Filter by vendor: ${r.vendor}`} className={`border-b last:border-0 cursor-pointer hover:bg-indigo-50 transition-colors ${rptFilterVendor === r.vendor ? 'bg-indigo-50' : idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
                             <td className="px-4 py-2.5 text-xs font-semibold max-w-[200px] truncate" title={r.vendor}>{r.vendor}</td>
                             <td className="px-4 py-2.5 text-right text-xs">{r.jwo_count}</td>
                             <td className="px-4 py-2.5 text-right text-xs font-medium">{r.dispatched_kgs.toLocaleString()}</td>
@@ -2810,7 +2817,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                       </thead>
                       <tbody>
                         {fItem.map((r: any, idx: number) => (
-                          <tr key={idx} className={`border-b last:border-0 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
+                          <tr key={idx} onClick={() => setRptFilterItem(r.item)} title={`Filter by item: ${r.item}`} className={`border-b last:border-0 cursor-pointer hover:bg-indigo-50 transition-colors ${rptFilterItem === r.item ? 'bg-indigo-50' : idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
                             <td className="px-4 py-2.5 text-xs font-semibold max-w-[200px] truncate" title={r.item}>{r.item}</td>
                             <td className="px-4 py-2.5 text-right text-xs">{r.jwo_count}</td>
                             <td className="px-4 py-2.5 text-right text-xs">{r.total_boxes}</td>
