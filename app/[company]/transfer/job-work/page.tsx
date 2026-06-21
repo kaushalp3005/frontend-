@@ -17,7 +17,8 @@ import {
   ArrowLeft, ArrowRight, Plus, Loader2, Search,
   Package, Send, Inbox, ClipboardList, Eye, CheckCircle,
   Truck, RefreshCw, Pencil, Printer, Trash2, AlertTriangle, Info,
-  BarChart3, TrendingUp, Filter, Download, Activity, Users, Layers, Box
+  BarChart3, TrendingUp, Filter, Download, Activity, Users, Layers, Box,
+  ChevronRight, ChevronDown
 } from "lucide-react"
 import QRCode from 'qrcode'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as ReTooltip, ResponsiveContainer } from "recharts"
@@ -1134,9 +1135,15 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
   const [rptFilterItem, setRptFilterItem] = useState("")
   const [rptFilterFrom, setRptFilterFrom] = useState("")
   const [rptFilterTo, setRptFilterTo] = useState("")
-  const [rptActiveView, setRptActiveView] = useState<"process" | "vendor" | "item" | "trend" | "matrix">("process")
+  const [rptActiveView, setRptActiveView] = useState<"drill" | "process" | "vendor" | "item" | "trend" | "matrix">("drill")
   const [rptSearch, setRptSearch] = useState("")
   const rptActiveFilters = [rptFilterProcess, rptFilterVendor, rptFilterItem].filter((v) => !isAll(v)).length + (rptFilterFrom || rptFilterTo ? 1 : 0)
+  // Drill-down tree (Process -> Vendor -> Transaction) — all OUT records, grouped client-side.
+  const [rptAllRecords, setRptAllRecords] = useState<any[]>([])
+  const [rptTreeLoading, setRptTreeLoading] = useState(false)
+  const [rptExpanded, setRptExpanded] = useState<Set<string>>(new Set())
+  const toggleExpand = (k: string) => setRptExpanded((prev) => { const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n })
+  const toYmd = (s: string) => { if (!s) return ""; if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10); const m = s.match(/^(\d{2})-(\d{2})-(\d{4})/); return m ? `${m[3]}-${m[2]}-${m[1]}` : s }
   const ymdLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
 
   const loadReportWithParams = async (filterProcess: string, filterVendor: string, filterItem: string, from: string, to: string) => {
@@ -1176,6 +1183,22 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
     }, 100)
     return () => clearTimeout(timer)
   }, [activeTab, rptFilterProcess, rptFilterVendor, rptFilterItem, rptFilterFrom, rptFilterTo])
+
+  // Fetch all OUT records once for the drill-down tree (grouped/filtered client-side).
+  useEffect(() => {
+    if (activeTab !== "reports" || rptAllRecords.length > 0) return
+    let cancelled = false
+    setRptTreeLoading(true)
+    ;(async () => {
+      try {
+        const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
+        const res = await fetch(`${base}/job-work/list?per_page=1000`, { headers: { Accept: "application/json" } })
+        const data = await res.json()
+        if (!cancelled) setRptAllRecords(data.records || [])
+      } catch { /* tree is best-effort */ } finally { if (!cancelled) setRptTreeLoading(false) }
+    })()
+    return () => { cancelled = true }
+  }, [activeTab])
 
   const rptSummary = rptData?.summary || {}
   const rptStatusCounts = rptData?.status_counts || {}
@@ -2701,7 +2724,8 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
               <div className="flex flex-col sm:flex-row sm:items-center gap-2 justify-between">
                 <div className="flex flex-wrap gap-1.5 bg-gray-100 rounded-lg p-1">
                   {[
-                    { key: "process" as const, label: "By Process", icon: Layers },
+                    { key: "drill" as const, label: "Drill-down", icon: Layers },
+                    { key: "process" as const, label: "By Process", icon: Activity },
                     { key: "vendor" as const, label: "By Vendor", icon: Users },
                     { key: "item" as const, label: "By Item", icon: Box },
                     { key: "trend" as const, label: "Monthly Trend", icon: TrendingUp },
@@ -2723,6 +2747,114 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                   </div>
                 )}
               </div>
+
+              {/* ─── Drill-down tree: Process → Vendor → Transaction ─── */}
+              {rptActiveView === "drill" && (
+                <Card className="border-0 shadow-sm overflow-hidden">
+                  <CardHeader className="pb-2 pt-4 px-4 border-b">
+                    <CardTitle className="text-sm font-semibold text-gray-800 flex items-center gap-2">
+                      <Layers className="h-4 w-4 text-indigo-600" /> Process → Vendor → Transaction
+                      <span className="text-[10px] font-normal text-gray-400 ml-1 hidden sm:inline">click a transaction to open its challan · hover for details</span>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    {rptTreeLoading ? (
+                      <div className="flex items-center justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-indigo-500" /></div>
+                    ) : (() => {
+                      const q = rptSearch.toLowerCase().trim()
+                      const recs = rptAllRecords.filter((r: any) => {
+                        if (!isAll(rptFilterProcess) && (r.sub_category || "Unknown") !== rptFilterProcess) return false
+                        if (!isAll(rptFilterVendor) && (r.to_party || "—") !== rptFilterVendor) return false
+                        if (!isAll(rptFilterItem) && !String(r.item_descriptions || "").includes(rptFilterItem)) return false
+                        if (rptFilterFrom && toYmd(r.job_work_date) < rptFilterFrom) return false
+                        if (rptFilterTo && toYmd(r.job_work_date) > rptFilterTo) return false
+                        if (q && !`${r.challan_no} ${r.to_party} ${r.sub_category} ${r.item_descriptions}`.toLowerCase().includes(q)) return false
+                        return true
+                      })
+                      if (!recs.length) return <p className="px-4 py-8 text-center text-xs text-gray-400">No transactions match the current filters.</p>
+                      const procMap: Record<string, any> = {}
+                      for (const r of recs) {
+                        const p = r.sub_category || "Unknown"; const v = r.to_party || "—"
+                        const disp = Number(r.total_net_weight) || Number(r.total_weight) || 0
+                        const fg = Number(r.fg_received_kgs) || 0
+                        const pe = procMap[p] || (procMap[p] = { disp: 0, fg: 0, count: 0, vendors: {} })
+                        pe.disp += disp; pe.fg += fg; pe.count++
+                        const ve = pe.vendors[v] || (pe.vendors[v] = { disp: 0, fg: 0, count: 0, rows: [] })
+                        ve.disp += disp; ve.fg += fg; ve.count++
+                        ve.rows.push(r)
+                      }
+                      const lossPct = (disp: number, fg: number) => disp > 0 ? (((disp - fg) / disp) * 100).toFixed(1) : "0.0"
+                      const procs = Object.entries(procMap).sort((a: any, b: any) => b[1].disp - a[1].disp)
+                      return (
+                        <div className="max-h-[560px] overflow-y-auto">
+                          {procs.map(([p, pd]: any) => {
+                            const pk = `p:${p}`; const pOpen = rptExpanded.has(pk)
+                            return (
+                              <div key={pk}>
+                                <button onClick={() => toggleExpand(pk)} className="w-full flex items-center gap-2 px-3 py-2.5 bg-[#0f172a] text-white hover:bg-[#1e293b] text-left">
+                                  {pOpen ? <ChevronDown className="h-3.5 w-3.5 flex-shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 flex-shrink-0" />}
+                                  <span className="font-semibold text-sm flex-1 truncate">{p}</span>
+                                  <span className="text-[11px] opacity-70 hidden sm:inline">{pd.count} JWO</span>
+                                  <span className="text-[11px] tabular-nums w-24 text-right">{Math.round(pd.disp).toLocaleString()} kg</span>
+                                  <span className="text-[11px] text-emerald-300 tabular-nums w-24 text-right hidden sm:inline">FG {Math.round(pd.fg).toLocaleString()}</span>
+                                  <span className="text-[11px] font-semibold w-14 text-right">{lossPct(pd.disp, pd.fg)}%</span>
+                                </button>
+                                {pOpen && Object.entries(pd.vendors).sort((a: any, b: any) => b[1].disp - a[1].disp).map(([v, vd]: any) => {
+                                  const vk = `${pk}|v:${v}`; const vOpen = rptExpanded.has(vk)
+                                  return (
+                                    <div key={vk}>
+                                      <button onClick={() => toggleExpand(vk)} className="w-full flex items-center gap-2 pl-8 pr-3 py-2 bg-slate-100 hover:bg-slate-200 border-l-[3px] border-l-teal-500 text-left">
+                                        {vOpen ? <ChevronDown className="h-3 w-3 flex-shrink-0 text-slate-500" /> : <ChevronRight className="h-3 w-3 flex-shrink-0 text-slate-500" />}
+                                        <span className="text-xs font-medium text-slate-700 flex-1 truncate">{v}</span>
+                                        <span className="text-[10px] text-slate-500 hidden sm:inline">{vd.count} JWO</span>
+                                        <span className="text-[10px] tabular-nums text-slate-600 w-24 text-right">{Math.round(vd.disp).toLocaleString()} kg</span>
+                                        <span className="text-[10px] font-semibold w-14 text-right text-slate-700">{lossPct(vd.disp, vd.fg)}%</span>
+                                      </button>
+                                      {vOpen && [...vd.rows].sort((a: any, b: any) => (Number(b.total_net_weight) || 0) - (Number(a.total_net_weight) || 0)).map((r: any) => {
+                                        const disp = Number(r.total_net_weight) || Number(r.total_weight) || 0
+                                        const fg = Number(r.fg_received_kgs) || 0
+                                        return (
+                                          <div key={r.id} onClick={() => router.push(`/${company}/transfer/job-work/dc/${r.challan_no}`)}
+                                            className="flex items-center gap-2 pl-[44px] pr-3 py-2 bg-white hover:bg-indigo-50 cursor-pointer border-b last:border-0 text-xs">
+                                            <TooltipProvider delayDuration={200}>
+                                              <Tooltip>
+                                                <TooltipTrigger asChild>
+                                                  <span className="font-mono text-indigo-700 flex-1 truncate underline decoration-dotted underline-offset-2">{r.challan_no}</span>
+                                                </TooltipTrigger>
+                                                <TooltipContent side="right" className="!bg-gradient-to-br !from-sky-50 !via-indigo-50 !to-violet-100 !text-slate-800 border border-indigo-200/70 rounded-lg max-w-xs text-xs p-3 space-y-1">
+                                                  <div className="font-semibold text-indigo-900 pb-1 border-b border-indigo-200/60">{r.challan_no}</div>
+                                                  <div><span className="text-indigo-700 font-semibold">Date:</span> {r.job_work_date}</div>
+                                                  <div><span className="text-indigo-700 font-semibold">Vendor:</span> {r.to_party}</div>
+                                                  <div><span className="text-indigo-700 font-semibold">Process:</span> {r.sub_category || "—"}</div>
+                                                  <div><span className="text-indigo-700 font-semibold">Dispatched:</span> {Math.round(disp).toLocaleString()} kg</div>
+                                                  <div><span className="text-indigo-700 font-semibold">FG / Waste / Rej:</span> {Math.round(fg).toLocaleString()} / {Math.round(Number(r.waste_received_kgs) || 0).toLocaleString()} / {Math.round(Number(r.rejection_kgs) || 0).toLocaleString()} kg</div>
+                                                  <div><span className="text-indigo-700 font-semibold">Loss:</span> {r.actual_loss_pct ?? lossPct(disp, fg)}% · {r.receipt_count || 0} receipt(s)</div>
+                                                  {r.item_descriptions && <div className="text-slate-600 pt-0.5 border-t border-indigo-200/40">{r.item_descriptions}</div>}
+                                                  <div className="text-[10px] text-indigo-500 pt-0.5">Click to open challan →</div>
+                                                </TooltipContent>
+                                              </Tooltip>
+                                            </TooltipProvider>
+                                            {getStatusBadge(r.status)}
+                                            <span className="text-[10px] text-gray-400 w-[74px] text-right hidden sm:inline">{r.job_work_date}</span>
+                                            <span className="tabular-nums text-gray-600 w-24 text-right">{Math.round(disp).toLocaleString()} kg</span>
+                                            <span className="text-emerald-700 tabular-nums w-20 text-right hidden sm:inline">FG {Math.round(fg).toLocaleString()}</span>
+                                            <span className="font-semibold w-14 text-right">{r.actual_loss_pct ?? lossPct(disp, fg)}%</span>
+                                            <Eye className="h-3.5 w-3.5 text-gray-300 flex-shrink-0" />
+                                          </div>
+                                        )
+                                      })}
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )
+                    })()}
+                  </CardContent>
+                </Card>
+              )}
 
               {/* ─── By Process ─── */}
               {rptActiveView === "process" && (
