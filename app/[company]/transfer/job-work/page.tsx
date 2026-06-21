@@ -3353,19 +3353,20 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                       const unaccounted = Math.max(0, line.sent_kgs - line.finished_goods_kgs - line.waste_kgs - line.rejection_kgs)
                       const lossPct = line.sent_kgs > 0 ? ((line.waste_kgs + line.rejection_kgs) / line.sent_kgs * 100) : 0
                       const overLimit = line.max_loss_pct > 0 && lossPct > line.max_loss_pct
+                      const lpct = (n: number) => line.sent_kgs > 0 ? `${(n / line.sent_kgs * 100).toFixed(1)}%` : "—"
                       return (
                         <Fragment key={idx}>
                           <tr className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
                             <td className="px-1.5 py-1.5 text-gray-500">{line.sl_no}</td>
                             <td className="px-1.5 py-1.5 font-medium truncate" title={line.item_description}>{line.item_description}</td>
                             <td className="px-1.5 py-1.5 text-right font-medium">{line.sent_kgs.toFixed(2)}</td>
-                            <td className="px-1.5 py-1.5 text-right font-medium text-emerald-700">{line.finished_goods_kgs.toFixed(2)}</td>
+                            <td className="px-1.5 py-1.5 text-right font-medium text-emerald-700">{line.finished_goods_kgs.toFixed(2)}<div className="text-[9px] text-emerald-400 font-normal leading-tight">({lpct(line.finished_goods_kgs)})</div></td>
                             <td className="px-1.5 py-1.5 text-right font-medium text-orange-700">
                               {line.waste_kgs.toFixed(2)}
-                              {line.waste_type && <div className="text-[9px] text-orange-400 font-normal leading-tight">{line.waste_type}</div>}
+                              <div className="text-[9px] text-orange-400 font-normal leading-tight">({lpct(line.waste_kgs)}){line.waste_type ? ` · ${line.waste_type}` : ""}</div>
                             </td>
-                            <td className="px-1.5 py-1.5 text-right font-medium text-rose-700">{line.rejection_kgs.toFixed(2)}</td>
-                            <td className="px-1.5 py-1.5 text-right font-medium text-purple-700">{unaccounted.toFixed(2)}</td>
+                            <td className="px-1.5 py-1.5 text-right font-medium text-rose-700">{line.rejection_kgs.toFixed(2)}<div className="text-[9px] text-rose-400 font-normal leading-tight">({lpct(line.rejection_kgs)})</div></td>
+                            <td className="px-1.5 py-1.5 text-right font-medium text-purple-700">{unaccounted.toFixed(2)}<div className="text-[9px] text-purple-400 font-normal leading-tight">({lpct(unaccounted)})</div></td>
                             <td className="px-1.5 py-1.5 text-right">
                               <span className={`font-medium ${overLimit ? 'text-red-600' : 'text-gray-700'}`}>{lossPct.toFixed(1)}%</span>
                               {(line.min_loss_pct > 0 || line.max_loss_pct > 0) && (
@@ -3384,21 +3385,23 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                   </tbody>
                   <tfoot className="bg-gray-100 border-t font-semibold">
                     <tr>
-                      <td colSpan={2} className="px-1.5 py-1.5 text-gray-700">Total</td>
-                      <td className="px-1.5 py-1.5 text-right">{viewIRData.lines.reduce((s: number, l: any) => s + l.sent_kgs, 0).toFixed(2)}</td>
-                      <td className="px-1.5 py-1.5 text-right text-emerald-700">{viewIRData.lines.reduce((s: number, l: any) => s + l.finished_goods_kgs, 0).toFixed(2)}</td>
-                      <td className="px-1.5 py-1.5 text-right text-orange-700">{viewIRData.lines.reduce((s: number, l: any) => s + l.waste_kgs, 0).toFixed(2)}</td>
-                      <td className="px-1.5 py-1.5 text-right text-rose-700">{viewIRData.lines.reduce((s: number, l: any) => s + l.rejection_kgs, 0).toFixed(2)}</td>
-                      <td className="px-1.5 py-1.5 text-right text-purple-700">
-                        {viewIRData.lines.reduce((s: number, l: any) => s + Math.max(0, l.sent_kgs - l.finished_goods_kgs - l.waste_kgs - l.rejection_kgs), 0).toFixed(2)}
-                      </td>
-                      <td className="px-1.5 py-1.5 text-right text-gray-600">
-                        {(() => {
-                          const totalSent = viewIRData.lines.reduce((s: number, l: any) => s + l.sent_kgs, 0)
-                          const totalLoss = viewIRData.lines.reduce((s: number, l: any) => s + l.waste_kgs + l.rejection_kgs, 0)
-                          return totalSent > 0 ? `${(totalLoss / totalSent * 100).toFixed(1)}%` : '—'
-                        })()}
-                      </td>
+                      {(() => {
+                        const tSent = viewIRData.lines.reduce((s: number, l: any) => s + l.sent_kgs, 0)
+                        const tFg = viewIRData.lines.reduce((s: number, l: any) => s + l.finished_goods_kgs, 0)
+                        const tWaste = viewIRData.lines.reduce((s: number, l: any) => s + l.waste_kgs, 0)
+                        const tRej = viewIRData.lines.reduce((s: number, l: any) => s + l.rejection_kgs, 0)
+                        const tUn = viewIRData.lines.reduce((s: number, l: any) => s + Math.max(0, l.sent_kgs - l.finished_goods_kgs - l.waste_kgs - l.rejection_kgs), 0)
+                        const tp = (n: number) => tSent > 0 ? `${(n / tSent * 100).toFixed(1)}%` : "—"
+                        return (<>
+                          <td colSpan={2} className="px-1.5 py-1.5 text-gray-700">Total</td>
+                          <td className="px-1.5 py-1.5 text-right">{tSent.toFixed(2)}</td>
+                          <td className="px-1.5 py-1.5 text-right text-emerald-700">{tFg.toFixed(2)}<div className="text-[9px] text-emerald-500 font-normal leading-tight">({tp(tFg)})</div></td>
+                          <td className="px-1.5 py-1.5 text-right text-orange-700">{tWaste.toFixed(2)}<div className="text-[9px] text-orange-500 font-normal leading-tight">({tp(tWaste)})</div></td>
+                          <td className="px-1.5 py-1.5 text-right text-rose-700">{tRej.toFixed(2)}<div className="text-[9px] text-rose-500 font-normal leading-tight">({tp(tRej)})</div></td>
+                          <td className="px-1.5 py-1.5 text-right text-purple-700">{tUn.toFixed(2)}<div className="text-[9px] text-purple-500 font-normal leading-tight">({tp(tUn)})</div></td>
+                          <td className="px-1.5 py-1.5 text-right text-gray-600">{tSent > 0 ? `${((tWaste + tRej) / tSent * 100).toFixed(1)}%` : '—'}</td>
+                        </>)
+                      })()}
                     </tr>
                   </tfoot>
                 </table>
@@ -3418,23 +3421,23 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                     </div>
                     <div className="bg-white rounded p-2 border border-emerald-100">
                       <div className="text-emerald-600 text-[10px] mb-0.5">FG Received</div>
-                      <div className="font-bold text-emerald-700">{viewIRData.cumulative.cum_fg_kgs.toFixed(2)} Kg</div>
+                      <div className="font-bold text-emerald-700">{viewIRData.cumulative.cum_fg_kgs.toFixed(2)} Kg <span className="text-[10px] font-normal text-emerald-400">{viewIRData.cumulative.dispatched_kgs > 0 ? `(${(viewIRData.cumulative.cum_fg_kgs / viewIRData.cumulative.dispatched_kgs * 100).toFixed(1)}%)` : ""}</span></div>
                     </div>
                     <div className="bg-white rounded p-2 border border-orange-100">
                       <div className="text-orange-600 text-[10px] mb-0.5">Total Waste</div>
-                      <div className="font-bold text-orange-700">{viewIRData.cumulative.cum_waste_kgs.toFixed(2)} Kg</div>
+                      <div className="font-bold text-orange-700">{viewIRData.cumulative.cum_waste_kgs.toFixed(2)} Kg <span className="text-[10px] font-normal text-orange-400">{viewIRData.cumulative.dispatched_kgs > 0 ? `(${(viewIRData.cumulative.cum_waste_kgs / viewIRData.cumulative.dispatched_kgs * 100).toFixed(1)}%)` : ""}</span></div>
                     </div>
                     <div className="bg-white rounded p-2 border border-rose-100">
                       <div className="text-rose-600 text-[10px] mb-0.5">Total Rejection</div>
-                      <div className="font-bold text-rose-700">{viewIRData.cumulative.cum_rejection_kgs.toFixed(2)} Kg</div>
+                      <div className="font-bold text-rose-700">{viewIRData.cumulative.cum_rejection_kgs.toFixed(2)} Kg <span className="text-[10px] font-normal text-rose-400">{viewIRData.cumulative.dispatched_kgs > 0 ? `(${(viewIRData.cumulative.cum_rejection_kgs / viewIRData.cumulative.dispatched_kgs * 100).toFixed(1)}%)` : ""}</span></div>
                     </div>
                     <div className="bg-white rounded p-2 border border-purple-100">
                       <div className="text-purple-600 text-[10px] mb-0.5">Unaccounted</div>
-                      <div className="font-bold text-purple-700">{viewIRData.cumulative.cum_unaccounted_kgs.toFixed(2)} Kg</div>
+                      <div className="font-bold text-purple-700">{viewIRData.cumulative.cum_unaccounted_kgs.toFixed(2)} Kg <span className="text-[10px] font-normal text-purple-400">{viewIRData.cumulative.dispatched_kgs > 0 ? `(${(viewIRData.cumulative.cum_unaccounted_kgs / viewIRData.cumulative.dispatched_kgs * 100).toFixed(1)}%)` : ""}</span></div>
                     </div>
                     <div className="bg-white rounded p-2 border border-amber-100">
                       <div className="text-amber-600 text-[10px] mb-0.5">Remaining to Receive</div>
-                      <div className="font-bold text-amber-700">{viewIRData.cumulative.remaining_kgs.toFixed(2)} Kg</div>
+                      <div className="font-bold text-amber-700">{viewIRData.cumulative.remaining_kgs.toFixed(2)} Kg <span className="text-[10px] font-normal text-amber-400">{viewIRData.cumulative.dispatched_kgs > 0 ? `(${(viewIRData.cumulative.remaining_kgs / viewIRData.cumulative.dispatched_kgs * 100).toFixed(1)}%)` : ""}</span></div>
                     </div>
                     <div className="bg-white rounded p-2 border border-gray-200 sm:col-span-2">
                       <div className="text-gray-500 text-[10px] mb-0.5">Cumulative Loss %</div>
