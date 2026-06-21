@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useEffect, Fragment } from "react"
+import { useState, useEffect, useRef, useCallback, Fragment, type ReactNode } from "react"
+import { createPortal } from "react-dom"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -105,6 +106,179 @@ interface JobWorkRecord {
   total_weight: number
   created_by: string
   created_at: string
+}
+
+// ─── Status → receipts secondary hover ───
+// On hover (mouse) / tap (touch) of a status that can have inward receipts,
+// lazy-fetch and show a roll-up of what's been received and how many receipts.
+// Statuses without receipts render the plain badge unchanged.
+const RECEIPT_STATUSES = new Set(["partially_received", "fully_received", "reconciled", "closed"])
+
+interface PriorIR {
+  ir_number: string
+  receipt_date: string
+  receipt_type: string
+  total_fg_kgs: number
+  total_waste_kgs: number
+  total_rejection_kgs: number
+}
+
+function StatusReceiveHover({ rec, children }: { rec: JobWorkRecord; children: ReactNode }) {
+  const [show, setShow] = useState(false)
+  const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number; maxHeight: number }>({ left: 0, maxHeight: 420 })
+  const [isTouch, setIsTouch] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [data, setData] = useState<{ receive_count: number; prior_irs: PriorIR[] } | null>(null)
+  const fetched = useRef(false)
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const triggerRef = useRef<HTMLSpanElement>(null)
+
+  const interactive = RECEIPT_STATUSES.has(rec.status)
+  const CARD_WIDTH = 320, MARGIN = 8, GAP = 6
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.matchMedia) {
+      setIsTouch(!window.matchMedia("(hover: hover)").matches)
+    }
+  }, [])
+
+  const ensureData = useCallback(async () => {
+    if (fetched.current) return
+    fetched.current = true
+    setLoading(true); setError(null)
+    try {
+      const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
+      const res = await fetch(`${base}/job-work/out/search?challan_no=${encodeURIComponent(rec.challan_no)}`, { headers: { Accept: "application/json" } })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const d = await res.json()
+      setData({ receive_count: d.receive_count || 0, prior_irs: d.prior_irs || [] })
+    } catch {
+      setError("Couldn't load receipts")
+      fetched.current = false // allow retry on next open
+    } finally {
+      setLoading(false)
+    }
+  }, [rec.challan_no])
+
+  const computePosition = useCallback(() => {
+    if (!triggerRef.current) return
+    const rect = triggerRef.current.getBoundingClientRect()
+    const vw = window.innerWidth, vh = window.innerHeight
+    let left = rect.left
+    if (left + CARD_WIDTH > vw - MARGIN) left = Math.max(MARGIN, vw - CARD_WIDTH - MARGIN)
+    if (left < MARGIN) left = MARGIN
+    const spaceAbove = rect.top - MARGIN
+    const spaceBelow = vh - rect.bottom - MARGIN
+    const maxHeight = Math.min(420, spaceAbove >= spaceBelow ? spaceAbove - GAP : spaceBelow - GAP)
+    if (spaceAbove >= spaceBelow && spaceAbove >= 100) setPos({ bottom: vh - rect.top + GAP, left, maxHeight })
+    else setPos({ top: rect.bottom + GAP, left, maxHeight })
+  }, [])
+
+  const open = useCallback(() => {
+    if (hideTimer.current) clearTimeout(hideTimer.current)
+    computePosition()
+    setShow(true)
+    ensureData()
+  }, [computePosition, ensureData])
+
+  const scheduleClose = useCallback(() => { hideTimer.current = setTimeout(() => setShow(false), 180) }, [])
+  const cancelClose = useCallback(() => { if (hideTimer.current) clearTimeout(hideTimer.current) }, [])
+
+  useEffect(() => {
+    if (!show) return
+    const onPointerDown = (e: Event) => {
+      const t = e.target as Node
+      if (triggerRef.current?.contains(t)) return
+      if (document.getElementById(`jw-receipts-${rec.id}`)?.contains(t)) return
+      setShow(false)
+    }
+    const onScrollResize = () => setShow(false)
+    document.addEventListener("pointerdown", onPointerDown, true)
+    window.addEventListener("scroll", onScrollResize, true)
+    window.addEventListener("resize", onScrollResize)
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true)
+      window.removeEventListener("scroll", onScrollResize, true)
+      window.removeEventListener("resize", onScrollResize)
+    }
+  }, [show, rec.id])
+
+  if (!interactive) return <>{children}</>
+
+  const totalFg = data?.prior_irs.reduce((s, ir) => s + (ir.total_fg_kgs || 0), 0) ?? 0
+
+  return (
+    <>
+      <span
+        ref={triggerRef}
+        onMouseEnter={() => { if (!isTouch) open() }}
+        onMouseLeave={() => { if (!isTouch) scheduleClose() }}
+        onClick={() => { if (isTouch) (show ? setShow(false) : open()) }}
+        className="inline-flex cursor-pointer"
+        title="View receipts"
+      >
+        {children}
+      </span>
+      {show && typeof document !== "undefined" && createPortal(
+        <div
+          id={`jw-receipts-${rec.id}`}
+          onMouseEnter={() => { if (!isTouch) cancelClose() }}
+          onMouseLeave={() => { if (!isTouch) scheduleClose() }}
+          style={{
+            position: "fixed",
+            ...(pos.bottom !== undefined ? { bottom: pos.bottom } : { top: pos.top }),
+            left: pos.left,
+            width: Math.min(CARD_WIDTH, window.innerWidth - MARGIN * 2),
+            maxHeight: pos.maxHeight,
+            zIndex: 9999,
+            overflowY: "auto",
+          }}
+          className="rounded-lg border border-indigo-200/70 shadow-lg shadow-indigo-200/40 bg-gradient-to-br from-sky-50 via-indigo-50 to-violet-100 text-slate-800 text-xs"
+        >
+          <div className="px-3 py-2 border-b border-indigo-200/60 flex items-center justify-between gap-2">
+            <span className="font-mono font-semibold text-indigo-900">{rec.challan_no}</span>
+            <span className="text-[10px] font-semibold text-indigo-700 whitespace-nowrap">
+              {loading ? "…" : `Receipts (${data?.receive_count ?? 0})`}
+            </span>
+          </div>
+          <div className="px-3 py-2 space-y-1.5">
+            {loading && (
+              <div className="flex items-center gap-1.5 text-slate-500"><Loader2 className="h-3 w-3 animate-spin" /> Loading receipts…</div>
+            )}
+            {error && <div className="text-red-600">{error}</div>}
+            {!loading && !error && data && data.receive_count === 0 && (
+              <div className="text-slate-500 italic">No receipts recorded yet.</div>
+            )}
+            {!loading && !error && data && data.prior_irs.length > 0 && (
+              <>
+                {data.prior_irs.map((ir, i) => (
+                  <div key={ir.ir_number || i} className="rounded border border-indigo-100 bg-white/70 px-2 py-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium text-slate-700">{ir.receipt_date}{ir.ir_number ? ` · ${ir.ir_number}` : ""}</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded border ${ir.receipt_type === "final" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-700 border-amber-200"}`}>
+                        {ir.receipt_type === "final" ? "Final" : "Partial"}
+                      </span>
+                    </div>
+                    <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-slate-600">
+                      <span>FG: <span className="font-semibold text-slate-800">{(ir.total_fg_kgs ?? 0).toFixed(2)} kg</span></span>
+                      {ir.total_waste_kgs > 0 && <span>Waste: {ir.total_waste_kgs.toFixed(2)}</span>}
+                      {ir.total_rejection_kgs > 0 && <span>Rej: {ir.total_rejection_kgs.toFixed(2)}</span>}
+                    </div>
+                  </div>
+                ))}
+                <div className="pt-1 mt-1 border-t border-indigo-200/60 flex items-center justify-between text-[11px]">
+                  <span className="text-slate-500">Total FG received</span>
+                  <span className="font-semibold text-slate-800">{totalFg.toFixed(2)} kg</span>
+                </div>
+              </>
+            )}
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
+  )
 }
 
 export default function JobWorkPage({ params }: JobWorkPageProps) {
@@ -1889,7 +2063,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                             <td className="px-3 py-1.5 text-xs text-gray-600">{art.item_group} / {art.sub_group}</td>
                             <td className="px-2 py-1">
                               <Input type="number" step="0.001" min={0}
-                                value={art.case_pack ?? ((art.uom ?? 0) > 0 ? round3(art.net_weight / (art.uom as number)) : 0) || ""}
+                                value={(art.case_pack ?? ((art.uom ?? 0) > 0 ? round3(art.net_weight / (art.uom as number)) : 0)) || ""}
                                 onChange={(e) => {
                                   const cp = Number(e.target.value) || 0
                                   setAeGeneratedArticles(prev => prev.map((a, i) => i === idx ? {
@@ -2169,7 +2343,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                               </Tooltip>
                             </TooltipProvider>
                           </td>
-                          <td className="px-4 py-3">{getStatusBadge(rec.status)}</td>
+                          <td className="px-4 py-3"><StatusReceiveHover rec={rec}>{getStatusBadge(rec.status)}</StatusReceiveHover></td>
                           <td className="px-4 py-3 text-xs">{getDisplayWarehouseName(rec.from_warehouse)} → {rec.to_party}</td>
                           <td className="px-4 py-3 text-xs max-w-[250px] truncate" title={rec.item_descriptions}>{rec.item_descriptions || "-"}</td>
                           <td className="px-4 py-3 text-xs whitespace-nowrap hidden lg:table-cell">{rec.job_work_date}</td>
@@ -2215,7 +2389,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                     <div key={rec.id} className="bg-white border rounded-lg p-3 space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="font-mono text-xs font-semibold">{rec.challan_no}</span>
-                        {getStatusBadge(rec.status)}
+                        <StatusReceiveHover rec={rec}>{getStatusBadge(rec.status)}</StatusReceiveHover>
                       </div>
                       <div className="text-xs text-gray-600">{getDisplayWarehouseName(rec.from_warehouse)} → {rec.to_party}</div>
                       {rec.item_descriptions && (
