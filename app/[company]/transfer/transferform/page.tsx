@@ -374,7 +374,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
   const [scannedBoxes, setScannedBoxes] = useState<any[]>([])
 
   // Cold transfer summary popup
-  const COLD_STORAGE_WAREHOUSES = ["Cold Storage", "Rishi", "Savla D-39", "Savla D-514", "Supreme"]
+  const COLD_STORAGE_WAREHOUSES = ["Cold Storage", "Rishi", "Savla D-39", "Savla D-514", "Supreme", "Eskimo"]
   const [coldTransferPopup, setColdTransferPopup] = useState<{ open: boolean; message: string }>({ open: false, message: "" })
   const [popupCopied, setPopupCopied] = useState(false)
   
@@ -1917,6 +1917,8 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                   <SelectItem value="Savla D-514">Savla D-514</SelectItem>
 
                   <SelectItem value="Supreme">Supreme</SelectItem>
+
+                  <SelectItem value="Eskimo">Eskimo</SelectItem>
 
                 </SelectContent>
 

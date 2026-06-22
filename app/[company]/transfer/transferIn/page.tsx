@@ -116,7 +116,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
   const canReopenReceived = (user?.email?.toLowerCase() || "") === "b.hrithik@candorfoods.in"
 
   // ── Cold storage check — used to drive cold-FROM display logic (cold→warehouse IN) ──
-  const COLD_STORAGE_WAREHOUSES = ["Cold Storage", "Rishi", "Savla D-39", "Savla D-514", "Supreme"]
+  const COLD_STORAGE_WAREHOUSES = ["Cold Storage", "Rishi", "Savla D-39", "Savla D-514", "Supreme", "Eskimo"]
   const fromWarehouse = transferData?.from_warehouse || transferData?.from_site || ""
   const toWarehouse = transferData?.to_warehouse || transferData?.to_site || ""
   const isColdStorageFrom = COLD_STORAGE_WAREHOUSES.some(w => w.toLowerCase() === fromWarehouse.toLowerCase())

@@ -265,7 +265,7 @@ function ItemDescriptionDropdown({
 }
 
 // Cold storage warehouse values that trigger the stock search UI
-const COLD_STORAGE_WAREHOUSES = ["Cold Storage", "Rishi", "Savla D-39", "Savla D-514", "Supreme"]
+const COLD_STORAGE_WAREHOUSES = ["Cold Storage", "Rishi", "Savla D-39", "Savla D-514", "Supreme", "Eskimo"]
 
 // Pending stock info for a result row (cartons reserved by Transfer Out, not yet received).
 // `transfers` is aggregated per challan; `boxes` is the deprecated box-level list.
