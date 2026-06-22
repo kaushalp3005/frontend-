@@ -57,6 +57,11 @@ export const WAREHOUSES: Record<string, WarehouseConfig> = {
     address: "MIDC, Turbhe",
     type: "cold",
   },
+  Eskimo: {
+    name: "Eskimo Cold Storage",
+    address: "", // TODO: confirm Eskimo cold storage address for challans
+    type: "cold",
+  },
 }
 
 /**
@@ -104,6 +109,11 @@ export const WAREHOUSE_ALIASES: Record<string, string> = {
   "supreme": "Supreme",
   "supreme cold": "Supreme",
   "supreme cold storage": "Supreme",
+
+  // Eskimo aliases (canonical code stays "Eskimo")
+  "eskimo": "Eskimo",
+  "eskimo cold": "Eskimo",
+  "eskimo cold storage": "Eskimo",
 }
 
 /**
@@ -116,6 +126,7 @@ export const WAREHOUSE_DISPLAY_NAMES: Record<string, string> = {
   "Savla D-514": "Savla D-514",
   "Rishi": "Rishi",
   "Supreme": "Supreme Cold",
+  "Eskimo": "Eskimo",
 }
 
 /** User-to-warehouse default mapping. "ALL" means no filter applied. */

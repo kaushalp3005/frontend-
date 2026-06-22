@@ -535,6 +535,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                         <SelectItem value="Savla D-514">Savla D-514</SelectItem>
                         <SelectItem value="Rishi">Rishi</SelectItem>
                         <SelectItem value="Supreme">Supreme</SelectItem>
+                        <SelectItem value="Eskimo">Eskimo</SelectItem>
                       </>
                     )}
                   </SelectContent>
