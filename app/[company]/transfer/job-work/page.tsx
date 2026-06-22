@@ -18,7 +18,7 @@ import {
   Package, Send, Inbox, ClipboardList, Eye, CheckCircle,
   Truck, RefreshCw, Pencil, Printer, Trash2, AlertTriangle, Info,
   BarChart3, TrendingUp, Filter, Download, Activity, Users, Layers, Box,
-  ChevronRight, ChevronDown
+  ChevronRight, ChevronDown, ArrowUpRight, ArrowDownLeft
 } from "lucide-react"
 import QRCode from 'qrcode'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as ReTooltip, ResponsiveContainer } from "recharts"
@@ -1298,6 +1298,174 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
 
   // Helper: bar width for visual bars
   const barWidth = (val: number, max: number) => max > 0 ? Math.max(4, (val / max) * 100) : 0
+
+  // ─── Layered breakdown engine (shared by the Drill-down tab and every By-X tab) ───
+  // Output % = FG / dispatched (yield). Pending % = unreturned / dispatched.
+  const outPct = (disp: number, fg: number) => disp > 0 ? ((fg / disp) * 100).toFixed(1) : "0.0"
+  const pendPct = (disp: number, fg: number, wr: number) => disp > 0 ? (Math.max(0, disp - fg - wr) / disp * 100).toFixed(1) : "0.0"
+  const recDisp = (r: any) => Number(r.total_net_weight) || Number(r.total_weight) || 0
+  const recWr = (r: any) => (Number(r.waste_received_kgs) || 0) + (Number(r.rejection_kgs) || 0)
+  // Records after the active chip/date/search filters (same logic the whole Summary shares).
+  const rptRecsFiltered = rptAllRecords.filter((r: any) => {
+    const q = rptSearch.toLowerCase().trim()
+    if (!isAll(rptFilterProcess) && (r.sub_category || "Unknown") !== rptFilterProcess) return false
+    if (!isAll(rptFilterVendor) && (r.to_party || "—") !== rptFilterVendor) return false
+    if (!isAll(rptFilterItem) && !String(r.item_descriptions || "").includes(rptFilterItem)) return false
+    if (!isAll(rptFilterGroup)) {
+      const grps = String(r.item_groups || "").split(",").map((s: string) => s.trim()).filter(Boolean)
+      if (!(grps.length ? grps.includes(rptFilterGroup) : rptFilterGroup === "UNGROUPED")) return false
+    }
+    if (rptFilterFrom && toYmd(r.job_work_date) < rptFilterFrom) return false
+    if (rptFilterTo && toYmd(r.job_work_date) > rptFilterTo) return false
+    if (q && !`${r.challan_no} ${r.to_party} ${r.sub_category} ${r.item_descriptions}`.toLowerCase().includes(q)) return false
+    return true
+  })
+  // OUT = dispatched to vendor; IN = finished goods received back. Tagged so a third party can read it.
+  const OutTag = ({ kg, cls = "text-amber-700" }: { kg: number; cls?: string }) => (
+    <span className={`inline-flex items-center gap-0.5 tabular-nums whitespace-nowrap ${cls}`} title="Material OUT — dispatched to vendor"><ArrowUpRight className="h-3 w-3" />{Math.round(kg).toLocaleString()}</span>
+  )
+  const InTag = ({ kg, cls = "text-emerald-700" }: { kg: number; cls?: string }) => (
+    <span className={`inline-flex items-center gap-0.5 tabular-nums whitespace-nowrap ${cls}`} title="Material IN — finished goods received back"><ArrowDownLeft className="h-3 w-3" />{Math.round(kg).toLocaleString()}</span>
+  )
+
+  // One transaction row + its (lazy) receipts layer. Receipt rows open the Inward Receipt Details card.
+  const renderTxRow = (r: any) => {
+    const disp = recDisp(r); const fg = Number(r.fg_received_kgs) || 0; const wr = recWr(r)
+    const txOpen = rptTxOpen.has(r.challan_no); const rc = rptReceipts[r.challan_no]
+    return (
+      <div key={r.id}>
+        <div className="flex items-center gap-2 pl-[40px] pr-3 py-2 bg-white hover:bg-indigo-50/60 border-b last:border-0 text-xs">
+          <button onClick={() => toggleTx(r.challan_no)} title={`${r.receipt_count || 0} receipt(s)`} className="flex-shrink-0 text-gray-400 hover:text-indigo-600">
+            {txOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+          </button>
+          <TooltipProvider delayDuration={200}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button onClick={() => openLatestReceipt(r.challan_no, r.receipt_count || 0)} className="font-mono text-indigo-700 flex-1 truncate text-left underline decoration-dotted underline-offset-2 hover:text-indigo-900">{r.challan_no}</button>
+              </TooltipTrigger>
+              <TooltipContent side="right" className="!bg-gradient-to-br !from-sky-50 !via-indigo-50 !to-violet-100 !text-slate-800 border border-indigo-200/70 rounded-lg max-w-xs text-xs p-3 space-y-1">
+                <div className="font-semibold text-indigo-900 pb-1 border-b border-indigo-200/60">{r.challan_no}</div>
+                <div><span className="text-indigo-700 font-semibold">Date:</span> {r.job_work_date}</div>
+                <div><span className="text-indigo-700 font-semibold">Vendor:</span> {r.to_party}</div>
+                <div><span className="text-indigo-700 font-semibold">Process:</span> {r.sub_category || "—"}</div>
+                <div><span className="text-amber-700 font-semibold">↑ OUT (dispatched):</span> {Math.round(disp).toLocaleString()} kg</div>
+                <div><span className="text-emerald-700 font-semibold">↓ IN (FG / Waste / Rej):</span> {Math.round(fg).toLocaleString()} / {Math.round(Number(r.waste_received_kgs) || 0).toLocaleString()} / {Math.round(Number(r.rejection_kgs) || 0).toLocaleString()} kg</div>
+                <div><span className="text-indigo-700 font-semibold">Output:</span> {outPct(disp, fg)}% · <span className="text-indigo-700 font-semibold">Pending:</span> {pendPct(disp, fg, wr)}%</div>
+                <div><span className="text-indigo-700 font-semibold">Receipts:</span> {r.receipt_count || 0}</div>
+                {r.item_descriptions && <div className="text-slate-600 pt-0.5 border-t border-indigo-200/40">{r.item_descriptions}</div>}
+                <div className="text-[10px] text-indigo-500 pt-0.5">{(r.receipt_count || 0) > 0 ? "Click → Receipt details" : "Click → Material In"} · ▸ expand receipts</div>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          {getStatusBadge(r.status)}
+          <span className="text-[10px] text-gray-400 w-[74px] text-right hidden sm:inline">{r.job_work_date}</span>
+          <span className="w-20 text-right"><OutTag kg={disp} /></span>
+          <span className="w-16 text-right hidden sm:inline"><InTag kg={fg} /></span>
+          <span className="text-sky-700 tabular-nums w-14 text-right hidden md:inline" title="Output = FG / dispatched">{outPct(disp, fg)}%</span>
+          <span className="font-semibold tabular-nums w-14 text-right" title="Pending = unreturned / dispatched">{pendPct(disp, fg, wr)}%</span>
+        </div>
+        {txOpen && (
+          <div className="pl-[64px] pr-3 py-1.5 bg-emerald-50/40 border-b">
+            <div className="text-[10px] font-semibold text-emerald-700 mb-1 flex items-center gap-1"><ArrowDownLeft className="h-3 w-3" /> Material In — Receipts (click for details)</div>
+            {!rc || rc.loading ? (
+              <div className="flex items-center gap-1.5 text-[10px] text-slate-400"><Loader2 className="h-3 w-3 animate-spin" /> Loading receipts…</div>
+            ) : rc.rows.length === 0 ? (
+              <p className="text-[10px] text-slate-400 italic">No receipts recorded yet.</p>
+            ) : (
+              <div className="space-y-1">
+                {rc.rows.map((ir: any, i: number) => (
+                  <button key={ir.ir_number || i} onClick={() => ir.id && handleViewIR(ir.id)} title="Open Inward Receipt Details card"
+                    className="w-full flex items-center gap-2 text-[10px] bg-white rounded border border-emerald-100 px-2 py-1 text-left hover:bg-emerald-50 hover:border-emerald-300 transition-colors">
+                    <Inbox className="h-3 w-3 text-emerald-500 flex-shrink-0" />
+                    <span className="font-mono text-indigo-700 flex-1 truncate underline decoration-dotted underline-offset-2">{ir.ir_number || ir.challan_no || "IR"}</span>
+                    <span className="text-slate-400 whitespace-nowrap hidden sm:inline">{ir.receipt_date}</span>
+                    <span className={`px-1.5 py-0.5 rounded border whitespace-nowrap ${ir.receipt_type === "final" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-700 border-amber-200"}`}>{ir.receipt_type === "final" ? "Final" : "Partial"}</span>
+                    {ir.inward_warehouse && <span className="text-teal-700 whitespace-nowrap">WH {getDisplayWarehouseName(ir.inward_warehouse)}</span>}
+                    <span className="text-emerald-700 whitespace-nowrap" title="FG received (IN)">FG {Math.round(Number(ir.total_fg_kgs) || 0).toLocaleString()}</span>
+                    {Number(ir.total_waste_kgs) > 0 && <span className="text-orange-600 whitespace-nowrap">W {Math.round(Number(ir.total_waste_kgs)).toLocaleString()}</span>}
+                    {Number(ir.total_rejection_kgs) > 0 && <span className="text-rose-600 whitespace-nowrap">R {Math.round(Number(ir.total_rejection_kgs)).toLocaleString()}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // OUT/IN legend shown above every layered view.
+  const layerLegend = (
+    <div className="flex items-center gap-3 px-3 py-1.5 bg-gray-50 border-b text-[10px] text-gray-500">
+      <span className="inline-flex items-center gap-1 text-amber-700"><ArrowUpRight className="h-3 w-3" /> Material OUT — dispatched to vendor</span>
+      <span className="inline-flex items-center gap-1 text-emerald-700"><ArrowDownLeft className="h-3 w-3" /> Material IN — finished goods received</span>
+      <span className="ml-auto hidden sm:inline">Out% = yield · Pend% = not yet returned</span>
+    </div>
+  )
+
+  // Generic layered tree: level1Fn(r)->string[]; level2Fn optional. Leaf = transaction (+receipts).
+  const renderTree = (level1Fn: (r: any) => string[], level2Fn: ((r: any) => string) | null, prefix: string) => {
+    if (rptTreeLoading) return <div className="flex items-center justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-indigo-500" /></div>
+    const recs = rptRecsFiltered
+    if (!recs.length) return <p className="px-4 py-8 text-center text-xs text-gray-400">No transactions match the current filters.</p>
+    const map: Record<string, any> = {}
+    for (const r of recs) {
+      const d = recDisp(r); const fg = Number(r.fg_received_kgs) || 0; const wr = recWr(r)
+      for (const k1 of level1Fn(r)) {
+        const e1 = map[k1] || (map[k1] = { disp: 0, fg: 0, wr: 0, count: 0, sub: {}, rows: [] })
+        e1.disp += d; e1.fg += fg; e1.wr += wr; e1.count++
+        if (level2Fn) {
+          const k2 = level2Fn(r)
+          const e2 = e1.sub[k2] || (e1.sub[k2] = { disp: 0, fg: 0, wr: 0, count: 0, rows: [] })
+          e2.disp += d; e2.fg += fg; e2.wr += wr; e2.count++; e2.rows.push(r)
+        } else { e1.rows.push(r) }
+      }
+    }
+    const byDisp = (a: any, b: any) => (Number(b.total_net_weight) || 0) - (Number(a.total_net_weight) || 0)
+    const l1 = Object.entries(map).sort((a: any, b: any) => b[1].disp - a[1].disp)
+    return (
+      <div className="max-h-[560px] overflow-y-auto">
+        {l1.map(([k1, d1]: any) => {
+          const pk = `${prefix}:${k1}`; const o1 = rptExpanded.has(pk)
+          return (
+            <div key={pk}>
+              <button onClick={() => toggleExpand(pk)} className="w-full flex items-center gap-2 px-3 py-2.5 bg-[#0f172a] text-white hover:bg-[#1e293b] text-left">
+                {o1 ? <ChevronDown className="h-3.5 w-3.5 flex-shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 flex-shrink-0" />}
+                <span className="font-semibold text-sm flex-1 truncate">{k1}</span>
+                <span className="text-[11px] opacity-70 hidden sm:inline">{d1.count} JWO</span>
+                <span className="w-24 text-right"><OutTag kg={d1.disp} cls="text-amber-300" /></span>
+                <span className="w-20 text-right hidden sm:inline"><InTag kg={d1.fg} cls="text-emerald-300" /></span>
+                <span className="text-[11px] text-sky-300 tabular-nums w-16 text-right hidden md:inline" title="Output = FG / dispatched">Out {outPct(d1.disp, d1.fg)}%</span>
+                <span className="text-[11px] font-semibold tabular-nums w-16 text-right" title="Pending = unreturned / dispatched">Pend {pendPct(d1.disp, d1.fg, d1.wr)}%</span>
+              </button>
+              {o1 && (level2Fn
+                ? Object.entries(d1.sub).sort((a: any, b: any) => b[1].disp - a[1].disp).map(([k2, d2]: any) => {
+                    const vk = `${pk}|${k2}`; const o2 = rptExpanded.has(vk)
+                    return (
+                      <div key={vk}>
+                        <button onClick={() => toggleExpand(vk)} className="w-full flex items-center gap-2 pl-8 pr-3 py-2 bg-slate-100 hover:bg-slate-200 border-l-[3px] border-l-teal-500 text-left">
+                          {o2 ? <ChevronDown className="h-3 w-3 flex-shrink-0 text-slate-500" /> : <ChevronRight className="h-3 w-3 flex-shrink-0 text-slate-500" />}
+                          <span className="text-xs font-medium text-slate-700 flex-1 truncate">{k2}</span>
+                          <span className="text-[10px] text-slate-500 hidden sm:inline">{d2.count} JWO</span>
+                          <span className="w-24 text-right"><OutTag kg={d2.disp} /></span>
+                          <span className="w-16 text-right hidden sm:inline"><InTag kg={d2.fg} /></span>
+                          <span className="text-[10px] tabular-nums text-sky-600 w-16 text-right hidden md:inline" title="Output">Out {outPct(d2.disp, d2.fg)}%</span>
+                          <span className="text-[10px] font-semibold tabular-nums w-16 text-right text-slate-700" title="Pending">Pend {pendPct(d2.disp, d2.fg, d2.wr)}%</span>
+                        </button>
+                        {o2 && [...d2.rows].sort(byDisp).map(renderTxRow)}
+                      </div>
+                    )
+                  })
+                : [...d1.rows].sort(byDisp).map(renderTxRow)
+              )}
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+  const firstGroup = (r: any) => [(r.item_groups || "").split(",")[0].trim() || "UNGROUPED"]
+  const itemKeys = (r: any) => { const ks = String(r.item_descriptions || "").split(",").map((s: string) => s.trim()).filter(Boolean); return ks.length ? ks : ["—"] }
 
   return (
     <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-6 py-4 sm:py-6">
@@ -2927,143 +3095,12 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                     </div>
                   </CardHeader>
                   <CardContent className="p-0">
-                    {rptTreeLoading ? (
-                      <div className="flex items-center justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-indigo-500" /></div>
-                    ) : (() => {
-                      const q = rptSearch.toLowerCase().trim()
-                      const recs = rptAllRecords.filter((r: any) => {
-                        if (!isAll(rptFilterProcess) && (r.sub_category || "Unknown") !== rptFilterProcess) return false
-                        if (!isAll(rptFilterVendor) && (r.to_party || "—") !== rptFilterVendor) return false
-                        if (!isAll(rptFilterItem) && !String(r.item_descriptions || "").includes(rptFilterItem)) return false
-                        if (!isAll(rptFilterGroup)) {
-                          const grps = String(r.item_groups || "").split(",").map((s: string) => s.trim()).filter(Boolean)
-                          if (!(grps.length ? grps.includes(rptFilterGroup) : rptFilterGroup === "UNGROUPED")) return false
-                        }
-                        if (rptFilterFrom && toYmd(r.job_work_date) < rptFilterFrom) return false
-                        if (rptFilterTo && toYmd(r.job_work_date) > rptFilterTo) return false
-                        if (q && !`${r.challan_no} ${r.to_party} ${r.sub_category} ${r.item_descriptions}`.toLowerCase().includes(q)) return false
-                        return true
-                      })
-                      if (!recs.length) return <p className="px-4 py-8 text-center text-xs text-gray-400">No transactions match the current filters.</p>
-                      const procMap: Record<string, any> = {}
-                      for (const r of recs) {
-                        const grp = (r.item_groups || "").split(",")[0].trim() || "UNGROUPED"
-                        const p = rptGroupBy === "process" ? (r.sub_category || "Unknown") : rptGroupBy === "vendor" ? (r.to_party || "—") : grp
-                        const v = rptGroupBy === "group" ? (r.to_party || "—") : rptGroupBy === "vendor" ? (r.sub_category || "Unknown") : (r.to_party || "—")
-                        const disp = Number(r.total_net_weight) || Number(r.total_weight) || 0
-                        const fg = Number(r.fg_received_kgs) || 0
-                        const wr = (Number(r.waste_received_kgs) || 0) + (Number(r.rejection_kgs) || 0)
-                        const pe = procMap[p] || (procMap[p] = { disp: 0, fg: 0, wr: 0, count: 0, vendors: {} })
-                        pe.disp += disp; pe.fg += fg; pe.wr += wr; pe.count++
-                        const ve = pe.vendors[v] || (pe.vendors[v] = { disp: 0, fg: 0, wr: 0, count: 0, rows: [] })
-                        ve.disp += disp; ve.fg += fg; ve.wr += wr; ve.count++
-                        ve.rows.push(r)
-                      }
-                      // Output % = FG / dispatched (yield). Pending % = (dispatched − FG − waste − rejection) / dispatched (not yet returned).
-                      const outPct = (disp: number, fg: number) => disp > 0 ? ((fg / disp) * 100).toFixed(1) : "0.0"
-                      const pendPct = (disp: number, fg: number, wr: number) => disp > 0 ? (Math.max(0, (disp - fg - wr)) / disp * 100).toFixed(1) : "0.0"
-                      const procs = Object.entries(procMap).sort((a: any, b: any) => b[1].disp - a[1].disp)
-                      return (
-                        <div className="max-h-[560px] overflow-y-auto">
-                          {procs.map(([p, pd]: any) => {
-                            const pk = `p:${p}`; const pOpen = rptExpanded.has(pk)
-                            return (
-                              <div key={pk}>
-                                <button onClick={() => toggleExpand(pk)} className="w-full flex items-center gap-2 px-3 py-2.5 bg-[#0f172a] text-white hover:bg-[#1e293b] text-left">
-                                  {pOpen ? <ChevronDown className="h-3.5 w-3.5 flex-shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 flex-shrink-0" />}
-                                  <span className="font-semibold text-sm flex-1 truncate">{p}</span>
-                                  <span className="text-[11px] opacity-70 hidden sm:inline">{pd.count} JWO</span>
-                                  <span className="text-[11px] tabular-nums w-24 text-right">{Math.round(pd.disp).toLocaleString()} kg</span>
-                                  <span className="text-[11px] text-emerald-300 tabular-nums w-24 text-right hidden sm:inline">FG {Math.round(pd.fg).toLocaleString()}</span>
-                                  <span className="text-[11px] text-sky-300 tabular-nums w-16 text-right hidden md:inline" title="Output = FG / dispatched">Out {outPct(pd.disp, pd.fg)}%</span>
-                                  <span className="text-[11px] font-semibold tabular-nums w-16 text-right" title="Pending = unreturned / dispatched">Pend {pendPct(pd.disp, pd.fg, pd.wr)}%</span>
-                                </button>
-                                {pOpen && Object.entries(pd.vendors).sort((a: any, b: any) => b[1].disp - a[1].disp).map(([v, vd]: any) => {
-                                  const vk = `${pk}|v:${v}`; const vOpen = rptExpanded.has(vk)
-                                  return (
-                                    <div key={vk}>
-                                      <button onClick={() => toggleExpand(vk)} className="w-full flex items-center gap-2 pl-8 pr-3 py-2 bg-slate-100 hover:bg-slate-200 border-l-[3px] border-l-teal-500 text-left">
-                                        {vOpen ? <ChevronDown className="h-3 w-3 flex-shrink-0 text-slate-500" /> : <ChevronRight className="h-3 w-3 flex-shrink-0 text-slate-500" />}
-                                        <span className="text-xs font-medium text-slate-700 flex-1 truncate">{v}</span>
-                                        <span className="text-[10px] text-slate-500 hidden sm:inline">{vd.count} JWO</span>
-                                        <span className="text-[10px] tabular-nums text-slate-600 w-24 text-right">{Math.round(vd.disp).toLocaleString()} kg</span>
-                                        <span className="text-[10px] tabular-nums text-sky-600 w-16 text-right hidden md:inline" title="Output">Out {outPct(vd.disp, vd.fg)}%</span>
-                                        <span className="text-[10px] font-semibold tabular-nums w-16 text-right text-slate-700" title="Pending">Pend {pendPct(vd.disp, vd.fg, vd.wr)}%</span>
-                                      </button>
-                                      {vOpen && [...vd.rows].sort((a: any, b: any) => (Number(b.total_net_weight) || 0) - (Number(a.total_net_weight) || 0)).map((r: any) => {
-                                        const disp = Number(r.total_net_weight) || Number(r.total_weight) || 0
-                                        const fg = Number(r.fg_received_kgs) || 0
-                                        const wr = (Number(r.waste_received_kgs) || 0) + (Number(r.rejection_kgs) || 0)
-                                        const txOpen = rptTxOpen.has(r.challan_no)
-                                        const rc = rptReceipts[r.challan_no]
-                                        return (
-                                          <div key={r.id}>
-                                            <div className="flex items-center gap-2 pl-[40px] pr-3 py-2 bg-white hover:bg-indigo-50/60 border-b last:border-0 text-xs">
-                                              <button onClick={() => toggleTx(r.challan_no)} title={`${r.receipt_count || 0} receipt(s)`} className="flex-shrink-0 text-gray-400 hover:text-indigo-600">
-                                                {txOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                                              </button>
-                                              <TooltipProvider delayDuration={200}>
-                                                <Tooltip>
-                                                  <TooltipTrigger asChild>
-                                                    <button onClick={() => openLatestReceipt(r.challan_no, r.receipt_count || 0)} className="font-mono text-indigo-700 flex-1 truncate text-left underline decoration-dotted underline-offset-2 hover:text-indigo-900">{r.challan_no}</button>
-                                                  </TooltipTrigger>
-                                                  <TooltipContent side="right" className="!bg-gradient-to-br !from-sky-50 !via-indigo-50 !to-violet-100 !text-slate-800 border border-indigo-200/70 rounded-lg max-w-xs text-xs p-3 space-y-1">
-                                                    <div className="font-semibold text-indigo-900 pb-1 border-b border-indigo-200/60">{r.challan_no}</div>
-                                                    <div><span className="text-indigo-700 font-semibold">Date:</span> {r.job_work_date}</div>
-                                                    <div><span className="text-indigo-700 font-semibold">Vendor:</span> {r.to_party}</div>
-                                                    <div><span className="text-indigo-700 font-semibold">Process:</span> {r.sub_category || "—"}</div>
-                                                    <div><span className="text-indigo-700 font-semibold">Dispatched:</span> {Math.round(disp).toLocaleString()} kg</div>
-                                                    <div><span className="text-indigo-700 font-semibold">FG / Waste / Rej:</span> {Math.round(fg).toLocaleString()} / {Math.round(Number(r.waste_received_kgs) || 0).toLocaleString()} / {Math.round(Number(r.rejection_kgs) || 0).toLocaleString()} kg</div>
-                                                    <div><span className="text-indigo-700 font-semibold">Output:</span> {outPct(disp, fg)}% · <span className="text-indigo-700 font-semibold">Pending:</span> {pendPct(disp, fg, wr)}%</div>
-                                                    <div><span className="text-indigo-700 font-semibold">Receipts:</span> {r.receipt_count || 0}</div>
-                                                    {r.item_descriptions && <div className="text-slate-600 pt-0.5 border-t border-indigo-200/40">{r.item_descriptions}</div>}
-                                                    <div className="text-[10px] text-indigo-500 pt-0.5">{(r.receipt_count || 0) > 0 ? "Click → Receipt details" : "Click → Material In"} · ▸ expand receipts</div>
-                                                  </TooltipContent>
-                                                </Tooltip>
-                                              </TooltipProvider>
-                                              {getStatusBadge(r.status)}
-                                              <span className="text-[10px] text-gray-400 w-[74px] text-right hidden sm:inline">{r.job_work_date}</span>
-                                              <span className="tabular-nums text-gray-600 w-20 text-right">{Math.round(disp).toLocaleString()} kg</span>
-                                              <span className="text-sky-700 tabular-nums w-16 text-right hidden md:inline" title="Output = FG / dispatched">Out {outPct(disp, fg)}%</span>
-                                              <span className="font-semibold tabular-nums w-16 text-right" title="Pending = unreturned / dispatched">Pend {pendPct(disp, fg, wr)}%</span>
-                                              <Inbox className="h-3.5 w-3.5 text-indigo-300 flex-shrink-0" />
-                                            </div>
-                                            {txOpen && (
-                                              <div className="pl-[64px] pr-3 py-1.5 bg-slate-50/70 border-b">
-                                                {!rc || rc.loading ? (
-                                                  <div className="flex items-center gap-1.5 text-[10px] text-slate-400"><Loader2 className="h-3 w-3 animate-spin" /> Loading receipts…</div>
-                                                ) : rc.rows.length === 0 ? (
-                                                  <p className="text-[10px] text-slate-400 italic">No receipts recorded yet.</p>
-                                                ) : (
-                                                  <div className="space-y-1">
-                                                    {rc.rows.map((ir: any, i: number) => (
-                                                      <button key={ir.ir_number || i} onClick={() => ir.id && handleViewIR(ir.id)} title="Open receipt details"
-                                                        className="w-full flex items-center gap-2 text-[10px] bg-white rounded border border-slate-100 px-2 py-1 text-left hover:bg-indigo-50 hover:border-indigo-200 transition-colors">
-                                                        <span className="font-mono text-indigo-700 flex-1 truncate underline decoration-dotted underline-offset-2">{ir.ir_number || ir.challan_no || "IR"}</span>
-                                                        <span className="text-slate-400 whitespace-nowrap hidden sm:inline">{ir.receipt_date}</span>
-                                                        <span className={`px-1.5 py-0.5 rounded border whitespace-nowrap ${ir.receipt_type === "final" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-700 border-amber-200"}`}>{ir.receipt_type === "final" ? "Final" : "Partial"}</span>
-                                                        {ir.inward_warehouse && <span className="text-indigo-600 whitespace-nowrap">WH {getDisplayWarehouseName(ir.inward_warehouse)}</span>}
-                                                        <span className="text-emerald-700 whitespace-nowrap">FG {Math.round(Number(ir.total_fg_kgs) || 0).toLocaleString()}</span>
-                                                        {Number(ir.total_waste_kgs) > 0 && <span className="text-orange-600 whitespace-nowrap">W {Math.round(Number(ir.total_waste_kgs)).toLocaleString()}</span>}
-                                                        {Number(ir.total_rejection_kgs) > 0 && <span className="text-rose-600 whitespace-nowrap">R {Math.round(Number(ir.total_rejection_kgs)).toLocaleString()}</span>}
-                                                      </button>
-                                                    ))}
-                                                  </div>
-                                                )}
-                                              </div>
-                                            )}
-                                          </div>
-                                        )
-                                      })}
-                                    </div>
-                                  )
-                                })}
-                              </div>
-                            )
-                          })}
-                        </div>
-                      )
-                    })()}
+                    {layerLegend}
+                    {renderTree(
+                      rptGroupBy === "process" ? (r: any) => [r.sub_category || "Unknown"] : rptGroupBy === "vendor" ? (r: any) => [r.to_party || "—"] : firstGroup,
+                      rptGroupBy === "group" ? (r: any) => r.to_party || "—" : rptGroupBy === "vendor" ? (r: any) => r.sub_category || "Unknown" : (r: any) => r.to_party || "—",
+                      "drill"
+                    )}
                   </CardContent>
                 </Card>
               )}
@@ -3072,67 +3109,13 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
               {rptActiveView === "group" && (
                 <Card className="border-0 shadow-sm overflow-hidden">
                   <CardHeader className="pb-2 pt-4 px-4 border-b">
-                    <CardTitle className="text-sm font-semibold text-gray-800 flex items-center gap-2"><Box className="h-4 w-4 text-indigo-600" /> Inventory Group Breakdown
-                      <span className="text-[10px] font-normal text-gray-400 ml-1 hidden sm:inline">click a group → filter every tab · hover for items/vendors</span>
+                    <CardTitle className="text-sm font-semibold text-gray-800 flex items-center gap-2"><Box className="h-4 w-4 text-indigo-600" /> Inventory Group → Transaction → Receipts
+                      <span className="text-[10px] font-normal text-gray-400 ml-1 hidden sm:inline">expand a row → its transactions → receipts</span>
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="p-0">
-                    <table className="w-full text-sm">
-                      <thead className="bg-gray-50 border-b">
-                        <tr>
-                          <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-600">Group</th>
-                          <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-600">SKUs</th>
-                          <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-600">JWOs</th>
-                          <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-600">Boxes</th>
-                          <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-600">Dispatched (Kg)</th>
-                          <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-600 w-[180px]">Volume</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {fGroup.map((r: any, idx: number) => (
-                          <tr key={idx} onClick={() => setRptFilterGroup(r.group)} title={`Filter everything by group: ${r.group}`} className={`border-b last:border-0 cursor-pointer hover:bg-indigo-50 transition-colors ${rptFilterGroup === r.group ? 'bg-indigo-50' : idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
-                            <td className="px-4 py-2.5 text-xs font-semibold max-w-[220px]">
-                              <TooltipProvider delayDuration={200}><Tooltip>
-                                <TooltipTrigger asChild>
-                                  <span className="truncate inline-block max-w-[200px] align-bottom cursor-help underline decoration-dotted underline-offset-2" title={r.group}>{r.group}</span>
-                                </TooltipTrigger>
-                                <TooltipContent side="right" className="!bg-gradient-to-br !from-sky-50 !via-indigo-50 !to-violet-100 !text-slate-800 border border-indigo-200/70 rounded-lg max-w-xs text-xs p-3 space-y-1">
-                                  {(() => {
-                                    const txs = rptAllRecords.filter((x: any) => { const g = String(x.item_groups || "").split(",").map((s: string) => s.trim()).filter(Boolean); return g.length ? g.includes(r.group) : r.group === "UNGROUPED" })
-                                    const disp = txs.reduce((s: number, x: any) => s + (Number(x.total_net_weight) || Number(x.total_weight) || 0), 0)
-                                    const fg = txs.reduce((s: number, x: any) => s + (Number(x.fg_received_kgs) || 0), 0)
-                                    const vendors = Array.from(new Set(txs.map((x: any) => x.to_party).filter(Boolean)))
-                                    const items = Array.from(new Set(txs.flatMap((x: any) => String(x.item_descriptions || "").split(",").map((s: string) => s.trim())).filter(Boolean)))
-                                    return (<>
-                                      <div className="font-semibold text-indigo-900 pb-1 border-b border-indigo-200/60">{r.group}</div>
-                                      <div><span className="text-indigo-700 font-semibold">SKUs:</span> {r.item_count} · <span className="text-indigo-700 font-semibold">JWOs:</span> {r.jwo_count} · <span className="text-indigo-700 font-semibold">Boxes:</span> {r.total_boxes}</div>
-                                      <div><span className="text-indigo-700 font-semibold">Dispatched:</span> {Math.round(r.dispatched_kgs).toLocaleString()} kg{txs.length > 0 ? ` · Output: ${disp > 0 ? (fg / disp * 100).toFixed(1) : "0.0"}%` : ""}</div>
-                                      {items.length > 0 && <div className="text-slate-600"><span className="text-indigo-700 font-semibold">Items:</span> {items.slice(0, 4).join(", ")}{items.length > 4 ? ` +${items.length - 4}` : ""}</div>}
-                                      {vendors.length > 0 && <div className="text-slate-600"><span className="text-indigo-700 font-semibold">Vendors:</span> {vendors.slice(0, 3).join(", ")}{vendors.length > 3 ? ` +${vendors.length - 3}` : ""}</div>}
-                                      {txs.length > 0 && <div className="pt-0.5 border-t border-indigo-200/40 text-[10px] text-slate-500">Recent transactions</div>}
-                                      {txs.slice(0, 5).map((x: any, i: number) => (
-                                        <div key={i} className="flex justify-between gap-2"><span className="font-mono truncate">{x.challan_no}</span><span className="tabular-nums whitespace-nowrap">{Math.round(Number(x.total_net_weight) || Number(x.total_weight) || 0).toLocaleString()} kg</span></div>
-                                      ))}
-                                      <div className="text-[10px] text-indigo-500 pt-0.5">Click row → filter everything by this group</div>
-                                    </>)
-                                  })()}
-                                </TooltipContent>
-                              </Tooltip></TooltipProvider>
-                            </td>
-                            <td className="px-4 py-2.5 text-right text-xs">{r.item_count}</td>
-                            <td className="px-4 py-2.5 text-right text-xs">{r.jwo_count}</td>
-                            <td className="px-4 py-2.5 text-right text-xs">{r.total_boxes}</td>
-                            <td className="px-4 py-2.5 text-right text-xs font-medium">{r.dispatched_kgs.toLocaleString()}</td>
-                            <td className="px-4 py-2.5">
-                              <div className="w-full bg-gray-200 rounded-full h-2">
-                                <div className="bg-indigo-500 h-2 rounded-full transition-all" style={{ width: `${barWidth(r.dispatched_kgs, rptByGroup[0]?.dispatched_kgs || 1)}%` }} />
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                        {fGroup.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-xs text-gray-400">No data</td></tr>}
-                      </tbody>
-                    </table>
+                    {layerLegend}
+                    {renderTree(firstGroup, null, "g")}
                   </CardContent>
                 </Card>
               )}
@@ -3140,36 +3123,13 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
               {rptActiveView === "process" && (
                 <Card className="border-0 shadow-sm overflow-hidden">
                   <CardHeader className="pb-2 pt-4 px-4 border-b">
-                    <CardTitle className="text-sm font-semibold text-gray-800">Process Type Breakdown</CardTitle>
+                    <CardTitle className="text-sm font-semibold text-gray-800 flex items-center gap-2"><Activity className="h-4 w-4 text-indigo-600" /> Process → Transaction → Receipts
+                      <span className="text-[10px] font-normal text-gray-400 ml-1 hidden sm:inline">expand a row → its transactions → receipts</span>
+                    </CardTitle>
                   </CardHeader>
                   <CardContent className="p-0">
-                    <table className="w-full text-sm">
-                      <thead className="bg-gray-50 border-b">
-                        <tr>
-                          <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-600">Process</th>
-                          <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-600">JWOs</th>
-                          <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-600">Dispatched (Kg)</th>
-                          <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-600">FG Received (Kg)</th>
-                          <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-600 w-[200px]">Volume</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {fProcess.map((r: any, idx: number) => (
-                          <tr key={idx} onClick={() => setRptFilterProcess(r.process)} title={`Filter by process: ${r.process}`} className={`border-b last:border-0 cursor-pointer hover:bg-indigo-50 transition-colors ${rptFilterProcess === r.process ? 'bg-indigo-50' : idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
-                            <td className="px-4 py-2.5 text-xs font-semibold">{r.process}</td>
-                            <td className="px-4 py-2.5 text-right text-xs">{r.jwo_count}</td>
-                            <td className="px-4 py-2.5 text-right text-xs font-medium">{r.dispatched_kgs.toLocaleString()}</td>
-                            <td className="px-4 py-2.5 text-right text-xs font-medium text-emerald-700">{r.fg_kgs.toLocaleString()}</td>
-                            <td className="px-4 py-2.5">
-                              <div className="w-full bg-gray-200 rounded-full h-2">
-                                <div className="bg-indigo-500 h-2 rounded-full transition-all" style={{ width: `${barWidth(r.dispatched_kgs, rptByProcess[0]?.dispatched_kgs || 1)}%` }} />
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                        {fProcess.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-xs text-gray-400">No data</td></tr>}
-                      </tbody>
-                    </table>
+                    {layerLegend}
+                    {renderTree((r: any) => [r.sub_category || "Unknown"], null, "pr")}
                   </CardContent>
                 </Card>
               )}
@@ -3178,57 +3138,13 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
               {rptActiveView === "vendor" && (
                 <Card className="border-0 shadow-sm overflow-hidden">
                   <CardHeader className="pb-2 pt-4 px-4 border-b">
-                    <CardTitle className="text-sm font-semibold text-gray-800">Vendor Breakdown ({rptSummary.unique_vendors} vendors)</CardTitle>
+                    <CardTitle className="text-sm font-semibold text-gray-800 flex items-center gap-2"><Users className="h-4 w-4 text-indigo-600" /> Vendor → Transaction → Receipts
+                      <span className="text-[10px] font-normal text-gray-400 ml-1 hidden sm:inline">expand a row → its transactions → receipts</span>
+                    </CardTitle>
                   </CardHeader>
                   <CardContent className="p-0">
-                    <table className="w-full text-sm">
-                      <thead className="bg-gray-50 border-b">
-                        <tr>
-                          <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-600">Vendor</th>
-                          <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-600">JWOs</th>
-                          <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-600">Dispatched (Kg)</th>
-                          <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-600 w-[200px]">Volume</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {fVendor.map((r: any, idx: number) => (
-                          <tr key={idx} onClick={() => setRptFilterVendor(r.vendor)} title={`Filter by vendor: ${r.vendor}`} className={`border-b last:border-0 cursor-pointer hover:bg-indigo-50 transition-colors ${rptFilterVendor === r.vendor ? 'bg-indigo-50' : idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
-                            <td className="px-4 py-2.5 text-xs font-semibold max-w-[200px]">
-                              <TooltipProvider delayDuration={200}><Tooltip>
-                                <TooltipTrigger asChild>
-                                  <span className="truncate inline-block max-w-[180px] align-bottom cursor-help underline decoration-dotted underline-offset-2" title={r.vendor}>{r.vendor}</span>
-                                </TooltipTrigger>
-                                <TooltipContent side="right" className="!bg-gradient-to-br !from-sky-50 !via-indigo-50 !to-violet-100 !text-slate-800 border border-indigo-200/70 rounded-lg max-w-xs text-xs p-3 space-y-1">
-                                  {(() => {
-                                    const txs = rptAllRecords.filter((x: any) => (x.to_party || "—") === r.vendor)
-                                    const disp = txs.reduce((s: number, x: any) => s + (Number(x.total_net_weight) || Number(x.total_weight) || 0), 0)
-                                    const fg = txs.reduce((s: number, x: any) => s + (Number(x.fg_received_kgs) || 0), 0)
-                                    return (<>
-                                      <div className="font-semibold text-indigo-900 pb-1 border-b border-indigo-200/60">{r.vendor}</div>
-                                      <div><span className="text-indigo-700 font-semibold">JWOs:</span> {r.jwo_count} · <span className="text-indigo-700 font-semibold">Dispatched:</span> {Math.round(r.dispatched_kgs).toLocaleString()} kg</div>
-                                      {txs.length > 0 && <div><span className="text-indigo-700 font-semibold">FG:</span> {Math.round(fg).toLocaleString()} kg · <span className="text-indigo-700 font-semibold">Output:</span> {disp > 0 ? (fg / disp * 100).toFixed(1) : "0.0"}%</div>}
-                                      {txs.length > 0 && <div className="pt-0.5 border-t border-indigo-200/40 text-[10px] text-slate-500">Recent transactions</div>}
-                                      {txs.slice(0, 5).map((x: any, i: number) => (
-                                        <div key={i} className="flex justify-between gap-2"><span className="font-mono truncate">{x.challan_no}</span><span className="tabular-nums whitespace-nowrap">{Math.round(Number(x.total_net_weight) || Number(x.total_weight) || 0).toLocaleString()} kg</span></div>
-                                      ))}
-                                      <div className="text-[10px] text-indigo-500 pt-0.5">Click row → filter by this vendor</div>
-                                    </>)
-                                  })()}
-                                </TooltipContent>
-                              </Tooltip></TooltipProvider>
-                            </td>
-                            <td className="px-4 py-2.5 text-right text-xs">{r.jwo_count}</td>
-                            <td className="px-4 py-2.5 text-right text-xs font-medium">{r.dispatched_kgs.toLocaleString()}</td>
-                            <td className="px-4 py-2.5">
-                              <div className="w-full bg-gray-200 rounded-full h-2">
-                                <div className="bg-teal-500 h-2 rounded-full transition-all" style={{ width: `${barWidth(r.dispatched_kgs, rptByVendor[0]?.dispatched_kgs || 1)}%` }} />
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                        {fVendor.length === 0 && <tr><td colSpan={4} className="px-4 py-8 text-center text-xs text-gray-400">No data</td></tr>}
-                      </tbody>
-                    </table>
+                    {layerLegend}
+                    {renderTree((r: any) => [r.to_party || "—"], null, "v")}
                   </CardContent>
                 </Card>
               )}
@@ -3237,61 +3153,13 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
               {rptActiveView === "item" && (
                 <Card className="border-0 shadow-sm overflow-hidden">
                   <CardHeader className="pb-2 pt-4 px-4 border-b">
-                    <CardTitle className="text-sm font-semibold text-gray-800">Item Breakdown</CardTitle>
+                    <CardTitle className="text-sm font-semibold text-gray-800 flex items-center gap-2"><Box className="h-4 w-4 text-indigo-600" /> Item → Transaction → Receipts
+                      <span className="text-[10px] font-normal text-gray-400 ml-1 hidden sm:inline">expand a row → its transactions → receipts</span>
+                    </CardTitle>
                   </CardHeader>
                   <CardContent className="p-0">
-                    <table className="w-full text-sm">
-                      <thead className="bg-gray-50 border-b">
-                        <tr>
-                          <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-600">Item</th>
-                          <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-600">JWOs</th>
-                          <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-600">Boxes</th>
-                          <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-600">Dispatched (Kg)</th>
-                          <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-600 w-[200px]">Volume</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {fItem.map((r: any, idx: number) => (
-                          <tr key={idx} onClick={() => setRptFilterItem(r.item)} title={`Filter by item: ${r.item}`} className={`border-b last:border-0 cursor-pointer hover:bg-indigo-50 transition-colors ${rptFilterItem === r.item ? 'bg-indigo-50' : idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
-                            <td className="px-4 py-2.5 text-xs font-semibold max-w-[200px]">
-                              <TooltipProvider delayDuration={200}><Tooltip>
-                                <TooltipTrigger asChild>
-                                  <span className="truncate inline-block max-w-[180px] align-bottom cursor-help underline decoration-dotted underline-offset-2" title={r.item}>{r.item}</span>
-                                </TooltipTrigger>
-                                <TooltipContent side="right" className="!bg-gradient-to-br !from-sky-50 !via-indigo-50 !to-violet-100 !text-slate-800 border border-indigo-200/70 rounded-lg max-w-xs text-xs p-3 space-y-1">
-                                  {(() => {
-                                    const txs = rptAllRecords.filter((x: any) => String(x.item_descriptions || "").includes(r.item))
-                                    const disp = txs.reduce((s: number, x: any) => s + (Number(x.total_net_weight) || Number(x.total_weight) || 0), 0)
-                                    const fg = txs.reduce((s: number, x: any) => s + (Number(x.fg_received_kgs) || 0), 0)
-                                    const vendors = Array.from(new Set(txs.map((x: any) => x.to_party).filter(Boolean)))
-                                    return (<>
-                                      <div className="font-semibold text-indigo-900 pb-1 border-b border-indigo-200/60">{r.item}</div>
-                                      <div><span className="text-indigo-700 font-semibold">JWOs:</span> {r.jwo_count} · <span className="text-indigo-700 font-semibold">Dispatched:</span> {Math.round(r.dispatched_kgs).toLocaleString()} kg · <span className="text-indigo-700 font-semibold">Boxes:</span> {r.total_boxes}</div>
-                                      {txs.length > 0 && <div><span className="text-indigo-700 font-semibold">FG:</span> {Math.round(fg).toLocaleString()} kg · <span className="text-indigo-700 font-semibold">Output:</span> {disp > 0 ? (fg / disp * 100).toFixed(1) : "0.0"}%</div>}
-                                      {vendors.length > 0 && <div className="text-slate-600"><span className="text-indigo-700 font-semibold">Vendors:</span> {vendors.slice(0, 3).join(", ")}{vendors.length > 3 ? ` +${vendors.length - 3}` : ""}</div>}
-                                      {txs.length > 0 && <div className="pt-0.5 border-t border-indigo-200/40 text-[10px] text-slate-500">Recent transactions</div>}
-                                      {txs.slice(0, 5).map((x: any, i: number) => (
-                                        <div key={i} className="flex justify-between gap-2"><span className="font-mono truncate">{x.challan_no}</span><span className="tabular-nums whitespace-nowrap">{Math.round(Number(x.total_net_weight) || Number(x.total_weight) || 0).toLocaleString()} kg</span></div>
-                                      ))}
-                                      <div className="text-[10px] text-indigo-500 pt-0.5">Click row → filter by this item</div>
-                                    </>)
-                                  })()}
-                                </TooltipContent>
-                              </Tooltip></TooltipProvider>
-                            </td>
-                            <td className="px-4 py-2.5 text-right text-xs">{r.jwo_count}</td>
-                            <td className="px-4 py-2.5 text-right text-xs">{r.total_boxes}</td>
-                            <td className="px-4 py-2.5 text-right text-xs font-medium">{r.dispatched_kgs.toLocaleString()}</td>
-                            <td className="px-4 py-2.5">
-                              <div className="w-full bg-gray-200 rounded-full h-2">
-                                <div className="bg-amber-500 h-2 rounded-full transition-all" style={{ width: `${barWidth(r.dispatched_kgs, rptByItem[0]?.dispatched_kgs || 1)}%` }} />
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                        {fItem.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-xs text-gray-400">No data</td></tr>}
-                      </tbody>
-                    </table>
+                    {layerLegend}
+                    {renderTree(itemKeys, null, "it")}
                   </CardContent>
                 </Card>
               )}
