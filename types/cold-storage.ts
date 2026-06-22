@@ -141,6 +141,12 @@ export interface BulkEntryTransaction {
   approved_at?: string | null
   created_at?: string
   updated_at?: string
+  // Article/box aggregates (populated by the list endpoint) for the inward-style hover card.
+  net_weight?: number | null
+  total_weight?: number | null
+  box_count?: number | null
+  item_descriptions?: string[]
+  article_items_with_qty?: string[]
 }
 
 export interface BulkEntryArticle {
