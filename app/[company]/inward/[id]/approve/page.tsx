@@ -319,8 +319,28 @@ export default function ApprovePage({ params }: ApprovePageProps) {
   const recomputeArticleFromBoxes = (boxes: BoxForm[], articleDesc: string) => {
     const agg = computeArticleAggregatesFromBoxes(boxes, articleDesc)
     setArticleForms((prev) =>
-      prev.map((a) => (a.item_description === articleDesc ? { ...a, ...agg } : a))
+      prev.map((a) =>
+        a.item_description === articleDesc
+          ? {
+              ...a,
+              ...agg,
+              // Net/Total Wt are the stored, user-editable values that the hover/list read.
+              // Never auto-overwrite a non-blank value from the boxes — only fill when blank.
+              // Any divergence from the box sum is surfaced as a red variance note in the UI.
+              net_weight: a.net_weight && a.net_weight !== "" ? a.net_weight : agg.net_weight,
+              total_weight: a.total_weight && a.total_weight !== "" ? a.total_weight : agg.total_weight,
+            }
+          : a
+      )
     )
+  }
+  // Live box sum per article — drives the red variance note next to the stored Net/Total Wt.
+  const boxSumFor = (articleDesc: string) => {
+    const ab = boxForms.filter((b) => b.article_description === articleDesc)
+    return {
+      net: ab.reduce((s, b) => s + (parseFloat(b.net_weight) || 0), 0),
+      gross: ab.reduce((s, b) => s + (parseFloat(b.gross_weight) || 0), 0),
+    }
   }
 
   const handleQuantityUnitsChange = (articleIdx: number, value: string) => {
@@ -388,8 +408,9 @@ export default function ApprovePage({ params }: ApprovePageProps) {
         a.item_description === articleDesc
           ? {
               ...a,
-              net_weight: totalNet > 0 ? String(parseFloat(totalNet.toFixed(3))) : "",
-              total_weight: totalGross > 0 ? String(parseFloat(totalGross.toFixed(3))) : "",
+              // Only fill when blank — keep the stored/edited Net/Total authoritative (variance shown in red).
+              net_weight: a.net_weight && a.net_weight !== "" ? a.net_weight : (totalNet > 0 ? String(parseFloat(totalNet.toFixed(3))) : ""),
+              total_weight: a.total_weight && a.total_weight !== "" ? a.total_weight : (totalGross > 0 ? String(parseFloat(totalGross.toFixed(3))) : ""),
             }
           : a
       )
@@ -1193,12 +1214,32 @@ export default function ApprovePage({ params }: ApprovePageProps) {
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-[11px]">Net Wt <span className="text-muted-foreground text-[9px]">(sum)</span></Label>
-                    <Input type="number" value={article.net_weight} readOnly className="h-8 text-xs bg-muted" />
+                    <Label className="text-[11px]">Net Wt <span className="text-muted-foreground text-[9px]">(kg)</span></Label>
+                    <Input type="number" value={article.net_weight} onChange={(e) => updateArticle(idx, "net_weight", e.target.value)} className="h-8 text-xs" />
+                    {(() => {
+                      const bn = boxSumFor(article.item_description).net
+                      const d = bn - (parseFloat(article.net_weight) || 0)
+                      return bn > 0 && Math.abs(d) > 0.01 ? (
+                        <button type="button" onClick={() => updateArticle(idx, "net_weight", String(parseFloat(bn.toFixed(3))))}
+                          className="block text-left text-[9px] text-red-600 hover:underline leading-tight" title="Boxes sum differs from the stored Net Wt — click to use the boxes sum">
+                          ⚠ Boxes: {bn.toLocaleString(undefined, { maximumFractionDigits: 1 })} (Δ {d > 0 ? "+" : ""}{d.toLocaleString(undefined, { maximumFractionDigits: 1 })})
+                        </button>
+                      ) : null
+                    })()}
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-[11px]">Total Wt <span className="text-muted-foreground text-[9px]">(sum)</span></Label>
-                    <Input type="number" value={article.total_weight} readOnly className="h-8 text-xs bg-muted" />
+                    <Label className="text-[11px]">Total Wt <span className="text-muted-foreground text-[9px]">(kg)</span></Label>
+                    <Input type="number" value={article.total_weight} onChange={(e) => updateArticle(idx, "total_weight", e.target.value)} className="h-8 text-xs" />
+                    {(() => {
+                      const bg = boxSumFor(article.item_description).gross
+                      const d = bg - (parseFloat(article.total_weight) || 0)
+                      return bg > 0 && Math.abs(d) > 0.01 ? (
+                        <button type="button" onClick={() => updateArticle(idx, "total_weight", String(parseFloat(bg.toFixed(3))))}
+                          className="block text-left text-[9px] text-red-600 hover:underline leading-tight" title="Boxes sum differs from the stored Total Wt — click to use the boxes sum">
+                          ⚠ Boxes: {bg.toLocaleString(undefined, { maximumFractionDigits: 1 })} (Δ {d > 0 ? "+" : ""}{d.toLocaleString(undefined, { maximumFractionDigits: 1 })})
+                        </button>
+                      ) : null
+                    })()}
                   </div>
                   <div className="space-y-1">
                     <Label className="text-[11px]">Carton Wt (kg)</Label>
