@@ -18,6 +18,7 @@ import {
 import { format } from "date-fns"
 import { bulkEntryApi } from "@/lib/api/bulkEntryApiService"
 import type { BulkEntryTransaction } from "@/types/cold-storage"
+import { InwardHoverPortal } from "@/components/inward/transaction-status-card"
 import { PermissionGuard } from "@/components/auth/permission-gate"
 import { cn } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -272,7 +273,7 @@ export default function ColdStorageListPage({ params }: ColdStorageListPageProps
                     <tbody>
                       {entries.map((entry) => (
                         <tr key={entry.transaction_no} className="border-b last:border-0 hover:bg-muted/20 transition-colors">
-                          <td className="px-4 py-3 font-medium">{entry.transaction_no}</td>
+                          <td className="px-4 py-3 font-medium"><InwardHoverPortal item={entry} /></td>
                           <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
                             {entry.entry_date ? format(new Date(entry.entry_date), "dd MMM yyyy") : "\u2014"}
                           </td>
@@ -308,7 +309,7 @@ export default function ColdStorageListPage({ params }: ColdStorageListPageProps
                     <div key={entry.transaction_no} className="p-3 space-y-2">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
-                          <p className="text-sm font-medium truncate">{entry.transaction_no}</p>
+                          <p className="text-sm font-medium truncate"><InwardHoverPortal item={entry} /></p>
                           <p className="text-xs text-muted-foreground">
                             {entry.entry_date ? format(new Date(entry.entry_date), "dd MMM yyyy") : "\u2014"}
                           </p>

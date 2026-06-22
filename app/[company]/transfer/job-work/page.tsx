@@ -1170,7 +1170,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
   const [rptFilterGroup, setRptFilterGroup] = useState("")
   const [rptFilterFrom, setRptFilterFrom] = useState("")
   const [rptFilterTo, setRptFilterTo] = useState("")
-  const [rptActiveView, setRptActiveView] = useState<"group" | "drill" | "process" | "vendor" | "item" | "trend" | "matrix">("group")
+  const [rptActiveView, setRptActiveView] = useState<"group" | "drill" | "process" | "vendor" | "item" | "trend" | "matrix">("drill")
   const [rptGroupBy, setRptGroupBy] = useState<"process" | "vendor" | "group">("group")
   const [rptSearch, setRptSearch] = useState("")
   const rptActiveFilters = [rptFilterProcess, rptFilterVendor, rptFilterItem, rptFilterGroup].filter((v) => !isAll(v)).length + (rptFilterFrom || rptFilterTo ? 1 : 0)
@@ -1198,9 +1198,10 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
     loadTxReceipts(challan)
   }
   // Clicking a transaction opens the latest receipt's Inward Receipt Details card.
-  // If the JWO has no receipts yet, fall back to the Material In flow.
+  // If the JWO has no receipt yet, show a notice — do NOT redirect to the Material In tab.
   const openLatestReceipt = async (challan: string, receiptCount: number) => {
-    if (!receiptCount) { handleAddStock(challan); return }
+    const noReceiptNotice = () => toast({ title: "No inward receipt yet", description: `${challan} has no finished-goods receipt recorded yet.` })
+    if (!receiptCount) { noReceiptNotice(); return }
     const cached = rptReceipts[challan]?.rows
     if (cached && cached.length && cached[cached.length - 1].id) { handleViewIR(cached[cached.length - 1].id); return }
     try {
@@ -1209,8 +1210,8 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
       const d = await res.json()
       const irs = d.prior_irs || []
       if (irs.length && irs[irs.length - 1].id) handleViewIR(irs[irs.length - 1].id)
-      else handleAddStock(challan)
-    } catch { handleAddStock(challan) }
+      else noReceiptNotice()
+    } catch { noReceiptNotice() }
   }
   const ymdLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
 
@@ -1353,7 +1354,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                 <div><span className="text-indigo-700 font-semibold">Output:</span> {outPct(disp, fg)}% · <span className="text-indigo-700 font-semibold">Pending:</span> {pendPct(disp, fg, wr)}%</div>
                 <div><span className="text-indigo-700 font-semibold">Receipts:</span> {r.receipt_count || 0}</div>
                 {r.item_descriptions && <div className="text-slate-600 pt-0.5 border-t border-indigo-200/40">{r.item_descriptions}</div>}
-                <div className="text-[10px] text-indigo-500 pt-0.5">{(r.receipt_count || 0) > 0 ? "Click → Receipt details" : "Click → Material In"} · ▸ expand receipts</div>
+                <div className="text-[10px] text-indigo-500 pt-0.5">{(r.receipt_count || 0) > 0 ? "Click → Receipt details" : "No receipts yet"} · ▸ expand receipts</div>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
@@ -3049,9 +3050,9 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
               <div className="flex flex-col sm:flex-row sm:items-center gap-2 justify-between">
                 <div className="flex flex-wrap gap-1.5 bg-gray-100 rounded-lg p-1">
                   {[
+                    { key: "drill" as const, label: "Drill-down", icon: Layers },
                     { key: "group" as const, label: "By Group", icon: Box },
                     { key: "vendor" as const, label: "By Vendor", icon: Users },
-                    { key: "drill" as const, label: "Drill-down", icon: Layers },
                     { key: "process" as const, label: "By Process", icon: Activity },
                     { key: "item" as const, label: "By Item", icon: Box },
                     { key: "trend" as const, label: "Monthly Trend", icon: TrendingUp },
