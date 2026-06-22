@@ -59,7 +59,7 @@ export const WAREHOUSES: Record<string, WarehouseConfig> = {
   },
   Eskimo: {
     name: "Eskimo Cold Storage",
-    address: "", // TODO: confirm Eskimo cold storage address for challans
+    address: "Eskimo Ice Mfg. Co. Pvt. Ltd., Plot No. A-824/1, Khairne MIDC, Thane-Belapur Road, Navi Mumbai, Maharashtra 400710",
     type: "cold",
   },
 }
