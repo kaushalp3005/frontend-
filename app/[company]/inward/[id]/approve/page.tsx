@@ -1033,10 +1033,7 @@ export default function ApprovePage({ params }: ApprovePageProps) {
                   <Label className="text-xs text-muted-foreground">Service</Label>
                   <Switch checked={isServiceOrder} onCheckedChange={(v) => { setIsServiceOrder(v); if (v) setIsRtv(false) }} />
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <Label className="text-xs text-muted-foreground">RTV</Label>
-                  <Switch checked={isRtv} onCheckedChange={(v) => { setIsRtv(v); if (v) setIsServiceOrder(false) }} />
-                </div>
+                {/* RTV toggle hidden — not needed in inward/bulk-entry for now (isRtv stays false) */}
               </div>
             </div>
           </CardHeader>
