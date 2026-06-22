@@ -1344,7 +1344,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
               <TooltipTrigger asChild>
                 <button onClick={() => openLatestReceipt(r.challan_no, r.receipt_count || 0)} className="font-mono text-indigo-700 flex-1 truncate text-left underline decoration-dotted underline-offset-2 hover:text-indigo-900">{r.challan_no}</button>
               </TooltipTrigger>
-              <TooltipContent side="right" className="!bg-gradient-to-br !from-sky-50 !via-indigo-50 !to-violet-100 !text-slate-800 border border-indigo-200/70 rounded-lg max-w-xs text-xs p-3 space-y-1">
+              <TooltipContent side="bottom" align="start" sideOffset={4} collisionPadding={8} className="!bg-gradient-to-br !from-sky-50 !via-indigo-50 !to-violet-100 !text-slate-800 border border-indigo-200/70 rounded-lg max-w-[min(20rem,calc(100vw-1.5rem))] max-h-[calc(100vh-1.5rem)] overflow-auto text-xs p-3 space-y-1">
                 <div className="font-semibold text-indigo-900 pb-1 border-b border-indigo-200/60">{r.challan_no}</div>
                 <div><span className="text-indigo-700 font-semibold">Date:</span> {r.job_work_date}</div>
                 <div><span className="text-indigo-700 font-semibold">Vendor:</span> {r.to_party}</div>
