@@ -1623,6 +1623,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                           <SelectItem value="Savla D-514">Savla D-514</SelectItem>
                           <SelectItem value="Rishi">Rishi</SelectItem>
                           <SelectItem value="Supreme">Supreme</SelectItem>
+                          <SelectItem value="Eskimo">Eskimo</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -2934,7 +2935,10 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                         if (!isAll(rptFilterProcess) && (r.sub_category || "Unknown") !== rptFilterProcess) return false
                         if (!isAll(rptFilterVendor) && (r.to_party || "—") !== rptFilterVendor) return false
                         if (!isAll(rptFilterItem) && !String(r.item_descriptions || "").includes(rptFilterItem)) return false
-                        if (!isAll(rptFilterGroup) && !String(r.item_groups || "").split(",").map((s: string) => s.trim()).includes(rptFilterGroup)) return false
+                        if (!isAll(rptFilterGroup)) {
+                          const grps = String(r.item_groups || "").split(",").map((s: string) => s.trim()).filter(Boolean)
+                          if (!(grps.length ? grps.includes(rptFilterGroup) : rptFilterGroup === "UNGROUPED")) return false
+                        }
                         if (rptFilterFrom && toYmd(r.job_work_date) < rptFilterFrom) return false
                         if (rptFilterTo && toYmd(r.job_work_date) > rptFilterTo) return false
                         if (q && !`${r.challan_no} ${r.to_party} ${r.sub_category} ${r.item_descriptions}`.toLowerCase().includes(q)) return false
@@ -3094,7 +3098,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                                 </TooltipTrigger>
                                 <TooltipContent side="right" className="!bg-gradient-to-br !from-sky-50 !via-indigo-50 !to-violet-100 !text-slate-800 border border-indigo-200/70 rounded-lg max-w-xs text-xs p-3 space-y-1">
                                   {(() => {
-                                    const txs = rptAllRecords.filter((x: any) => String(x.item_groups || "").split(",").map((s: string) => s.trim()).includes(r.group))
+                                    const txs = rptAllRecords.filter((x: any) => { const g = String(x.item_groups || "").split(",").map((s: string) => s.trim()).filter(Boolean); return g.length ? g.includes(r.group) : r.group === "UNGROUPED" })
                                     const disp = txs.reduce((s: number, x: any) => s + (Number(x.total_net_weight) || Number(x.total_weight) || 0), 0)
                                     const fg = txs.reduce((s: number, x: any) => s + (Number(x.fg_received_kgs) || 0), 0)
                                     const vendors = Array.from(new Set(txs.map((x: any) => x.to_party).filter(Boolean)))
