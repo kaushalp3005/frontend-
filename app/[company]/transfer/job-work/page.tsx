@@ -1321,6 +1321,26 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
     if (q && !`${r.challan_no} ${r.to_party} ${r.sub_category} ${r.item_descriptions}`.toLowerCase().includes(q)) return false
     return true
   })
+  // Per-month aggregate for the Monthly Trend hover (frontend-only; same filtered records the rest of the Summary uses).
+  const rptMonthlyDetail: Record<string, { jwos: number; disp: number; fg: number; waste: number; rej: number; receipts: number; vendors: Set<string>; out: number; partial: number; full: number }> = {}
+  for (const r of rptRecsFiltered) {
+    const ymd = toYmd(r.job_work_date)
+    if (!ymd || ymd.length < 7) continue
+    const key = `${ymd.slice(5, 7)}-${ymd.slice(0, 4)}` // MM-YYYY, matches m.month
+    const g = rptMonthlyDetail[key] || (rptMonthlyDetail[key] = { jwos: 0, disp: 0, fg: 0, waste: 0, rej: 0, receipts: 0, vendors: new Set<string>(), out: 0, partial: 0, full: 0 })
+    g.jwos += 1
+    g.disp += recDisp(r)
+    g.fg += Number(r.fg_received_kgs) || 0
+    g.waste += Number(r.waste_received_kgs) || 0
+    g.rej += Number(r.rejection_kgs) || 0
+    g.receipts += Number(r.receipt_count) || 0
+    if (r.to_party) g.vendors.add(String(r.to_party))
+    const st = String(r.status || "").toLowerCase()
+    if (st.includes("partial")) g.partial += 1
+    else if (st.includes("received") || st.includes("final") || st.includes("complete")) g.full += 1
+    else g.out += 1
+  }
+
   // OUT = dispatched to vendor; IN = finished goods received back. Tagged so a third party can read it.
   const OutTag = ({ kg, cls = "text-amber-700" }: { kg: number; cls?: string }) => (
     <span className={`inline-flex items-center gap-0.5 tabular-nums whitespace-nowrap ${cls}`} title="Material OUT — dispatched to vendor"><ArrowUpRight className="h-3 w-3" />{Math.round(kg).toLocaleString()}</span>
@@ -3174,18 +3194,45 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                   <CardContent className="p-4">
                     {rptMonthly.length > 0 ? (
                       <div className="space-y-2">
-                        {rptMonthly.map((m: any, idx: number) => (
-                          <div key={idx} className="flex items-center gap-3">
-                            <span className="text-xs font-mono font-medium text-gray-600 w-[60px]">{m.month}</span>
-                            <div className="flex-1 bg-gray-100 rounded-full h-6 relative overflow-hidden">
-                              <div className="absolute inset-y-0 left-0 bg-gradient-to-r from-indigo-400 to-indigo-600 rounded-full transition-all flex items-center justify-end pr-2"
-                                style={{ width: `${barWidth(m.dispatched_kgs, Math.max(...rptMonthly.map((x: any) => x.dispatched_kgs)))}%` }}>
-                                <span className="text-[10px] font-semibold text-white">{m.dispatched_kgs.toLocaleString()} kg</span>
-                              </div>
-                            </div>
-                            <span className="text-xs text-gray-500 w-[50px] text-right">{m.jwo_count} JWO{m.jwo_count !== 1 ? 's' : ''}</span>
-                          </div>
-                        ))}
+                        {rptMonthly.map((m: any, idx: number) => {
+                          const d = rptMonthlyDetail[m.month]
+                          const fg = d?.fg || 0, waste = d?.waste || 0, rej = d?.rej || 0
+                          return (
+                          <TooltipProvider key={idx} delayDuration={150}>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div className="flex items-center gap-3 cursor-default rounded-md px-1 -mx-1 py-0.5 hover:bg-indigo-50/60 transition-colors">
+                                  <span className="text-xs font-mono font-medium text-gray-600 w-[60px]">{m.month}</span>
+                                  <div className="flex-1 bg-gray-100 rounded-full h-6 relative overflow-hidden">
+                                    <div className="absolute inset-y-0 left-0 bg-gradient-to-r from-indigo-400 to-indigo-600 rounded-full transition-all flex items-center justify-end pr-2"
+                                      style={{ width: `${barWidth(m.dispatched_kgs, Math.max(...rptMonthly.map((x: any) => x.dispatched_kgs)))}%` }}>
+                                      <span className="text-[10px] font-semibold text-white">{m.dispatched_kgs.toLocaleString()} kg</span>
+                                    </div>
+                                  </div>
+                                  <span className="text-xs text-gray-500 w-[50px] text-right">{m.jwo_count} JWO{m.jwo_count !== 1 ? 's' : ''}</span>
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent side="bottom" align="start" sideOffset={6} collisionPadding={8} className="!bg-gradient-to-br !from-sky-50 !via-indigo-50 !to-violet-100 !text-slate-800 border border-indigo-200/70 rounded-lg max-w-[min(20rem,calc(100vw-1.5rem))] max-h-[calc(100vh-1.5rem)] overflow-auto text-xs p-3 space-y-1">
+                                <div className="font-semibold text-indigo-900 pb-1 border-b border-indigo-200/60">{m.month} · Job Work Summary</div>
+                                <div className="flex justify-between gap-4"><span className="text-indigo-700 font-semibold">JWOs</span><span>{m.jwo_count}{d ? ` · ${d.vendors.size} vendor${d.vendors.size !== 1 ? "s" : ""}` : ""}</span></div>
+                                <div className="flex justify-between gap-4"><span className="text-amber-700 font-semibold">↑ OUT dispatched</span><span>{Math.round(m.dispatched_kgs).toLocaleString()} kg</span></div>
+                                <div className="flex justify-between gap-4"><span className="text-emerald-700 font-semibold">↓ IN — FG received</span><span>{Math.round(fg).toLocaleString()} kg</span></div>
+                                <div className="flex justify-between gap-4"><span className="text-orange-600 font-semibold">Waste</span><span>{Math.round(waste).toLocaleString()} kg</span></div>
+                                <div className="flex justify-between gap-4"><span className="text-rose-600 font-semibold">Rejection</span><span>{Math.round(rej).toLocaleString()} kg</span></div>
+                                <div className="flex justify-between gap-4 border-t border-indigo-200/40 pt-1"><span className="text-indigo-700 font-semibold">Output · Pending</span><span>{outPct(m.dispatched_kgs, fg)}% · {pendPct(m.dispatched_kgs, fg, waste + rej)}%</span></div>
+                                <div className="flex justify-between gap-4"><span className="text-indigo-700 font-semibold">Inward receipts</span><span>{d?.receipts || 0}</span></div>
+                                {d && (
+                                  <div className="flex flex-wrap gap-1 pt-1 border-t border-indigo-200/40">
+                                    <span className="px-1.5 py-0.5 rounded bg-sky-100 text-sky-700">Material Out {d.out}</span>
+                                    <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">Partial {d.partial}</span>
+                                    <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">Received {d.full}</span>
+                                  </div>
+                                )}
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                          )
+                        })}
                       </div>
                     ) : (
                       <p className="text-center text-xs text-gray-400 py-8">No monthly data available</p>
