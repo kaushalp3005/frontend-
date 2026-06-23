@@ -73,6 +73,7 @@ export default function DCPage({ params }: DCPageProps) {
       totalQtyRequired={transferData.total_qty_required || (transferData.lines || []).reduce((s: number, l: any) => s + parseFloat(l.quantity || l.qty || 0), 0)}
       boxesProvided={(transferData.boxes || []).length}
       boxesPending={0}
+      boxes={transferData.boxes || []}
       warehouseAddresses={WAREHOUSE_ADDRESSES}
     />
   )

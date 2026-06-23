@@ -316,7 +316,7 @@ export function groupLinesByItem(lines: any[], fallbackUnit?: string): HoverLine
   })
 }
 
-export function groupBoxesByItem(boxes: any[], fallbackUnit?: string): HoverLine[] {
+export function groupBoxesByItem(boxes: any[], fallbackUnit?: string, lines?: any[]): HoverLine[] {
   type Agg = {
     name: string
     qty: number
@@ -330,8 +330,30 @@ export function groupBoxesByItem(boxes: any[], fallbackUnit?: string): HoverLine
     // and even then we surface the single most-common one (never a joined list).
     fallbackCounts: Map<string, number>
   }
+  // Boxes don't always carry unit_pack_size / material_type — source them from the parent
+  // line (matched by article, case-insensitive) so PM/packaging Count works even when the
+  // box payload lacks those fields. Uses the max unit_pack_size seen for the article.
+  const lineInfo = new Map<string, { ups: number; mt: string; cat: string }>()
+  for (const l of (lines || [])) {
+    const k = (l.item_desc_raw || l.item_description || l.article || '').trim().toUpperCase()
+    if (!k) continue
+    const ups = parseFloat(String(l.unit_pack_size || 0)) || 0
+    const prev = lineInfo.get(k)
+    lineInfo.set(k, {
+      ups: Math.max(ups, prev?.ups || 0),
+      mt: (l.material_type || l.rm_pm_fg_type || prev?.mt || '').toString(),
+      cat: (l.item_category || prev?.cat || '').toString(),
+    })
+  }
   const grouped = new Map<string, Agg>()
-  for (const b of boxes) {
+  for (const b0 of boxes) {
+    const li = lineInfo.get((b0.article || b0.item_description || '').trim().toUpperCase())
+    const b = li ? {
+      ...b0,
+      unit_pack_size: (parseFloat(String(b0.unit_pack_size || 0)) || 0) > 0 ? b0.unit_pack_size : li.ups,
+      material_type: b0.material_type || b0.rm_pm_fg_type || li.mt,
+      item_category: b0.item_category || li.cat,
+    } : b0
     const name = b.article || b.item_description || 'Unknown'
     const lot = b.lot_number || ''
     const key = `${name}||${lot}`

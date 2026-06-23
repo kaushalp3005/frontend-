@@ -15,6 +15,7 @@ interface DeliveryChallanProps {
   totalQtyRequired: number
   boxesProvided: number
   boxesPending: number
+  boxes?: any[]
   warehouseAddresses: Record<string, { name: string; address: string }>
 }
 
@@ -31,6 +32,7 @@ export default function DeliveryChallan({
   totalQtyRequired,
   boxesProvided,
   boxesPending,
+  boxes = [],
   warehouseAddresses
 }: DeliveryChallanProps) {
 
@@ -104,12 +106,16 @@ export default function DeliveryChallan({
 
   // Consolidate items: group by item description and sum quantities/weights
   const consolidatedItems = React.useMemo(() => {
+    // Actual physical box counts per article — authoritative for the "No. of Boxes" column.
+    // (Previously box_count counted LINES, so it read 1 once the duplicate lines were
+    //  collapsed — even though 3 boxes were transferred.)
+    const boxCountByDesc = new Map<string, number>()
+    for (const bx of (boxes || [])) {
+      const d = (bx.article || bx.item_description || '').trim().toUpperCase()
+      if (d) boxCountByDesc.set(d, (boxCountByDesc.get(d) || 0) + 1)
+    }
+
     const itemMap = new Map<string, any>()
-
-    console.log('🔄 Consolidating items, total raw items:', items.length)
-    console.log('🔄 Sample item keys:', items.length > 0 ? Object.keys(items[0]) : 'none')
-    console.log('🔄 Sample item:', items.length > 0 ? JSON.stringify(items[0]) : 'none')
-
     for (const item of validItems) {
       // Build key from item description (normalized) - this is the primary grouping field
       const description = (item.item_description || item.item_desc_raw || '').trim().toUpperCase()
@@ -121,20 +127,24 @@ export default function DeliveryChallan({
         const existing = itemMap.get(key)
         existing.qty = (parseFloat(existing.qty) || 0) + (parseFloat(item.qty || item.quantity) || 0)
         existing.net_weight = (parseFloat(existing.net_weight) || 0) + (parseFloat(item.net_weight) || 0)
-        existing.box_count += 1
       } else {
         itemMap.set(key, {
           ...item,
           qty: parseFloat(item.qty || item.quantity) || 0,
           net_weight: parseFloat(item.net_weight) || 0,
-          box_count: 1,
         })
       }
     }
 
-    console.log('🔄 Consolidated to', itemMap.size, 'unique items')
-    return Array.from(itemMap.values())
-  }, [validItems])
+    // No. of Boxes = actual physical boxes for the article; fall back to qty (each unit == 1
+    // box) for line-only transfers that carry no scanned boxes.
+    const out = Array.from(itemMap.values())
+    for (const it of out) {
+      const d = (it.item_description || it.item_desc_raw || '').trim().toUpperCase()
+      it.box_count = boxCountByDesc.get(d) || it.qty || 0
+    }
+    return out
+  }, [validItems, boxes])
 
   // Split consolidated items into chunks for pagination - 10 items per page
   const itemsPerPage = 10
@@ -334,7 +344,7 @@ export default function DeliveryChallan({
                       TOTAL ({consolidatedItems.length} item{consolidatedItems.length !== 1 ? 's' : ''}):
                     </td>
                     <td style={{ padding: '8px 6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', fontSize: '10.5px', whiteSpace: 'nowrap' }}>
-                      {Number(validItems.length || 0).toLocaleString('en-IN')}
+                      {Number(consolidatedItems.reduce((s, it) => s + (Number(it.box_count) || 0), 0)).toLocaleString('en-IN')}
                     </td>
                     <td style={{ padding: '8px 6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', fontSize: '10.5px', whiteSpace: 'nowrap' }}>
                       {Number(totalQtyRequired || 0).toLocaleString('en-IN')}
@@ -527,7 +537,7 @@ export default function DeliveryChallan({
             <td style={{ padding: '6px', border: '1px solid #000', fontWeight: 'bold' }}>Total Items: {consolidatedItems.length}</td>
             <td style={{ padding: '6px', border: '1px solid #000' }}>&nbsp;</td>
             <td style={{ padding: '6px', border: '1px solid #000', fontWeight: 'bold' }}>Total Qty: {Number(totalQtyRequired || 0).toLocaleString('en-IN')}</td>
-            <td style={{ padding: '6px', border: '1px solid #000', fontWeight: 'bold' }}>Total Boxes: {Number(validItems.length || 0).toLocaleString('en-IN')}</td>
+            <td style={{ padding: '6px', border: '1px solid #000', fontWeight: 'bold' }}>Total Boxes: {Number(consolidatedItems.reduce((s, it) => s + (Number(it.box_count) || 0), 0)).toLocaleString('en-IN')}</td>
             <td style={{ padding: '6px', border: '1px solid #000', fontWeight: 'bold' }}>
               Total Kg: {Number(consolidatedItems.reduce((s, it) => s + (parseFloat(it.net_weight as unknown as string) || 0), 0)).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
             </td>
