@@ -307,7 +307,7 @@ export default function DeliveryChallan({
                       {Number(item.qty || item.quantity || 0).toLocaleString('en-IN')}
                     </td>
                     <td style={{ padding: '5px 6px', border: '1px solid #000', textAlign: 'center', fontSize: '10.5px', whiteSpace: 'nowrap' }}>
-                      {item.uom || 'N/A'}
+                      {item.uom || (isCountableItem(item) ? 'BOX' : 'N/A')}
                     </td>
                     <td style={{ padding: '5px 6px', border: '1px solid #000', textAlign: 'center', fontSize: '10.5px', whiteSpace: 'nowrap' }}>
                       {(() => {
