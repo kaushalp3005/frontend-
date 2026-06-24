@@ -20,7 +20,7 @@ import { useAuthStore } from "@/lib/stores/auth"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { getAllWarehouseCodes, getUserDefaultWarehouses, normalizeWarehouseName, getDisplayWarehouseName } from "@/lib/constants/warehouses"
 import PendingTransfersModal from "@/components/transfer/PendingTransfersModal"
-import { ChallanHoverCard, groupLinesByItem, groupBoxesByItem, type HoverLine, type HoverMeta } from "@/components/transfer/ChallanHoverCard"
+import { ChallanHoverCard, groupLinesByItem, groupBoxesByItem, groupTransferItems, type HoverLine, type HoverMeta } from "@/components/transfer/ChallanHoverCard"
 
 interface TransferPageProps {
   params: {
@@ -780,9 +780,7 @@ export default function TransferPage({ params }: TransferPageProps) {
                               const fromColdUnit: string | undefined = data.from_cold_unit || t.from_cold_unit || undefined
                               // Per-lot cold unit (lot_origin_unit) when the server can map it;
                               // otherwise fall back to the transfer's cold unit (fromColdUnit).
-                              const lines = (data.boxes || []).length > 0
-                                ? groupBoxesByItem(data.boxes, fromColdUnit, data.lines || [])
-                                : groupLinesByItem(data.lines || [], fromColdUnit)
+                              const lines = groupTransferItems(data.boxes || [], data.lines || [], fromColdUnit)
                               const meta: HoverMeta[] = []
                               // Cold source shows per-lot (lot_origin_unit); falls back to fromColdUnit so the chip always shows for cold transfers
                               if (data.vehicle_no || data.vehicle_number) meta.push({ label: "Vehicle", value: data.vehicle_no || data.vehicle_number })
@@ -871,9 +869,7 @@ export default function TransferPage({ params }: TransferPageProps) {
                                 const fromColdUnit: string | undefined = data.from_cold_unit || t.from_cold_unit || undefined
                                 // Per-lot cold unit (lot_origin_unit) when the server can map it;
                                 // otherwise fall back to the transfer's cold unit (fromColdUnit).
-                                const lines = (data.boxes || []).length > 0
-                                  ? groupBoxesByItem(data.boxes, fromColdUnit, data.lines || [])
-                                  : groupLinesByItem(data.lines || [], fromColdUnit)
+                                const lines = groupTransferItems(data.boxes || [], data.lines || [], fromColdUnit)
                                 const meta: HoverMeta[] = []
                                 // Cold source shows per-lot (lot_origin_unit); falls back to fromColdUnit so the chip always shows for cold transfers
                                 if (data.vehicle_no || data.vehicle_number) meta.push({ label: "Vehicle", value: data.vehicle_no || data.vehicle_number })
@@ -1313,9 +1309,7 @@ export default function TransferPage({ params }: TransferPageProps) {
                               const fromColdUnit: string | undefined = data.from_cold_unit || t.from_cold_unit || undefined
                               // Per-lot cold unit (lot_origin_unit) when the server can map it;
                               // otherwise fall back to the transfer's cold unit (fromColdUnit).
-                              const lines = (data.boxes || []).length > 0
-                                ? groupBoxesByItem(data.boxes, fromColdUnit, data.lines || [])
-                                : groupLinesByItem(data.lines || [], fromColdUnit)
+                              const lines = groupTransferItems(data.boxes || [], data.lines || [], fromColdUnit)
                               const meta: HoverMeta[] = []
                               // Cold source shows per-lot (lot_origin_unit); falls back to fromColdUnit so the chip always shows for cold transfers
                               if (data.vehicle_no || data.vehicle_number) meta.push({ label: "Vehicle", value: data.vehicle_no || data.vehicle_number })
@@ -1389,9 +1383,7 @@ export default function TransferPage({ params }: TransferPageProps) {
                               const fromColdUnit: string | undefined = data.from_cold_unit || t.from_cold_unit || undefined
                               // Per-lot cold unit (lot_origin_unit) when the server can map it;
                               // otherwise fall back to the transfer's cold unit (fromColdUnit).
-                              const lines = (data.boxes || []).length > 0
-                                ? groupBoxesByItem(data.boxes, fromColdUnit, data.lines || [])
-                                : groupLinesByItem(data.lines || [], fromColdUnit)
+                              const lines = groupTransferItems(data.boxes || [], data.lines || [], fromColdUnit)
                               const meta: HoverMeta[] = []
                               // Cold source shows per-lot (lot_origin_unit); falls back to fromColdUnit so the chip always shows for cold transfers
                               if (data.vehicle_no || data.vehicle_number) meta.push({ label: "Vehicle", value: data.vehicle_no || data.vehicle_number })

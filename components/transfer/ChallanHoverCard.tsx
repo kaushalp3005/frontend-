@@ -402,3 +402,19 @@ export function groupBoxesByItem(boxes: any[], fallbackUnit?: string, lines?: an
     }
   })
 }
+
+// Merge boxed + line-only items so a transfer hover shows EVERY item. Boxed items come from the
+// scanned boxes (with box count / lot); any line item that has NO scanned boxes is added from the
+// lines. Previously the hover showed ONLY boxed items whenever any box existed, so line-only items
+// (e.g. items entered by qty but not box-scanned) silently vanished from the hover.
+export function groupTransferItems(boxes: any[], lines: any[], fallbackUnit?: string): HoverLine[] {
+  if (!boxes || boxes.length === 0) return groupLinesByItem(lines || [], fallbackUnit)
+  const boxed = groupBoxesByItem(boxes, fallbackUnit, lines || [])
+  const boxedArticles = new Set(
+    boxes.map((b: any) => (b.article || b.item_description || "").trim().toUpperCase()).filter(Boolean)
+  )
+  const unboxedLines = (lines || []).filter(
+    (l: any) => !boxedArticles.has((l.item_desc_raw || l.item_description || l.article || "").trim().toUpperCase())
+  )
+  return [...boxed, ...groupLinesByItem(unboxedLines, fallbackUnit)]
+}
