@@ -1231,17 +1231,20 @@ export default function MaterialOutPage({ params }: MaterialOutPageProps) {
         Object.entries(unitGroups).forEach(([unit, items]) => {
           const header = `━━ ${unit} → ${headerData.toParty || "-"} ━━`
           // Consolidate items by itemMark + itemDescription + lotNumber
-          const consolidated: Record<string, { itemMark: string; itemDescription: string; lotNumber: string; totalBoxes: number }> = {}
+          const consolidated: Record<string, { itemMark: string; group: string; lotNumber: string; totalBoxes: number }> = {}
           items.forEach((art) => {
             const key = `${art.itemMark || "-"}||${art.itemDescription || "-"}||${art.lotNumber || "-"}`
             if (!consolidated[key]) {
-              consolidated[key] = { itemMark: art.itemMark || "-", itemDescription: art.itemDescription || "-", lotNumber: art.lotNumber || "-", totalBoxes: 0 }
+              const grp = (art.itemCategory && art.itemCategory !== "N/A") ? art.itemCategory : ""
+              consolidated[key] = { itemMark: art.itemMark || "-", group: grp, lotNumber: art.lotNumber || "-", totalBoxes: 0 }
             }
             consolidated[key].totalBoxes += parseInt(art.quantity) || 1
           })
-          const itemLines = Object.values(consolidated).map((c) =>
-            `Item Mark : ${c.itemMark}\nItem : ${c.itemDescription}\nNo of Boxes : ${c.totalBoxes}\nLot Number : ${c.lotNumber}`
-          )
+          const itemLines = Object.values(consolidated).map((c) => {
+            const group = (c.group || "").trim()
+            const itemLabel = group ? `${group} ${c.itemMark}` : c.itemMark
+            return `Item : ${itemLabel}\nNo of Boxes : ${c.totalBoxes}\nLot Number : ${c.lotNumber}`
+          })
           sections.push([header, ...itemLines].join("\n\n"))
         })
         sections.push(`Vehicle Number : ${vehicleNo || "-"}`)
@@ -1930,7 +1933,16 @@ export default function MaterialOutPage({ params }: MaterialOutPageProps) {
       </form>
 
       {/* Cold Transfer Summary Popup */}
-      <Dialog open={coldTransferPopup.open} onOpenChange={() => {}}>
+      <Dialog
+        open={coldTransferPopup.open}
+        onOpenChange={(open) => {
+          // X button / Esc key close the popup and return to the job-work list
+          if (!open) {
+            setColdTransferPopup({ open: false, message: "" })
+            router.push(`/${company}/transfer/job-work`)
+          }
+        }}
+      >
         <DialogContent
           className="w-[95vw] sm:max-w-2xl max-h-[90vh] flex flex-col p-0 gap-0"
           onPointerDownOutside={(e) => e.preventDefault()}

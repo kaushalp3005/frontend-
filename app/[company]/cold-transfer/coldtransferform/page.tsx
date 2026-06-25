@@ -2807,7 +2807,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       if (isColdInvolved) {
         const vehicleNo = transferInfo.vehicleNumber === "other" ? transferInfo.vehicleNumberOther : transferInfo.vehicleNumber
         // Build per-item summary from scannedBoxes grouped by description
-        const itemMap: Record<string, { description: string; subCategory: string; boxes: number; lotNumber: string; itemMark: string }> = {}
+        const itemMap: Record<string, { description: string; subCategory: string; group: string; boxes: number; lotNumber: string; itemMark: string }> = {}
         scannedBoxes.forEach((box) => {
           const key = `${box.itemDescription || ""}_${box.lotNumber || ""}`
           if (!itemMap[key]) {
@@ -2816,6 +2816,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
             itemMap[key] = {
               description: box.itemDescription || "-",
               subCategory: box.subCategory || matchedArticle?.sub_category || "-",
+              group: (box.itemCategory && box.itemCategory !== "N/A") ? box.itemCategory : (matchedArticle?.item_category || ""),
               boxes: 0,
               lotNumber: box.lotNumber || "-",
               itemMark: box.itemMark || matchedArticle?.cs_item_mark || "-",
@@ -2824,9 +2825,11 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
           itemMap[key].boxes += 1
         })
 
-        const summaryLines = Object.values(itemMap).map((item) =>
-          `Item Mark : ${item.itemMark}\nNo of Boxes : ${item.boxes}\nLot Number : ${item.lotNumber}`
-        )
+        const summaryLines = Object.values(itemMap).map((item) => {
+          const group = (item.group || "").trim()
+          const itemLabel = group ? `${group} ${item.itemMark}` : item.itemMark
+          return `Item : ${itemLabel}\nNo of Boxes : ${item.boxes}\nLot Number : ${item.lotNumber}`
+        })
         summaryLines.push(`From : ${fromWh || "-"}\nTo : ${toWh || "-"}`)
         summaryLines.push(`Vehicle Number : ${vehicleNo || "-"}`)
         const message = summaryLines.join("\n\n")
@@ -3774,26 +3777,41 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     </div>
 
     {/* Cold Transfer Summary Popup */}
-    <Dialog open={coldTransferPopup.open} onOpenChange={() => {}}>
-      <DialogContent className="max-w-md" onPointerDownOutside={(e) => e.preventDefault()}>
-        <DialogHeader>
+    <Dialog
+      open={coldTransferPopup.open}
+      onOpenChange={(open) => {
+        // X button / Esc key close the popup and return to the cold-transfer list
+        if (!open) {
+          setColdTransferPopup({ open: false, message: "" })
+          router.push(`/${company}/cold-transfer`)
+        }
+      }}
+    >
+      <DialogContent
+        className="w-[95vw] sm:max-w-md max-h-[90vh] flex flex-col p-0 gap-0"
+        onPointerDownOutside={(e) => e.preventDefault()}
+      >
+        <DialogHeader className="px-5 pt-5 pb-3 border-b shrink-0">
           <DialogTitle>Transfer Summary</DialogTitle>
         </DialogHeader>
-        <div className="relative bg-gray-50 rounded-lg p-4 text-sm whitespace-pre-wrap font-mono leading-relaxed">
+        <div className="relative flex-1 min-h-0 overflow-y-auto px-5 py-4">
           <button
             type="button"
-            className="absolute top-2 right-2 p-1.5 rounded-md hover:bg-gray-200 transition-colors"
+            className="sticky top-0 float-right -mt-1 p-1.5 rounded-md hover:bg-gray-200 transition-colors bg-white/80 backdrop-blur z-10"
             onClick={() => {
               navigator.clipboard.writeText(coldTransferPopup.message)
               setPopupCopied(true)
               setTimeout(() => setPopupCopied(false), 2000)
             }}
+            title="Copy summary"
           >
             {popupCopied ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4 text-gray-500" />}
           </button>
-          {coldTransferPopup.message}
+          <pre className="bg-gray-50 rounded-lg p-4 text-xs sm:text-sm whitespace-pre-wrap break-words font-mono leading-relaxed text-gray-800 m-0">
+{coldTransferPopup.message}
+          </pre>
         </div>
-        <DialogFooter>
+        <DialogFooter className="px-5 py-3 border-t shrink-0 bg-white">
           <Button
             type="button"
             onClick={() => {
