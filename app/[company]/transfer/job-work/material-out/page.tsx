@@ -1242,7 +1242,8 @@ export default function MaterialOutPage({ params }: MaterialOutPageProps) {
           })
           const itemLines = Object.values(consolidated).map((c) => {
             const group = (c.group || "").trim()
-            const itemLabel = group ? `${group} ${c.itemMark}` : c.itemMark
+            const groupLabel = group ? group.charAt(0).toUpperCase() + group.slice(1).toLowerCase() : ""
+            const itemLabel = groupLabel ? `${groupLabel} - ${c.itemMark}` : c.itemMark
             return `Item : ${itemLabel}\nNo of Boxes : ${c.totalBoxes}\nLot Number : ${c.lotNumber}`
           })
           sections.push([header, ...itemLines].join("\n\n"))

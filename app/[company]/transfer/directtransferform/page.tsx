@@ -2087,7 +2087,8 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
 
         const summaryLines = Object.values(itemMap).map((item) => {
           const group = (item.group || "").trim()
-          const itemLabel = group ? `${group} ${item.itemMark}` : item.itemMark
+          const groupLabel = group ? group.charAt(0).toUpperCase() + group.slice(1).toLowerCase() : ""
+          const itemLabel = groupLabel ? `${groupLabel} - ${item.itemMark}` : item.itemMark
           return `Item : ${itemLabel}\nNo of Boxes : ${item.boxes}\nLot Number : ${item.lotNumber}`
         })
         summaryLines.push(`From : ${fromWh || "-"}\nTo : ${toWh || "-"}`)
