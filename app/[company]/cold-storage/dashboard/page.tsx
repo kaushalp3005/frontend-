@@ -2044,7 +2044,7 @@ function StockL1({ l1, ex, toggle, l3t, lc, ll }: SProps) {
   return (<>
     <tr className={cn("border-b cursor-pointer transition-colors hover:opacity-90", L_BG[0])} onClick={() => toggle(k)}>
       <td className={cn("px-3 py-2.5", L_PL[0])}>
-        <span className="inline-flex items-center gap-1.5">{open ? <ChevronDown className="h-4 w-4 text-teal-400" /> : <ChevronRight className="h-4 w-4 text-teal-400" />}{l1.storage_location} — {l1.group_name}</span>
+        <span className="inline-flex items-center gap-1.5">{open ? <ChevronDown className="h-4 w-4 text-teal-400" /> : <ChevronRight className="h-4 w-4 text-teal-400" />}{l1.group_name}</span>
       </td>
       <td className="text-right px-3 py-2.5 tabular-nums">{fmtKgs(l1.total_kgs)}</td>
       <td className="text-right px-3 py-2.5 tabular-nums">{fmtVal(l1.total_value)}</td>
@@ -2483,7 +2483,7 @@ function AgeL1({ l1, view, ex, toggle, l3t, lc, ll }: AProps) {
   return (<>
     <tr className={cn("border-b cursor-pointer hover:opacity-90 transition-colors", L_BG[0])} onClick={() => toggle(k)}>
       <td className={cn("px-3 py-2.5", L_PL[0])}>
-        <span className="inline-flex items-center gap-1.5">{open ? <ChevronDown className="h-4 w-4 text-teal-400" /> : <ChevronRight className="h-4 w-4 text-teal-400" />}{l1.storage_location} — {l1.group_name}</span>
+        <span className="inline-flex items-center gap-1.5">{open ? <ChevronDown className="h-4 w-4 text-teal-400" /> : <ChevronRight className="h-4 w-4 text-teal-400" />}{l1.group_name}</span>
       </td>
       <AgeingCells d={l1} view={view} />
     </tr>
@@ -2634,7 +2634,7 @@ function AgeDayL1({ l1, view, ex, toggle, l3t, lc, ll }: ADayProps) {
   return (<>
     <tr className={cn("border-b cursor-pointer hover:opacity-90 transition-colors", L_BG[0])} onClick={() => toggle(k)}>
       <td className={cn("px-3 py-2.5", L_PL[0])}>
-        <span className="inline-flex items-center gap-1.5">{open ? <ChevronDown className="h-4 w-4 text-teal-400" /> : <ChevronRight className="h-4 w-4 text-teal-400" />}{l1.storage_location} — {l1.group_name}</span>
+        <span className="inline-flex items-center gap-1.5">{open ? <ChevronDown className="h-4 w-4 text-teal-400" /> : <ChevronRight className="h-4 w-4 text-teal-400" />}{l1.group_name}</span>
       </td>
       <AgeDayCells d={l1} view={view} />
     </tr>
