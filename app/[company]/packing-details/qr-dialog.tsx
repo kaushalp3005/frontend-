@@ -17,7 +17,7 @@ import { Loader2, Printer } from "lucide-react"
 import { mintBatchToken } from "@/lib/packing"
 
 const LANDING_BASE =
-  process.env.NEXT_PUBLIC_QR_LANDING_URL || "https://www.candorfoods.in/packing"
+  process.env.NEXT_PUBLIC_QR_LANDING_URL || "https://www.candorfoods.in/packing-details"
 
 function escapeHtml(s: string): string {
   return s.replace(
