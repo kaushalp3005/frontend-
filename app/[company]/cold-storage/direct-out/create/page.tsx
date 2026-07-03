@@ -30,6 +30,7 @@ interface DirectOutPageProps {
 interface DirectOutLine {
   rowId: string
   stockId: number
+  company: string | null  // source company of this box (cfpl/cdpl) — cold storage is company-agnostic
   itemDescription: string
   lotNo: string
   inwardNo: string
@@ -49,12 +50,9 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 // ── Cold Storage Stock Search (mirrors directtransferform/page.tsx) ──
 function ColdStorageStockSearch({
   onSelect,
-  company,
 }: {
   onSelect: (record: ColdStorageStockRecord) => void
-  company: string
 }) {
-  const [coldCompany, setColdCompany] = useState(company.toLowerCase())
   const [lotNoSearch, setLotNoSearch] = useState("")
   const [descSearch, setDescSearch] = useState("")
   const [results, setResults] = useState<ColdStorageStockRecord[]>([])
@@ -71,7 +69,9 @@ function ColdStorageStockSearch({
       }
       setLoading(true)
       try {
-        const params: Record<string, string> = { company: coldCompany }
+        // Company-agnostic: backend searches BOTH cfpl + cdpl cold_stocks and
+        // tags each result with its real source company (record.company).
+        const params: Record<string, string> = {}
         if (lotNo.trim()) params.lot_no = lotNo.trim()
         if (desc.trim()) params.q = desc.trim()
         const data = await ColdStorageApiService.searchColdStorageStocks(params)
@@ -83,7 +83,7 @@ function ColdStorageStockSearch({
         setLoading(false)
       }
     },
-    [coldCompany],
+    [],
   )
 
   useEffect(() => {
@@ -106,29 +106,11 @@ function ColdStorageStockSearch({
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between mb-1">
-        <div className="flex items-center gap-2">
-          <Search className="h-4 w-4 text-blue-600" />
-          <span className="text-sm font-medium text-blue-600">
-            Search Cold Storage Stock
-          </span>
-        </div>
-        <Select
-          value={coldCompany}
-          onValueChange={(val) => {
-            setColdCompany(val)
-            setResults([])
-            setShowResults(false)
-          }}
-        >
-          <SelectTrigger className="h-8 w-[110px] text-xs bg-white border-gray-200">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="cfpl">CFPL</SelectItem>
-            <SelectItem value="cdpl">CDPL</SelectItem>
-          </SelectContent>
-        </Select>
+      <div className="flex items-center gap-2 mb-1">
+        <Search className="h-4 w-4 text-blue-600" />
+        <span className="text-sm font-medium text-blue-600">
+          Search Cold Storage Stock
+        </span>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
@@ -293,6 +275,7 @@ export default function ColdStorageDirectOutCreatePage({ params }: DirectOutPage
     const newLine: DirectOutLine = {
       rowId: `row-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       stockId: record.id,
+      company: record.company || null,  // remember which company's cold_stocks this box came from
       itemDescription: record.item_description || "",
       lotNo: record.lot_no || "",
       inwardNo: record.inward_no || "",
@@ -361,6 +344,7 @@ export default function ColdStorageDirectOutCreatePage({ params }: DirectOutPage
         remarks: remarks || null,
         lines: lines.map((l) => ({
           stock_id: l.stockId,
+          company: l.company || activeCompany,  // per-box company drives the auto-split on submit
           item_description: l.itemDescription,
           lot_no: l.lotNo,
           inward_no: l.inwardNo,
@@ -555,7 +539,7 @@ export default function ColdStorageDirectOutCreatePage({ params }: DirectOutPage
         {/* Search */}
         <Card>
           <CardContent className="pt-4">
-            <ColdStorageStockSearch onSelect={handleAddLine} company={activeCompany} />
+            <ColdStorageStockSearch onSelect={handleAddLine} />
           </CardContent>
         </Card>
 
