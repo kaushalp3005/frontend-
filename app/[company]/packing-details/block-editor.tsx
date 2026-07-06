@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Plus, X } from "lucide-react"
+import { Plus, X, ChevronUp, ChevronDown } from "lucide-react"
 import { emptyBlock, type Block, type BlockType } from "@/lib/packing"
 
 function ValueInput({ block, onChange }: { block: Block; onChange: (v: string) => void }) {
@@ -66,6 +66,15 @@ export function BlockEditor({
     onChange(blocks.map((b) => (b.id === id ? { ...b, ...p } : b)))
   const remove = (id: string) => onChange(blocks.filter((b) => b.id !== id))
   const add = () => onChange([...blocks, emptyBlock()])
+  // Reorder is user-driven and persisted verbatim: the block order here is the
+  // order saved to (and read back from) `details`. Nothing re-sorts it.
+  const move = (from: number, to: number) => {
+    if (to < 0 || to >= blocks.length) return
+    const next = [...blocks]
+    const [moved] = next.splice(from, 1)
+    next.splice(to, 0, moved)
+    onChange(next)
+  }
 
   return (
     <div className="space-y-2">
@@ -74,8 +83,20 @@ export function BlockEditor({
           No blocks yet — add a block to build the details JSON body.
         </p>
       )}
-      {blocks.map((b) => (
+      {blocks.map((b, i) => (
         <div key={b.id} className="flex flex-wrap items-start gap-2 rounded border p-2">
+          <div className="flex flex-col">
+            <Button type="button" variant="ghost" size="icon" title="Move up"
+              className="h-5 w-6 text-muted-foreground" disabled={i === 0}
+              onClick={() => move(i, i - 1)}>
+              <ChevronUp className="h-4 w-4" />
+            </Button>
+            <Button type="button" variant="ghost" size="icon" title="Move down"
+              className="h-5 w-6 text-muted-foreground" disabled={i === blocks.length - 1}
+              onClick={() => move(i, i + 1)}>
+              <ChevronDown className="h-4 w-4" />
+            </Button>
+          </div>
           <Input
             value={b.label}
             placeholder="Field name (JSON key)"
