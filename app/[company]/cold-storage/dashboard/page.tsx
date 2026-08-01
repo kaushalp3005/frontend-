@@ -15,7 +15,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import Link from "next/link"
 import { useParams } from "next/navigation"
 import {
-  RefreshCw, ChevronRight, ChevronDown, ChevronsUpDown,
+  ChevronRight, ChevronDown, ChevronsUpDown,
   Download, Copy, Camera, Loader2, ArrowLeft, Filter,
   TrendingUp, TrendingDown, Package, AlertTriangle,
   BarChart3, Send, Search, ArrowUpDown, EyeOff, X, Layers,
@@ -33,6 +33,8 @@ import {
 } from "recharts"
 import { parseSearchTerms, matchesAllTerms } from "@/lib/search/recordSearch"
 import { readDashboardCache, writeDashboardCache } from "@/lib/cache/dashboardCache"
+import { useLiveDashboard } from "@/lib/hooks/useLiveDashboard"
+import { DataFreshness } from "@/components/dashboard/DataFreshness"
 import {
   coldStorageDashboardApi,
   type StockSummaryResponse, type StockLayer1, type StockLayer2, type StockLayer3,
@@ -205,6 +207,7 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null)
   const [downloadingMaster, setDownloadingMaster] = useState(false)
 
   const handleDownloadMasterSheet = async () => {
@@ -355,16 +358,24 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
         const itRes = await fetch(`${apiBase}/interunit/pending-stock/in-transit-by-lot${coParam}`)
         if (itRes.ok) setInTransitByLot(await itRes.json())
       } catch { /* overlay is optional — never block the dashboard */ }
+      setLastLoadedAt(new Date())
     } catch (err) {
-      // Don't blank the screen with an error during a silent background refresh —
-      // keep the cached data and let the next refresh recover (matches inward/RTV).
+      // A background refresh must not blank the screen, but it must not vanish
+      // either: re-thrown so useLiveDashboard can flag that what is on screen is
+      // older than it looks. Silently keeping stale stock on display is how days
+      // -old figures were read as current.
       if (!showRefresh) setError(err instanceof Error ? err.message : "Failed to load dashboard")
+      throw err
     } finally {
       setLoading(false); setRefreshing(false)
     }
   }, [companyFilter])
 
-  // On mount: paint instantly from cache (if any), then revalidate in background.
+  // Live behaviour: poll while visible, refresh on return to the tab, on
+  // reconnect, and expose how stale the figures are.
+  const live = useLiveDashboard(() => fetchData(true), { intervalMs: 60_000 })
+
+  // On mount: paint instantly from a RECENT cache, then revalidate in background.
   useEffect(() => {
     const cached = readDashboardCache<any>(`cold-storage-dashboard:cache:v1:${companyFilter}`)
     if (cached?.payload?.s) {
@@ -372,9 +383,10 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
       setStockData(p.s); setAgeingData(p.a); setAgeingDaysData(p.ad); setConcentrationData(p.c); setTrendData(p.t); setRawLocations(p.l)
       setAttentionData(p.af); setSlowMovingData(p.sm); setRundownData(p.rd)
       setLoading(false)
-      fetchData(true)
+      setLastLoadedAt(new Date(cached.savedAt))
+      void live.refresh()
     } else {
-      fetchData(false)
+      fetchData(false).catch(() => { /* surfaced via setError above */ })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyFilter])
@@ -1259,9 +1271,13 @@ export default function ColdStorageDashboard({ params }: DashboardPageProps) {
               {downloadingMaster ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
               <span className="hidden sm:inline">Master Sheet</span>
             </Button>
-            <Button variant="outline" size="sm" className="h-8 gap-1 text-xs" onClick={() => fetchData(true)} disabled={refreshing}>
-              <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} /><span className="hidden sm:inline">Refresh</span>
-            </Button>
+            <DataFreshness
+              lastUpdated={live.lastUpdated ?? lastLoadedAt}
+              refreshing={refreshing || live.refreshing}
+              failed={live.refreshFailed}
+              error={live.refreshError}
+              onRefresh={() => { void live.refresh() }}
+            />
             <div className="relative" ref={snapshotPanelRef}>
               <Button variant="outline" size="sm" className="h-8 gap-1 text-xs" onClick={() => { setSnapshotLayerOpen(v => !v); setCopyLayerOpen(false) }} disabled={snapping}>
                 {snapping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Camera className="h-3.5 w-3.5" />}<span className="hidden sm:inline">{snapping ? "Capturing..." : "Snapshot"}</span>

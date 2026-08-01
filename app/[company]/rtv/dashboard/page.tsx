@@ -17,6 +17,8 @@ import { rtvApi } from "@/lib/api/rtvApiService"
 import type { RTVListItem, RTVWithDetails, RTVLine } from "@/types/rtv"
 import { makeRecordSearch, parseSearchTerms } from "@/lib/search/recordSearch"
 import { readDashboardCache, writeDashboardCache } from "@/lib/cache/dashboardCache"
+import { useLiveDashboard } from "@/lib/hooks/useLiveDashboard"
+import { DataFreshness } from "@/components/dashboard/DataFreshness"
 import { canonicalize, groupByCanonical } from "@/lib/customers/canonicalize"
 import { CUSTOMER_ALIASES } from "@/lib/constants/customerAliases"
 import { Switch } from "@/components/ui/switch"
@@ -120,6 +122,7 @@ export default function RTVDashboard({ params }: Props) {
   const [loading, setLoading] = useState(true)
   const [loadingDetails, setLoadingDetails] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+  const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const [dateFrom, setDateFrom] = useState("")
@@ -179,22 +182,30 @@ export default function RTVDashboard({ params }: Props) {
       setRows(enriched)
       writeDashboardCache(`rtv-dashboard:cache:v1:${company}`, { rows: enriched })
     } catch (err) {
+      // Re-thrown so a failed silent refresh is reported rather than leaving
+      // stale rows on screen looking current.
       if (!silent) setError(err instanceof Error ? err.message : "Failed to load RTV data")
+      throw err
     } finally {
       if (silent) setRefreshing(false)
       else { setLoading(false); setLoadingDetails(false) }
     }
   }, [company])
 
-  // On mount: paint instantly from cache (if any), then revalidate in background.
+  const live = useLiveDashboard(() => fetchData({ silent: true }), { intervalMs: 60_000 })
+
+  // On mount: paint instantly from a RECENT cache, then revalidate in background.
   useEffect(() => {
     const cached = readDashboardCache<{ rows: RTVRow[] }>(`rtv-dashboard:cache:v1:${company}`)
     if (cached?.payload?.rows?.length) {
       setRows(cached.payload.rows)
       setLoading(false)
-      fetchData({ silent: true })
+      setLastLoadedAt(new Date(cached.savedAt))
+      void live.refresh()
     } else {
       fetchData({ silent: false })
+        .then(() => live.markUpdated())
+        .catch(() => { /* surfaced via setError above */ })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [company])
@@ -476,9 +487,13 @@ export default function RTVDashboard({ params }: Props) {
           </div>
         </div>
         <div className="flex items-center gap-1.5 flex-wrap">
-          <Button variant="outline" size="sm" className="h-8 gap-1 text-xs" onClick={() => fetchData({ silent: true })}>
-            <RefreshCw className={cn("h-3.5 w-3.5", (loading || refreshing || loadingDetails) && "animate-spin")} /><span className="hidden sm:inline">Refresh</span>
-          </Button>
+          <DataFreshness
+            lastUpdated={live.lastUpdated ?? lastLoadedAt}
+            refreshing={loading || refreshing || loadingDetails || live.refreshing}
+            failed={live.refreshFailed}
+            error={live.refreshError}
+            onRefresh={() => { void live.refresh() }}
+          />
           <Button variant="outline" size="sm" className="h-8 gap-1 text-xs" onClick={handleCopy}>
             <Copy className="h-3.5 w-3.5" /><span className="hidden sm:inline">{copied ? "Copied!" : "Copy"}</span>
           </Button>

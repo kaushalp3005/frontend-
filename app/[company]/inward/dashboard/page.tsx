@@ -31,6 +31,8 @@ import { usePersistedState, setSerializers } from "@/lib/hooks/usePersistedState
 import { getDisplayWarehouseName, isColdWarehouse, normalizeWarehouseName } from "@/lib/constants/warehouses"
 import { makeRecordSearch, parseSearchTerms } from "@/lib/search/recordSearch"
 import { readDashboardCache, writeDashboardCache } from "@/lib/cache/dashboardCache"
+import { useLiveDashboard } from "@/lib/hooks/useLiveDashboard"
+import { DataFreshness } from "@/components/dashboard/DataFreshness"
 
 interface Props { params: { company: string } }
 
@@ -101,6 +103,7 @@ export default function InwardDashboard({ params }: Props) {
   const [filterOpts, setFilterOpts] = useState<FilterOptions | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   // Filters (client-side — no refetch). Persisted to sessionStorage so
@@ -167,22 +170,30 @@ export default function InwardDashboard({ params }: Props) {
       applyData(data.records || [], fopts)
       writeDashboardCache(`inward-dashboard:cache:v1:${company}`, { records: data.records || [], filterOptions: fopts })
     } catch (err) {
+      // Re-thrown so a failed silent refresh is reported rather than leaving
+      // stale rows on screen looking current.
       if (!silent) setError(err instanceof Error ? err.message : "Failed to load")
+      throw err
     } finally {
       if (silent) setRefreshing(false)
       else setLoading(false)
     }
   }, [company, applyData])
 
-  // On mount: paint instantly from cache (if any), then revalidate in background.
+  const live = useLiveDashboard(() => fetchData({ silent: true }), { intervalMs: 60_000 })
+
+  // On mount: paint instantly from a RECENT cache, then revalidate in background.
   useEffect(() => {
     const cached = readDashboardCache<{ records: InwardRecord[]; filterOptions: FilterOptions | null }>(`inward-dashboard:cache:v1:${company}`)
     if (cached?.payload?.records?.length) {
       applyData(cached.payload.records, cached.payload.filterOptions)
       setLoading(false)
-      fetchData({ silent: true })
+      setLastLoadedAt(new Date(cached.savedAt))
+      void live.refresh()
     } else {
       fetchData({ silent: false })
+        .then(() => live.markUpdated())
+        .catch(() => { /* surfaced via setError above */ })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [company])
@@ -540,9 +551,13 @@ export default function InwardDashboard({ params }: Props) {
             </div>
           </div>
           <div className="flex items-center gap-1.5 flex-wrap">
-            <Button variant="outline" size="sm" className="h-8 gap-1 text-xs" onClick={() => fetchData({ silent: true })}>
-              <RefreshCw className={cn("h-3.5 w-3.5", (loading || refreshing) && "animate-spin")} /><span className="hidden sm:inline">Refresh</span>
-            </Button>
+            <DataFreshness
+              lastUpdated={live.lastUpdated ?? lastLoadedAt}
+              refreshing={loading || refreshing || live.refreshing}
+              failed={live.refreshFailed}
+              error={live.refreshError}
+              onRefresh={() => { void live.refresh() }}
+            />
             <Button variant="outline" size="sm" className="h-8 gap-1 text-xs" onClick={handleCopy}>
               <Copy className="h-3.5 w-3.5" /><span className="hidden sm:inline">{copied ? "Copied!" : "Copy"}</span>
             </Button>
