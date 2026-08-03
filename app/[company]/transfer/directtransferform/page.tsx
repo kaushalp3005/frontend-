@@ -439,12 +439,15 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     loadedItems: { value: loadedItems, setter: setLoadedItems },
   })
 
-  // Always reset requestDate to today on mount — localStorage restore may have cached an old date
+  // Always reset requestDate to today on mount — localStorage restore may have cached an old date.
+  // Same for the transfer number: a restored draft carries the number minted when the draft was
+  // started (yesterday's TRANS<yyyymmddhhmm>), which is already taken by the transfer saved then.
   useEffect(() => {
     if (!isEditMode) {
       const now = new Date()
       const today = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}`
       setFormData(prev => ({ ...prev, requestDate: today }))
+      setTransferNo(generateTransferNo())
     }
   }, [])
 
@@ -2051,7 +2054,9 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         response = await InterunitApiService.submitTransfer(company, payload, user?.name || user?.email || 'unknown')
         toast({
           title: "Transfer Submitted Successfully",
-          description: `Transfer ${payload.header.challan_no} has been created successfully`,
+          // Show the challan the SERVER stored — it re-mints the number when the
+          // form's client-side one is already taken (stale draft / same-minute submit).
+          description: `Transfer ${response?.challan_no || payload.header.challan_no} has been created successfully`,
         })
       }
 

@@ -5,7 +5,8 @@
 // than "0" when there is nothing to sum, preserving the screens' existing presentation.
 
 export interface BoxLike {
-  article_description: string
+  line_number?: number
+  article_description?: string
   net_weight?: string | number | null
   gross_weight?: string | number | null
 }
@@ -19,11 +20,17 @@ export interface ArticleAggregates {
 const toNum = (v: string | number | null | undefined): number =>
   parseFloat(String(v ?? '')) || 0
 
+// `match` selects the article's boxes: a number matches by line_number (the stable
+// per-article identity, so same-name articles stay separate); a string matches by
+// article_description (legacy callers / tests).
 export function computeArticleAggregatesFromBoxes(
   boxes: BoxLike[],
-  articleDescription: string,
+  match: number | string,
 ): ArticleAggregates {
-  const articleBoxes = boxes.filter((b) => b.article_description === articleDescription)
+  const articleBoxes =
+    typeof match === "number"
+      ? boxes.filter((b) => b.line_number === match)
+      : boxes.filter((b) => b.article_description === match)
   const totalNet = articleBoxes.reduce((sum, b) => sum + toNum(b.net_weight), 0)
   const totalGross = articleBoxes.reduce((sum, b) => sum + toNum(b.gross_weight), 0)
   const boxCount = articleBoxes.length

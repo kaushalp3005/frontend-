@@ -321,13 +321,16 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
           approval_authority: approvalAuthority || undefined,
           remark: remark || undefined,
         },
-        articles: articleForms.map((a) => ({
+        articles: articleForms.map((a, aIdx) => ({
           transaction_no: txnNo,
+          line_number: aIdx + 1,
           item_description: a.item_description,
-          sku_id: articles.find((ar) => ar.item_description === a.item_description)?.sku_id ?? undefined,
-          item_category: articles.find((ar) => ar.item_description === a.item_description)?.item_category,
-          sub_category: articles.find((ar) => ar.item_description === a.item_description)?.sub_category,
-          material_type: articles.find((ar) => ar.item_description === a.item_description)?.material_type,
+          // articles[] and articleForms[] are parallel arrays — index by position, not by
+          // description, so two same-name articles keep their own SKU/line identity.
+          sku_id: articles[aIdx]?.sku_id ?? undefined,
+          item_category: articles[aIdx]?.item_category,
+          sub_category: articles[aIdx]?.sub_category,
+          material_type: articles[aIdx]?.material_type,
           quality_grade: a.quality_grade || undefined,
           uom: a.uom || undefined,
           po_quantity: r3(a.po_quantity),
@@ -356,6 +359,7 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
             const boxNum = i + 1
             const rangeMatch = ranges.find((r) => boxNum >= r.from && boxNum <= r.to)
             return {
+              line_number: aIdx + 1,
               article_description: a.item_description,
               box_number: boxNum,
               net_weight: r3(a.box_net_weight),
@@ -620,11 +624,15 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
     setAddingBoxes(true)
     try {
       const existingMaxBox = Math.max(...articleGroup.boxes.map((b) => b.box_number), 0)
+      // Use the article group's stable line_number so added boxes attach to THIS article,
+      // even if another article shares its name.
+      const line = articleGroup.line_number ?? (articleIdx + 1)
       const newBoxes: BulkStickerBox[] = []
 
       for (let i = 0; i < qty; i++) {
         const boxNumber = existingMaxBox + i + 1
         const res = await inwardApiService.upsertBox(company as Company, result.transaction_no, {
+          line_number: line,
           article_description: articleGroup.article_description,
           box_number: boxNumber,
           net_weight: r3(addMoreNetWeight),
@@ -632,6 +640,7 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
         })
         newBoxes.push({
           box_number: boxNumber,
+          line_number: line,
           box_id: res.box_id,
           article_description: articleGroup.article_description,
           net_weight: r3(addMoreNetWeight),
@@ -682,7 +691,11 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
     setPrintingAll(true)
     try {
       const allBoxes = result.articles_with_boxes.flatMap((articleGroup) => {
-        const af = articleForms.find((a) => a.item_description === articleGroup.article_description)
+        // articleForms index === submit position === line_number − 1, so map by line to
+        // pick the correct form even when two articles share a name (fall back to name).
+        const line = articleGroup.line_number
+        const af = (line != null ? articleForms[line - 1] : undefined)
+          ?? articleForms.find((a) => a.item_description === articleGroup.article_description)
         return articleGroup.boxes.map((box) => ({
           ...box,
           expiry_date: af?.expiry_date,
@@ -702,7 +715,9 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
 
   const handlePrintArticle = async (articleGroup: BulkStickerArticleResponse) => {
     if (!result) return
-    const af = articleForms.find((a) => a.item_description === articleGroup.article_description)
+    const line = articleGroup.line_number
+    const af = (line != null ? articleForms[line - 1] : undefined)
+      ?? articleForms.find((a) => a.item_description === articleGroup.article_description)
     const boxes = articleGroup.boxes.map((box) => ({
       ...box,
       expiry_date: af?.expiry_date,
@@ -786,7 +801,10 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
               </CardHeader>
               <CardContent className="px-3 sm:px-6">
                 {(() => {
-                  const artPage = getBoxPage(articleGroup.article_description)
+                  // Page/highlight state keyed by the group's line_number so two same-name
+                  // article groups paginate independently.
+                  const groupKey = String(articleGroup.line_number ?? aIdx)
+                  const artPage = getBoxPage(groupKey)
                   const artTotalPages = Math.max(1, Math.ceil(articleGroup.boxes.length / BOX_PAGE_SIZE))
                   const pageStart = (artPage - 1) * BOX_PAGE_SIZE
                   const pageBoxes = articleGroup.boxes.slice(pageStart, pageStart + BOX_PAGE_SIZE)
@@ -795,13 +813,13 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
                   boxCount={articleGroup.boxes.length}
                   currentPage={artPage}
                   totalPages={artTotalPages}
-                  onPageChange={(page) => setBoxPage(articleGroup.article_description, page)}
+                  onPageChange={(page) => setBoxPage(groupKey, page)}
                   onNavigate={(boxNum) => {
                     const targetPage = Math.ceil(boxNum / BOX_PAGE_SIZE)
-                    setBoxPage(articleGroup.article_description, targetPage)
-                    setHighlightBoxMap((prev) => ({ ...prev, [articleGroup.article_description]: { boxNumber: boxNum, key: Date.now() } }))
+                    setBoxPage(groupKey, targetPage)
+                    setHighlightBoxMap((prev) => ({ ...prev, [groupKey]: { boxNumber: boxNum, key: Date.now() } }))
                   }}
-                  highlightBox={highlightBoxMap[articleGroup.article_description] ?? null}
+                  highlightBox={highlightBoxMap[groupKey] ?? null}
                   boxForms={articleGroup.boxes.map((b) => ({ box_number: b.box_number, lot_number: b.lot_number, article_description: b.article_description }))}
                 >
                   {(registerRef) => pageBoxes.map((box) => (
@@ -833,7 +851,8 @@ export default function BulkStickerPage({ params }: BulkStickerPageProps) {
                           size="sm"
                           className="h-7 w-7 p-0"
                           onClick={() => {
-                            const af = articleForms.find((a) => a.item_description === box.article_description)
+                            const af = (box.line_number != null ? articleForms[box.line_number - 1] : undefined)
+                              ?? articleForms.find((a) => a.item_description === box.article_description)
                             printSingleBox(
                               result.transaction_no, box.box_id, box.box_number,
                               box.article_description, box.net_weight, box.gross_weight,

@@ -445,6 +445,20 @@ export default function BulkEntryDetailPage({ params }: BulkEntryDetailPageProps
               variant="outline"
               size="sm"
               className="gap-1.5 h-8 text-xs sm:text-sm"
+              onClick={() => printSelectedBoxes(data.boxes.filter((b) => b.box_id))}
+              disabled={printingAll || !data.boxes.length}
+            >
+              {printingAll ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Printer className="h-3.5 w-3.5" />
+              )}
+              Print All ({allBoxIds.size})
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5 h-8 text-xs sm:text-sm"
               onClick={openPrintDialog}
               disabled={printingAll || !data.boxes.length}
             >

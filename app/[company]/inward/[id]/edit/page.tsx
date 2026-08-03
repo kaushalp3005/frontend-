@@ -32,6 +32,9 @@ interface EditInwardPageProps {
 
 // Cold per-article fields are edit-page-only (kept off the shared ArticleEditor).
 type ArticleEdit = ArticleFields & {
+  // Stable per-article identity (1-based). Boxes are grouped to their article by
+  // line_number, not by item_description, so same-name articles stay separate.
+  line_number?: number
   item_mark?: string
   spl_remarks?: string
   vakkal?: string
@@ -65,15 +68,16 @@ export default function EditInwardPage({ params }: EditInwardPageProps) {
   // Articles
   const [articles, setArticles] = useState<ArticleEdit[]>([])
 
-  // Existing boxes from backend (preserved on save)
+  // Existing boxes from backend (preserved on save). line_number carries the box's
+  // parent-article identity so boxes are grouped by line, never by description.
   const [existingBoxes, setExistingBoxes] = useState<Array<{
-    transaction_no: string; article_description: string; box_number: number;
+    transaction_no: string; line_number?: number; article_description: string; box_number: number;
     net_weight?: number; gross_weight?: number; lot_number?: string; count?: number;
     box_id?: string;
   }>>([])
 
-  // Bulk add boxes
-  const [bulkAddArticle, setBulkAddArticle] = useState<string | null>(null)
+  // Bulk add boxes — tracked by article line_number so same-name articles toggle independently
+  const [bulkAddArticle, setBulkAddArticle] = useState<number | null>(null)
   const [bulkAddQty, setBulkAddQty] = useState("")
   const [bulkAddNetWeight, setBulkAddNetWeight] = useState("")
   const [bulkAddGrossWeight, setBulkAddGrossWeight] = useState("")
@@ -84,9 +88,9 @@ export default function EditInwardPage({ params }: EditInwardPageProps) {
   const BOX_PAGE_SIZE = 200
   const [boxPageMap, setBoxPageMap] = useState<Record<string, number>>({})
   const [highlightBoxMap, setHighlightBoxMap] = useState<Record<string, { boxNumber: number; key: number } | null>>({})
-  const getBoxPage = (articleDesc: string) => boxPageMap[articleDesc] ?? 1
-  const setBoxPage = (articleDesc: string, page: number) =>
-    setBoxPageMap((prev) => ({ ...prev, [articleDesc]: page }))
+  const getBoxPage = (line: number) => boxPageMap[String(line)] ?? 1
+  const setBoxPage = (line: number, page: number) =>
+    setBoxPageMap((prev) => ({ ...prev, [String(line)]: page }))
 
   // Submit
   const [saving, setSaving] = useState(false)
@@ -134,7 +138,8 @@ export default function EditInwardPage({ params }: EditInwardPageProps) {
         })
 
         setArticles(
-          detail.articles.map((a) => ({
+          detail.articles.map((a, idx) => ({
+            line_number: a.line_number ?? (idx + 1),
             item_description: a.item_description,
             po_weight: a.po_weight,
             sku_id: a.sku_id,
@@ -153,6 +158,7 @@ export default function EditInwardPage({ params }: EditInwardPageProps) {
         setExistingBoxes(
           detail.boxes.map((b) => ({
             transaction_no: transactionNo,
+            line_number: b.line_number,
             article_description: b.article_description,
             box_number: b.box_number,
             net_weight: b.net_weight,
@@ -210,8 +216,9 @@ export default function EditInwardPage({ params }: EditInwardPageProps) {
           po_quantity: poQuantity ? parseFloat(poQuantity) : originalValues.po_quantity || undefined,
           currency: currency || originalValues.currency || undefined,
         },
-        articles: articles.map((a) => ({
+        articles: articles.map((a, idx) => ({
           transaction_no: transactionNo,
+          line_number: a.line_number ?? (idx + 1),
           item_description: a.item_description,
           po_weight: a.po_weight,
           sku_id: a.sku_id ?? undefined,
@@ -229,14 +236,26 @@ export default function EditInwardPage({ params }: EditInwardPageProps) {
           } : {}),
         })) as any,
         boxes: (() => {
-          // Keep existing boxes, add a default box for any new article without boxes
-          const articleDescs = new Set(articles.map((a) => a.item_description))
-          const kept = existingBoxes.filter((b) => articleDescs.has(b.article_description))
-          const articlesWithBoxes = new Set(kept.map((b) => b.article_description))
+          // Send EVERY existing box (never drop — orphan boxes whose article was renamed
+          // or removed are preserved), carrying its line_number through. Then add one
+          // default box for any article that has no boxes yet, tagged with the article's line.
+          const kept = existingBoxes.map((b) => ({
+            transaction_no: b.transaction_no,
+            line_number: b.line_number,
+            article_description: b.article_description,
+            box_number: b.box_number,
+            net_weight: b.net_weight,
+            gross_weight: b.gross_weight,
+            lot_number: b.lot_number,
+            count: b.count,
+          }))
+          const linesWithBoxes = new Set(kept.map((b) => b.line_number))
           const newDefaults = articles
-            .filter((a) => !articlesWithBoxes.has(a.item_description))
-            .map((a) => ({
+            .map((a, idx) => ({ a, line: a.line_number ?? (idx + 1) }))
+            .filter(({ line }) => !linesWithBoxes.has(line))
+            .map(({ a, line }) => ({
               transaction_no: transactionNo,
+              line_number: line,
               article_description: a.item_description,
               box_number: 1,
             }))
@@ -259,10 +278,14 @@ export default function EditInwardPage({ params }: EditInwardPageProps) {
   }
 
   const addArticle = () => {
-    setArticles((prev) => [
-      ...prev,
-      { item_description: "" },
-    ])
+    setArticles((prev) => {
+      // Assign a fresh line_number above every existing article AND box line so a new
+      // article never collides with a loaded article's (or orphan box's) identity.
+      const maxArticleLine = prev.reduce((m, a) => Math.max(m, a.line_number ?? 0), 0)
+      const maxBoxLine = existingBoxes.reduce((m, b) => Math.max(m, b.line_number ?? 0), 0)
+      const nextLine = Math.max(maxArticleLine, maxBoxLine) + 1
+      return [...prev, { item_description: "", line_number: nextLine }]
+    })
   }
 
   const updateArticle = (index: number, field: keyof ArticleEdit, value: any) => {
@@ -376,13 +399,13 @@ export default function EditInwardPage({ params }: EditInwardPageProps) {
     }, 10000)
   }
 
-  const handleBulkAddBoxes = async (articleDescription: string) => {
+  const handleBulkAddBoxes = async (articleDescription: string, line: number) => {
     const qty = parseInt(bulkAddQty) || 0
     if (qty < 1) return
 
     setAddingBulkBoxes(true)
     try {
-      const articleBoxes = existingBoxes.filter((b) => b.article_description === articleDescription)
+      const articleBoxes = existingBoxes.filter((b) => b.line_number === line)
       const startNum = articleBoxes.length > 0
         ? Math.max(...articleBoxes.map((b) => b.box_number)) + 1
         : 1
@@ -394,12 +417,14 @@ export default function EditInwardPage({ params }: EditInwardPageProps) {
       const upsertPromises = Array.from({ length: qty }, (_, i) => {
         const boxNumber = startNum + i
         return inwardApiService.upsertBox(company, transactionNo, {
+          line_number: line,
           article_description: articleDescription,
           box_number: boxNumber,
           net_weight: netWt,
           gross_weight: grossWt,
         }).then((res) => ({
           transaction_no: transactionNo,
+          line_number: line,
           article_description: articleDescription,
           box_number: boxNumber,
           net_weight: netWt,
@@ -629,8 +654,9 @@ export default function EditInwardPage({ params }: EditInwardPageProps) {
           </CardHeader>
           <CardContent className="space-y-3 px-3 sm:px-6">
             {articles.map((article, aIdx) => {
+              const line = article.line_number ?? (aIdx + 1)
               const articleBoxes = existingBoxes
-                .filter((b) => b.article_description === article.item_description)
+                .filter((b) => b.line_number === line)
                 .sort((a, b) => a.box_number - b.box_number)
               return (
                 <div key={aIdx} className="p-3 border rounded-lg space-y-2">
@@ -644,10 +670,10 @@ export default function EditInwardPage({ params }: EditInwardPageProps) {
                       size="sm"
                       className="h-7 text-xs gap-1 flex-shrink-0"
                       onClick={() => {
-                        if (bulkAddArticle === article.item_description) {
+                        if (bulkAddArticle === line) {
                           setBulkAddArticle(null)
                         } else {
-                          setBulkAddArticle(article.item_description)
+                          setBulkAddArticle(line)
                           setBulkAddQty("")
                           setBulkAddNetWeight("")
                           setBulkAddGrossWeight("")
@@ -660,7 +686,7 @@ export default function EditInwardPage({ params }: EditInwardPageProps) {
 
                   {/* Existing boxes summary */}
                   {articleBoxes.length > 0 && (() => {
-                    const artPage = getBoxPage(article.item_description)
+                    const artPage = getBoxPage(line)
                     const artTotalPages = Math.max(1, Math.ceil(articleBoxes.length / BOX_PAGE_SIZE))
                     const pageStart = (artPage - 1) * BOX_PAGE_SIZE
                     const pageBoxes = articleBoxes.slice(pageStart, pageStart + BOX_PAGE_SIZE)
@@ -669,18 +695,18 @@ export default function EditInwardPage({ params }: EditInwardPageProps) {
                       boxCount={articleBoxes.length}
                       currentPage={artPage}
                       totalPages={artTotalPages}
-                      onPageChange={(page) => setBoxPage(article.item_description, page)}
+                      onPageChange={(page) => setBoxPage(line, page)}
                       onNavigate={(boxNum) => {
                         const targetPage = Math.ceil(boxNum / BOX_PAGE_SIZE)
-                        setBoxPage(article.item_description, targetPage)
-                        setHighlightBoxMap((prev) => ({ ...prev, [article.item_description]: { boxNumber: boxNum, key: Date.now() } }))
+                        setBoxPage(line, targetPage)
+                        setHighlightBoxMap((prev) => ({ ...prev, [String(line)]: { boxNumber: boxNum, key: Date.now() } }))
                       }}
-                      highlightBox={highlightBoxMap[article.item_description] ?? null}
+                      highlightBox={highlightBoxMap[String(line)] ?? null}
                       boxForms={articleBoxes.map((b) => ({ box_number: b.box_number, lot_number: b.lot_number, article_description: b.article_description }))}
                     >
                       {(registerRef) => pageBoxes.map((box) => (
                         <span
-                          key={`${box.article_description}-${box.box_number}`}
+                          key={`${box.line_number}-${box.box_number}`}
                           ref={(el) => registerRef(box.box_number, el)}
                         >
                           <Badge variant="outline" className="text-[10px] gap-1">
@@ -695,7 +721,7 @@ export default function EditInwardPage({ params }: EditInwardPageProps) {
                   })()}
 
                   {/* Bulk Add Form */}
-                  {bulkAddArticle === article.item_description && (
+                  {bulkAddArticle === line && (
                     <div className="p-2.5 rounded-lg border bg-blue-50/50 space-y-2">
                       <p className="text-[11px] font-semibold text-muted-foreground">Bulk Add Boxes</p>
                       <div className="grid grid-cols-3 gap-2">
@@ -737,7 +763,7 @@ export default function EditInwardPage({ params }: EditInwardPageProps) {
                         <Button
                           size="sm"
                           className="h-7 text-xs gap-1"
-                          onClick={() => handleBulkAddBoxes(article.item_description)}
+                          onClick={() => handleBulkAddBoxes(article.item_description, line)}
                           disabled={addingBulkBoxes || !bulkAddQty || parseInt(bulkAddQty) < 1}
                         >
                           {addingBulkBoxes ? <Loader2 className="h-3 w-3 animate-spin" /> : <Printer className="h-3 w-3" />}

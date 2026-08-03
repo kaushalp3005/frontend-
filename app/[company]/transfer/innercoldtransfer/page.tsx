@@ -138,7 +138,7 @@ function ColdStorageStockSearch({
           {/* Mobile card list */}
           <div className="md:hidden max-h-[350px] overflow-y-auto divide-y">
             {results.map((record, idx) => (
-              <div key={record.id} className="p-3 space-y-2 bg-white">
+              <div key={record.pile_key || `${record.company}-${record.id}`} className="p-3 space-y-2 bg-white">
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{record.item_description || "-"}</p>
@@ -177,7 +177,7 @@ function ColdStorageStockSearch({
               </thead>
               <tbody>
                 {results.map((record, idx) => (
-                  <tr key={record.id} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}>
+                  <tr key={record.pile_key || `${record.company}-${record.id}`} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}>
                     <td className="px-3 py-2 text-gray-600">{idx + 1}</td>
                     <td className="px-3 py-2 whitespace-nowrap">{record.inward_dt || "-"}</td>
                     <td className="px-3 py-2">{record.unit || "-"}</td>

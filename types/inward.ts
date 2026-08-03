@@ -49,6 +49,9 @@ export interface TransactionV2 {
 export interface ArticleV2 {
   id?: number
   transaction_no?: string
+  // Stable per-transaction article identity (1-based). Distinguishes two articles with
+  // the same item_description but different grade/rate. See boxes' line_number.
+  line_number?: number
   // PO Extract fields
   item_description: string
   po_weight?: number
@@ -80,6 +83,9 @@ export interface ArticleV2 {
 export interface BoxV2 {
   id?: number
   transaction_no?: string
+  // Identifies the parent article by its line_number (not by name). Boxes are grouped
+  // to articles by this so same-name articles keep separate boxes/box IDs.
+  line_number?: number
   article_description: string
   box_number: number
   net_weight?: number
@@ -93,6 +99,7 @@ export interface BoxV2 {
 // ─── Box Upsert + Edit Log Types ───────────────────────────
 
 export interface BoxUpsertPayload {
+  line_number?: number
   article_description: string
   box_number: number
   net_weight?: number
@@ -105,6 +112,7 @@ export interface BoxUpsertResponse {
   status: "inserted" | "updated"
   box_id: string
   transaction_no: string
+  line_number?: number
   article_description: string
   box_number: number
 }
@@ -204,6 +212,7 @@ export interface CreateInwardPayload {
   }
   articles: Array<{
     transaction_no: string
+    line_number?: number
     item_description: string
     po_weight?: number
     sku_id?: number
@@ -216,6 +225,7 @@ export interface CreateInwardPayload {
   }>
   boxes: Array<{
     transaction_no: string
+    line_number?: number
     article_description: string
     box_number: number
     net_weight?: number
@@ -246,6 +256,7 @@ export interface ApprovePayload {
     rtv?: boolean
   }
   articles: Array<{
+    line_number?: number
     item_description: string
     quality_grade?: string
     uom?: string
@@ -265,6 +276,7 @@ export interface ApprovePayload {
     vakkal?: string
   }>
   boxes: Array<{
+    line_number?: number
     article_description: string
     box_number: number
     net_weight?: number
@@ -278,6 +290,7 @@ export interface ApprovePayload {
 // POST /inward/bulk-sticker — Bulk sticker creation
 export interface BulkStickerArticle {
   transaction_no: string
+  line_number?: number
   item_description: string
   sku_id?: number
   item_category?: string
@@ -324,6 +337,7 @@ export interface BulkStickerPayload {
   }
   articles: BulkStickerArticle[]
   boxes: Array<{
+    line_number?: number
     article_description: string
     box_number: number
     net_weight?: number
@@ -334,6 +348,7 @@ export interface BulkStickerPayload {
 
 export interface BulkStickerBox {
   box_number: number
+  line_number?: number
   box_id: string
   article_description: string
   net_weight?: number
@@ -342,6 +357,7 @@ export interface BulkStickerBox {
 }
 
 export interface BulkStickerArticleResponse {
+  line_number?: number
   article_description: string
   box_ids: string[]
   boxes: BulkStickerBox[]

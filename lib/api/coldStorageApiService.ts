@@ -50,6 +50,11 @@ async function handleResponse<T>(response: Response): Promise<T> {
 // ── Cold Storage Stock Record (from /cold-storage/stocks/search) ──
 export interface ColdStorageStockRecord {
   id: number
+  // Opaque unique identity of this pile (item+lot+inward+mark+site+unit+inward date).
+  // Two rows in one search result NEVER share it, so it is the correct row key, the
+  // correct "already added?" key, and the correct pick-boxes selector. Older backends
+  // omit it — callers must fall back to (item, lot, inward_no).
+  pile_key?: string | null
   inward_dt: string | null
   unit: string | null
   inward_no: string | null
@@ -92,6 +97,10 @@ export const ColdStorageApiService = {
     lot_no: string
     inward_no: string
     qty: number
+    // Send the selected row's pile_key. Without it the backend cannot tell two
+    // same-lot piles apart (different inward date / unit / site / mark) and returns
+    // the FIRST pile's boxes for both.
+    pile_key?: string | null
   }): Promise<{ boxes: { id: number; box_id: string; transaction_no: string; weight_kg: number }[] }> {
     const sp = new URLSearchParams({
       company: params.company,
@@ -100,6 +109,7 @@ export const ColdStorageApiService = {
       inward_no: params.inward_no,
       qty: String(params.qty),
     })
+    if (params.pile_key) sp.set("pile_key", params.pile_key)
     const response = await fetch(`${API_URL}/cold-storage/stocks/pick-boxes?${sp.toString()}`, {
       method: "GET",
       headers: getAuthHeaders(),

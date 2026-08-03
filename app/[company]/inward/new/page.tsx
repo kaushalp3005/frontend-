@@ -124,6 +124,10 @@ interface ArticleApprovalForm {
 }
 
 interface BoxForm {
+  // Stable identity of the parent article within this transaction (1-based). Boxes are
+  // grouped/filtered by line_number — NOT by article_description — so two articles with
+  // the same name (different grade/rate) keep separate boxes and box IDs.
+  line_number: number
   article_description: string
   box_number: number
   net_weight: string
@@ -216,11 +220,12 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
   // Per-article box pagination — only render a window of boxes at a time so large
   // entries (e.g. 1000+ boxes) don't render thousands of inputs and freeze/crash.
   const BOX_PAGE_SIZE = 200
+  // Keyed by article line_number (as string) so same-name articles page independently.
   const [boxPageMap, setBoxPageMap] = useState<Record<string, number>>({})
   const [highlightBoxMap, setHighlightBoxMap] = useState<Record<string, { boxNumber: number; key: number } | null>>({})
-  const getBoxPage = (articleDesc: string) => boxPageMap[articleDesc] ?? 1
-  const setBoxPage = (articleDesc: string, page: number) =>
-    setBoxPageMap((prev) => ({ ...prev, [articleDesc]: page }))
+  const getBoxPage = (line: number) => boxPageMap[String(line)] ?? 1
+  const setBoxPage = (line: number, page: number) =>
+    setBoxPageMap((prev) => ({ ...prev, [String(line)]: page }))
 
   // Box delete confirmation, edit tracking, printing
   const [deleteBoxIdx, setDeleteBoxIdx] = useState<number | null>(null)
@@ -537,6 +542,7 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
         const approvalForm = articleApprovalForms[idx]
         return {
           transaction_no: txnNo,
+          line_number: idx + 1,
           item_description: a.item_description,
           po_weight: a.po_weight,
           sku_id: a.sku_id ?? undefined,
@@ -556,6 +562,7 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
         const count = parseInt(approvalForm?.box_count) || 1
         return Array.from({ length: count }, (_, i) => ({
           transaction_no: txnNo,
+          line_number: idx + 1,
           article_description: a.item_description,
           box_number: i + 1,
           net_weight: r3(approvalForm?.box_net_weight),
@@ -599,7 +606,8 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
             service: isServiceOrder,
             rtv: isRtv,
           },
-          articles: articleApprovalForms.map((a) => ({
+          articles: articleApprovalForms.map((a, idx) => ({
+            line_number: idx + 1,
             item_description: a.item_description,
             quality_grade: a.quality_grade || undefined,
             uom: a.uom || undefined,
@@ -624,6 +632,7 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
             } : {}),
           })),
           boxes: boxForms.map((b) => ({
+            line_number: b.line_number,
             article_description: b.article_description,
             box_number: b.box_number,
             net_weight: r3(b.net_weight),
@@ -705,8 +714,9 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
             invoice_number: invoiceNumber || undefined,
             grn_number: grnNumber || undefined,
           },
-          articles: po.articles.map((a) => ({
+          articles: po.articles.map((a, idx) => ({
             transaction_no: txnNo,
+            line_number: idx + 1,
             item_description: a.item_description,
             po_weight: a.po_weight,
             sku_id: a.sku_id ?? undefined,
@@ -716,10 +726,11 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
             unit_rate: a.unit_rate,
             total_amount: a.total_amount,
           })),
-          boxes: po.articles.flatMap((a) => {
+          boxes: po.articles.flatMap((a, idx) => {
             const count = 1
             return Array.from({ length: count }, (_, i) => ({
               transaction_no: txnNo,
+              line_number: idx + 1,
               article_description: a.item_description,
               box_number: i + 1,
             }))
@@ -751,13 +762,17 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
   }
 
   const removeArticle = (index: number) => {
-    const removedDesc = articles[index]?.item_description
+    // line_number is the article's 1-based position. Removing article at `index`
+    // (line index+1) drops its boxes, then shifts every higher line down by one so the
+    // invariant line_number === (array index + 1) holds for the remaining articles.
+    const removedLine = index + 1
     setArticles((prev) => prev.filter((_, i) => i !== index))
     setArticleApprovalForms((prev) => prev.filter((_, i) => i !== index))
-    if (removedDesc) {
-      const newBoxes = boxForms.filter((b) => b.article_description !== removedDesc)
-      setBoxForms(newBoxes)
-    }
+    setBoxForms((prev) =>
+      prev
+        .filter((b) => b.line_number !== removedLine)
+        .map((b) => (b.line_number > removedLine ? { ...b, line_number: b.line_number - 1 } : b))
+    )
   }
 
   const addArticle = () => {
@@ -795,17 +810,16 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
   const updateArticle = (index: number, field: keyof ArticleFields, value: any) => {
     setArticles((prev) => {
       const updated = prev.map((a, i) => (i === index ? { ...a, [field]: value } : a))
-      // Sync item_description to approval forms
+      // Sync item_description to approval forms + this line's boxes (display only —
+      // identity is line_number, so a rename never re-links boxes).
       if (field === "item_description") {
-        const oldDesc = prev[index]?.item_description
+        const line = index + 1
         setArticleApprovalForms((af) =>
           af.map((a, i) => (i === index ? { ...a, item_description: String(value) } : a))
         )
-        if (oldDesc) {
-          setBoxForms((bf) =>
-            bf.map((b) => b.article_description === oldDesc ? { ...b, article_description: String(value) } : b)
-          )
-        }
+        setBoxForms((bf) =>
+          bf.map((b) => (b.line_number === line ? { ...b, article_description: String(value) } : b))
+        )
       }
       // Sync unit_rate and total_amount to approval forms
       if (field === "unit_rate" || field === "total_amount") {
@@ -823,13 +837,12 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
       prev.map((a, i) => (i === idx ? { ...a, [field]: value } : a))
     )
 
-    const articleDesc = articleApprovalForms[idx]?.item_description
-    if (!articleDesc) return
+    const line = idx + 1  // this article's stable identity
 
     // Propagate lot_number to all boxes of this article
     if (field === "lot_number") {
       setBoxForms((prev) =>
-        prev.map((b) => b.article_description === articleDesc ? { ...b, lot_number: value } : b)
+        prev.map((b) => b.line_number === line ? { ...b, lot_number: value } : b)
       )
     }
 
@@ -837,7 +850,7 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
     if (field === "carton_weight") {
       const carton = parseFloat(value) || 0
       const newBoxes = boxForms.map((b) => {
-        if (b.article_description !== articleDesc) return b
+        if (b.line_number !== line) return b
         const gross = parseFloat(b.gross_weight) || 0
         if (carton > 0 && gross > 0) {
           const net = Math.max(0, gross - carton)
@@ -846,14 +859,14 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
         return b
       })
       setBoxForms(newBoxes)
-      recomputeArticleFromBoxes(newBoxes, articleDesc)
+      recomputeArticleFromBoxes(newBoxes, line)
     }
   }
 
-  const recomputeArticleFromBoxes = (boxes: BoxForm[], articleDesc: string) => {
-    const agg = computeArticleAggregatesFromBoxes(boxes, articleDesc)
+  const recomputeArticleFromBoxes = (boxes: BoxForm[], line: number) => {
+    const agg = computeArticleAggregatesFromBoxes(boxes, line)
     setArticleApprovalForms((prev) =>
-      prev.map((a) => (a.item_description === articleDesc ? { ...a, ...agg } : a))
+      prev.map((a, i) => (i === line - 1 ? { ...a, ...agg } : a))
     )
   }
 
@@ -863,15 +876,15 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
     if (value !== "" && (isNaN(parsed) || parsed < 0)) return
     const desired = value === "" ? 0 : parsed
 
-    const articleDesc = articleApprovalForms[articleIdx]?.item_description
-    if (!articleDesc) return
+    const line = articleIdx + 1
+    const articleDesc = articleApprovalForms[articleIdx]?.item_description ?? ""
 
     // Update the field directly
     setArticleApprovalForms((prev) =>
       prev.map((a, i) => (i === articleIdx ? { ...a, quantity_units: value } : a))
     )
 
-    const currentBoxes = boxForms.filter((b) => b.article_description === articleDesc)
+    const currentBoxes = boxForms.filter((b) => b.line_number === line)
     const currentCount = currentBoxes.length
 
     if (desired > currentCount) {
@@ -880,6 +893,7 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
       const newBlankBoxes: BoxForm[] = []
       for (let i = currentCount; i < desired; i++) {
         newBlankBoxes.push({
+          line_number: line,
           article_description: articleDesc,
           box_number: i + 1,
           net_weight: "",
@@ -892,7 +906,7 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
       }
       const updatedBoxes = [...boxForms, ...newBlankBoxes]
       setBoxForms(updatedBoxes)
-      recomputeWeightsOnly(updatedBoxes, articleDesc)
+      recomputeWeightsOnly(updatedBoxes, line)
     } else if (desired < currentCount) {
       // Remove boxes from the end — existing boxes untouched
       let removed = 0
@@ -900,7 +914,7 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
       const updatedBoxes = [...boxForms]
       // Remove from the end of this article's boxes
       for (let i = updatedBoxes.length - 1; i >= 0 && removed < toRemove; i--) {
-        if (updatedBoxes[i].article_description === articleDesc) {
+        if (updatedBoxes[i].line_number === line) {
           updatedBoxes.splice(i, 1)
           removed++
         }
@@ -908,25 +922,25 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
       // Renumber remaining boxes for this article
       let boxNum = 1
       const renumbered = updatedBoxes.map((b) => {
-        if (b.article_description === articleDesc) {
+        if (b.line_number === line) {
           return { ...b, box_number: boxNum++ }
         }
         return b
       })
       setBoxForms(renumbered)
-      recomputeWeightsOnly(renumbered, articleDesc)
+      recomputeWeightsOnly(renumbered, line)
     }
   }
 
   // Recompute only weights (not quantity_units) — used by handleQuantityUnitsChange
-  const recomputeWeightsOnly = (boxes: BoxForm[], articleDesc: string) => {
-    const articleBoxes = boxes.filter((b) => b.article_description === articleDesc)
+  const recomputeWeightsOnly = (boxes: BoxForm[], line: number) => {
+    const articleBoxes = boxes.filter((b) => b.line_number === line)
     const totalNet = articleBoxes.reduce((sum, b) => sum + (parseFloat(b.net_weight) || 0), 0)
     const totalGross = articleBoxes.reduce((sum, b) => sum + (parseFloat(b.gross_weight) || 0), 0)
 
     setArticleApprovalForms((prev) =>
-      prev.map((a) =>
-        a.item_description === articleDesc
+      prev.map((a, i) =>
+        i === line - 1
           ? {
               ...a,
               net_weight: totalNet > 0 ? String(parseFloat(totalNet.toFixed(3))) : "",
@@ -937,13 +951,14 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
     )
   }
 
-  const addBox = (articleDescription: string) => {
-    const existing = boxForms.filter((b) => b.article_description === articleDescription)
-    const parentArticle = articleApprovalForms.find((a) => a.item_description === articleDescription)
+  const addBox = (line: number) => {
+    const existing = boxForms.filter((b) => b.line_number === line)
+    const parentArticle = articleApprovalForms[line - 1]
     const newBoxes: BoxForm[] = [
       ...boxForms,
       {
-        article_description: articleDescription,
+        line_number: line,
+        article_description: parentArticle?.item_description ?? "",
         box_number: existing.length + 1,
         net_weight: "",
         gross_weight: "",
@@ -954,13 +969,13 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
       },
     ]
     setBoxForms(newBoxes)
-    recomputeArticleFromBoxes(newBoxes, articleDescription)
+    recomputeArticleFromBoxes(newBoxes, line)
   }
 
-  const applyLotRanges = (articleDescription: string, ranges: LotRange[]) => {
+  const applyLotRanges = (line: number, ranges: LotRange[]) => {
     setBoxForms((prev) =>
       prev.map((box) => {
-        if (box.article_description !== articleDescription) return box
+        if (box.line_number !== line) return box
         const match = ranges.find((r) => box.box_number >= r.from && box.box_number <= r.to)
         return match ? { ...box, lot_number: match.lot } : box
       })
@@ -972,8 +987,8 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
 
     // Auto-calc net_weight when gross_weight changes and article has carton_weight
     if (field === "gross_weight") {
-      const articleDesc = boxForms[idx].article_description
-      const parentArticle = articleApprovalForms.find((a) => a.item_description === articleDesc)
+      const line = boxForms[idx].line_number
+      const parentArticle = articleApprovalForms[line - 1]
       const carton = parseFloat(parentArticle?.carton_weight || "") || 0
       if (carton > 0) {
         const gross = parseFloat(String(value)) || 0
@@ -984,23 +999,23 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
 
     setBoxForms(newBoxes)
     if (field === "net_weight" || field === "gross_weight") {
-      recomputeArticleFromBoxes(newBoxes, boxForms[idx].article_description)
+      recomputeArticleFromBoxes(newBoxes, boxForms[idx].line_number)
     }
   }
 
   const removeBox = (idx: number) => {
-    const articleDesc = boxForms[idx].article_description
+    const line = boxForms[idx].line_number
     const newBoxes = boxForms.filter((_, i) => i !== idx)
-    // Renumber boxes for the same article
+    // Renumber boxes for the same article (by line_number)
     let boxNum = 1
     const renumbered = newBoxes.map((b) => {
-      if (b.article_description === articleDesc) {
+      if (b.line_number === line) {
         return { ...b, box_number: boxNum++ }
       }
       return b
     })
     setBoxForms(renumbered)
-    recomputeArticleFromBoxes(renumbered, articleDesc)
+    recomputeArticleFromBoxes(renumbered, line)
     // Clean up edit state if this box was being edited
     if (editingBoxIndices.has(idx)) {
       setEditingBoxIndices((prev) => {
@@ -1024,7 +1039,7 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
 
   const handlePrintBox = async (boxIdx: number) => {
     const box = boxForms[boxIdx]
-    const approvalForm = articleApprovalForms.find((a) => a.item_description === box.article_description)
+    const approvalForm = articleApprovalForms[box.line_number - 1]
     if (!approvalForm) return
 
     try {
@@ -1035,6 +1050,7 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
 
       // 1. Save box to backend via upsert
       const upsertResult = await inwardApiService.upsertBox(company, txnNo, {
+        line_number: box.line_number,
         article_description: box.article_description,
         box_number: box.box_number,
         net_weight: r3(box.net_weight),
@@ -1195,10 +1211,10 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
     const approvalForm = articleApprovalForms[articleIdx]
     if (!approvalForm) return
 
-    const articleDesc = approvalForm.item_description
+    const line = articleIdx + 1
     const articleBoxes = boxForms
       .map((b, i) => ({ box: b, idx: i }))
-      .filter(({ box }) => box.article_description === articleDesc)
+      .filter(({ box }) => box.line_number === line)
 
     if (articleBoxes.length === 0) {
       toast({ title: "No boxes", description: "Add boxes first before printing.", variant: "destructive" })
@@ -1224,6 +1240,7 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
       const upsertedBoxes: Array<{ box_id: string; box_number: number; article_description: string; net_weight?: string; gross_weight?: string; lot_number?: string }> = []
       for (const { box, idx } of rangeBoxes) {
         const upsertResult = await inwardApiService.upsertBox(company, txnNo, {
+          line_number: box.line_number,
           article_description: box.article_description,
           box_number: box.box_number,
           net_weight: r3(box.net_weight),
@@ -2239,6 +2256,7 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
               <CardContent className="space-y-3 px-3 sm:px-6">
                 {articles.map((article, idx) => {
                   const approvalForm = articleApprovalForms[idx]
+                  const line = idx + 1  // stable per-article identity for box grouping
                   return (
                     <div key={idx} className="space-y-3 p-3 sm:p-4 border rounded-lg">
                       <ArticleEditor
@@ -2339,14 +2357,13 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
                                 value={approvalForm.box_net_weight}
                                 onChange={(e) => {
                                   updateArticleApproval(idx, "box_net_weight", e.target.value)
-                                  // Apply same net weight to all boxes of this article
-                                  const articleDesc = approvalForm.item_description
+                                  // Apply same net weight to all boxes of this article (by line_number)
                                   setBoxForms((prev) =>
-                                    prev.map((b) => b.article_description === articleDesc ? { ...b, net_weight: e.target.value } : b)
+                                    prev.map((b) => b.line_number === line ? { ...b, net_weight: e.target.value } : b)
                                   )
                                   // Recompute article totals
-                                  const updatedBoxes = boxForms.map((b) => b.article_description === articleDesc ? { ...b, net_weight: e.target.value } : b)
-                                  recomputeArticleFromBoxes(updatedBoxes, articleDesc)
+                                  const updatedBoxes = boxForms.map((b) => b.line_number === line ? { ...b, net_weight: e.target.value } : b)
+                                  recomputeArticleFromBoxes(updatedBoxes, line)
                                 }}
                                 placeholder="kg per box"
                                 className="h-8 text-xs"
@@ -2363,14 +2380,13 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
                                   const dot = v.indexOf('.')
                                   if (dot !== -1 && v.length - dot - 1 > 3) return
                                   updateArticleApproval(idx, "box_gross_weight", v)
-                                  // Apply same gross weight to all boxes of this article
-                                  const articleDesc = approvalForm.item_description
+                                  // Apply same gross weight to all boxes of this article (by line_number)
                                   const carton = parseFloat(approvalForm.carton_weight) || 0
                                   const gross = parseFloat(v) || 0
                                   const net = carton > 0 && gross > 0 ? Math.max(0, gross - carton) : 0
                                   const netStr = net > 0 ? String(parseFloat(net.toFixed(3))) : ""
                                   setBoxForms((prev) =>
-                                    prev.map((b) => b.article_description === articleDesc
+                                    prev.map((b) => b.line_number === line
                                       ? { ...b, gross_weight: v, ...(carton > 0 ? { net_weight: netStr } : {}) }
                                       : b
                                     )
@@ -2378,11 +2394,11 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
                                   if (carton > 0) {
                                     updateArticleApproval(idx, "box_net_weight", netStr)
                                   }
-                                  const updatedBoxes = boxForms.map((b) => b.article_description === articleDesc
+                                  const updatedBoxes = boxForms.map((b) => b.line_number === line
                                     ? { ...b, gross_weight: v, ...(carton > 0 ? { net_weight: netStr } : {}) }
                                     : b
                                   )
-                                  recomputeArticleFromBoxes(updatedBoxes, articleDesc)
+                                  recomputeArticleFromBoxes(updatedBoxes, line)
                                 }}
                                 placeholder="kg per box"
                                 className="h-8 text-xs"
@@ -2441,7 +2457,7 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
                               <Input
                                 type="number"
                                 min="1"
-                                placeholder={String(boxForms.filter((b) => b.article_description === approvalForm.item_description).length || 1)}
+                                placeholder={String(boxForms.filter((b) => b.line_number === line).length || 1)}
                                 value={printRangeTo[idx] || ""}
                                 onChange={(e) => setPrintRangeTo((prev) => ({ ...prev, [idx]: e.target.value }))}
                                 className="h-8 text-xs w-20"
@@ -2452,7 +2468,7 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
                               size="sm"
                               className="h-8 text-xs gap-1"
                               onClick={() => handlePrintRange(idx)}
-                              disabled={printingRange === idx || boxForms.filter((b) => b.article_description === approvalForm.item_description).length === 0}
+                              disabled={printingRange === idx || boxForms.filter((b) => b.line_number === line).length === 0}
                             >
                               {printingRange === idx ? (
                                 <>
@@ -2471,28 +2487,28 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
                               size="sm"
                               className="h-8 text-xs gap-1"
                               onClick={() => {
-                                const totalBoxes = boxForms.filter((b) => b.article_description === approvalForm.item_description).length
+                                const totalBoxes = boxForms.filter((b) => b.line_number === line).length
                                 setPrintRangeFrom((prev) => ({ ...prev, [idx]: "1" }))
                                 setPrintRangeTo((prev) => ({ ...prev, [idx]: String(totalBoxes) }))
                                 handlePrintRange(idx, 1, totalBoxes)
                               }}
-                              disabled={printingRange === idx || boxForms.filter((b) => b.article_description === approvalForm.item_description).length === 0}
+                              disabled={printingRange === idx || boxForms.filter((b) => b.line_number === line).length === 0}
                             >
                               <Printer className="h-3 w-3" />
-                              Print All ({boxForms.filter((b) => b.article_description === approvalForm.item_description).length})
+                              Print All ({boxForms.filter((b) => b.line_number === line).length})
                             </Button>
                           </div>
 
                           {/* Lot Range Dedicator — available on all warehouses */}
                           <LotRangeDedicator
                             warehouse={warehouse}
-                            totalBoxes={boxForms.filter((b) => b.article_description === approvalForm.item_description).length}
-                            onApply={(ranges) => applyLotRanges(approvalForm.item_description, ranges)}
+                            totalBoxes={boxForms.filter((b) => b.line_number === line).length}
+                            onApply={(ranges) => applyLotRanges(line, ranges)}
                           />
 
                           {(() => {
-                            const allArticleBoxes = boxForms.filter((b) => b.article_description === approvalForm.item_description)
-                            const artPage = getBoxPage(approvalForm.item_description)
+                            const allArticleBoxes = boxForms.filter((b) => b.line_number === line)
+                            const artPage = getBoxPage(line)
                             const artTotalPages = Math.max(1, Math.ceil(allArticleBoxes.length / BOX_PAGE_SIZE))
                             const pageStart = (artPage - 1) * BOX_PAGE_SIZE
                             const pageBoxes = allArticleBoxes.slice(pageStart, pageStart + BOX_PAGE_SIZE)
@@ -2501,14 +2517,14 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
                             boxCount={allArticleBoxes.length}
                             currentPage={artPage}
                             totalPages={artTotalPages}
-                            onPageChange={(page) => setBoxPage(approvalForm.item_description, page)}
+                            onPageChange={(page) => setBoxPage(line, page)}
                             onNavigate={(boxNum) => {
                               const targetPage = Math.ceil(boxNum / BOX_PAGE_SIZE)
-                              setBoxPage(approvalForm.item_description, targetPage)
-                              setHighlightBoxMap((prev) => ({ ...prev, [approvalForm.item_description]: { boxNumber: boxNum, key: Date.now() } }))
+                              setBoxPage(line, targetPage)
+                              setHighlightBoxMap((prev) => ({ ...prev, [String(line)]: { boxNumber: boxNum, key: Date.now() } }))
                             }}
-                            highlightBox={highlightBoxMap[approvalForm.item_description] ?? null}
-                            onAddBox={() => addBox(approvalForm.item_description)}
+                            highlightBox={highlightBoxMap[String(line)] ?? null}
+                            onAddBox={() => addBox(line)}
                             boxForms={allArticleBoxes.map((b) => ({ box_number: b.box_number, lot_number: b.lot_number, article_description: b.article_description }))}
                           >
                             {(registerRef) => pageBoxes
@@ -2604,7 +2620,7 @@ export default function NewInwardPage({ params }: NewInwardPageProps) {
                                           variant="ghost"
                                           size="icon"
                                           className="h-7 w-7 text-primary hover:text-primary"
-                                          onClick={() => addBox(approvalForm.item_description)}
+                                          onClick={() => addBox(line)}
                                           title="Add box below"
                                         >
                                           <Plus className="h-3 w-3" />

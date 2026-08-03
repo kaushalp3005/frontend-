@@ -199,7 +199,7 @@ function ColdStorageStockSearch({
               <tbody>
                 {results.map((record, idx) => (
                   <tr
-                    key={record.id}
+                    key={record.pile_key || `${record.company}-${record.id}`}
                     className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}
                   >
                     <td className="px-3 py-2 text-gray-600">{idx + 1}</td>

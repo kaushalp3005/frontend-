@@ -7,6 +7,10 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import Link from "next/link"
 import {
   ArrowLeft, Edit, CheckCircle2, XCircle, Clock, Trash2,
@@ -71,6 +75,10 @@ export default function InwardDetailPage({ params }: InwardDetailPageProps) {
   const [showDelete, setShowDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [printingBoxId, setPrintingBoxId] = useState<string | null>(null)
+  const [printingAll, setPrintingAll] = useState(false)
+  const [showPrintDialog, setShowPrintDialog] = useState(false)
+  const [rangeInput, setRangeInput] = useState("")
+  const [selectedBoxIds, setSelectedBoxIds] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     if (!transactionNo || transactionNo === "undefined") {
@@ -108,7 +116,7 @@ export default function InwardDetailPage({ params }: InwardDetailPageProps) {
   const handleReprintLabel = async (box: typeof boxes[number]) => {
     if (!data || !box.box_id) return
     const txn = data.transaction
-    const article = data.articles.find((a) => a.item_description === box.article_description)
+    const article = data.articles.find((a) => a.line_number === box.line_number)
 
     try {
       setPrintingBoxId(box.box_id)
@@ -210,6 +218,193 @@ export default function InwardDetailPage({ params }: InwardDetailPageProps) {
     }
   }
 
+  // Reprint the given box labels as one multi-page document
+  const printBoxes = async (boxesToPrint: typeof boxes) => {
+    if (!data || !boxesToPrint.length) return
+    const txn = data.transaction
+
+    const formatDate = (d: string) => {
+      if (!d) return ""
+      try {
+        return new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "2-digit" })
+      } catch { return "" }
+    }
+
+    try {
+      setPrintingAll(true)
+
+      const printable = boxesToPrint.filter((b) => b.box_id)
+      if (!printable.length) return
+
+      const qrCodes = await Promise.all(
+        printable.map((box) =>
+          QRCode.toDataURL(JSON.stringify({ tx: txn.transaction_no, bi: box.box_id }), {
+            width: 170,
+            margin: 1,
+            errorCorrectionLevel: "M",
+          })
+        )
+      )
+
+      const labelsHtml = printable.map((box, i) => {
+        const article = data.articles.find((a) => a.line_number === box.line_number)
+        return `
+        <div class="label">
+          <div class="qr"><img src="${qrCodes[i]}" /></div>
+          <div class="info">
+            <div>
+              <div class="company">${company}</div>
+              <div class="txn">${txn.transaction_no}</div>
+              <div class="boxid">ID: ${box.box_id}</div>
+            </div>
+            <div class="item">${box.article_description}</div>
+            <div>
+              <div class="detail"><b>Box #${box.box_number}</b> &nbsp; Net: ${box.net_weight ?? "—"}kg &nbsp; Gross: ${box.gross_weight ?? "—"}kg</div>
+              ${box.count ? `<div class="detail">Count: ${box.count}</div>` : ""}
+              <div class="detail">Entry: ${formatDate(txn.entry_date)}</div>
+              ${article?.expiry_date ? `<div class="detail exp">Exp: ${formatDate(article.expiry_date)}</div>` : ""}
+            </div>
+            <div class="lot">${(box.lot_number || article?.lot_number || "").substring(0, 20)}${txn.customer_party_name ? ` · ${txn.customer_party_name}` : ""}</div>
+          </div>
+        </div>`
+      }).join("\n")
+
+      const iframe = document.createElement("iframe")
+      iframe.style.position = "fixed"
+      iframe.style.left = "-9999px"
+      iframe.style.top = "-9999px"
+      iframe.style.width = "0"
+      iframe.style.height = "0"
+      document.body.appendChild(iframe)
+
+      const doc = iframe.contentWindow?.document
+      if (!doc) return
+
+      doc.open()
+      doc.write(`<!DOCTYPE html><html><head><title>Bulk Labels</title><style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { background: white; }
+        @page { size: 4in 2in; margin: 0; padding: 0; }
+        @media print {
+          html, body { background: white; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          * { visibility: visible; }
+        }
+        .label { width: 4in; height: 2in; background: white; border: 1px solid #000; display: flex; font-family: Arial, sans-serif; overflow: hidden; page-break-after: always; page-break-inside: avoid; }
+        .label:last-child { page-break-after: auto; }
+        .qr { width: 2in; height: 100%; display: flex; align-items: center; justify-content: center; padding: 0.1in; }
+        .qr img { width: 1.7in; height: 1.7in; }
+        .info { width: 2in; height: 100%; padding: 0.08in; font-size: 8pt; line-height: 1.2; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; }
+        .company { font-weight: bold; font-size: 9pt; }
+        .txn { font-family: monospace; font-size: 7pt; }
+        .boxid { font-family: monospace; font-size: 6.5pt; color: #555; }
+        .item { font-weight: bold; font-size: 7.5pt; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .detail { font-size: 7pt; }
+        .exp { color: red; }
+        .lot { font-family: monospace; border-top: 1px solid #ccc; padding-top: 2px; font-size: 6.5pt; }
+      </style></head><body>
+        ${labelsHtml}
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+              window.onafterprint = function() { window.parent.postMessage('print-complete', '*'); };
+            }, 500);
+          };
+        </script>
+      </body></html>`)
+      doc.close()
+
+      const cleanup = (e: MessageEvent) => {
+        if (e.data === "print-complete") {
+          window.removeEventListener("message", cleanup)
+          if (document.body.contains(iframe)) document.body.removeChild(iframe)
+        }
+      }
+      window.addEventListener("message", cleanup)
+
+      setTimeout(() => {
+        if (document.body.contains(iframe)) {
+          document.body.removeChild(iframe)
+          window.removeEventListener("message", cleanup)
+        }
+      }, 30000)
+    } catch (err) {
+      console.error("Print all failed:", err)
+    } finally {
+      setPrintingAll(false)
+    }
+  }
+
+  // ── Range/selection print dialog helpers ──────────────────────
+  // Parse "1-5, 8, 10-15" into a Set of box numbers
+  const parseRange = (input: string): Set<number> => {
+    const nums = new Set<number>()
+    if (!input.trim()) return nums
+    for (const part of input.split(",")) {
+      const trimmed = part.trim()
+      if (!trimmed) continue
+      const rangeParts = trimmed.split("-")
+      if (rangeParts.length === 2) {
+        const start = parseInt(rangeParts[0].trim(), 10)
+        const end = parseInt(rangeParts[1].trim(), 10)
+        if (!isNaN(start) && !isNaN(end)) {
+          for (let i = Math.min(start, end); i <= Math.max(start, end); i++) nums.add(i)
+        }
+      } else {
+        const n = parseInt(trimmed, 10)
+        if (!isNaN(n)) nums.add(n)
+      }
+    }
+    return nums
+  }
+
+  const handleRangeChange = (value: string) => {
+    setRangeInput(value)
+    if (!data?.boxes) return
+    const boxNumbers = parseRange(value)
+    if (boxNumbers.size === 0 && value.trim() === "") return // keep manual selection on empty
+    const next = new Set<string>()
+    for (const box of data.boxes) {
+      if (boxNumbers.has(box.box_number) && box.box_id) next.add(box.box_id)
+    }
+    setSelectedBoxIds(next)
+  }
+
+  const toggleBox = (boxId: string) => {
+    setSelectedBoxIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(boxId)) next.delete(boxId)
+      else next.add(boxId)
+      return next
+    })
+    setRangeInput("")
+  }
+
+  const selectAllBoxes = () => {
+    if (!data?.boxes) return
+    setSelectedBoxIds(new Set(data.boxes.filter((b) => b.box_id).map((b) => b.box_id)))
+    setRangeInput("")
+  }
+
+  const deselectAllBoxes = () => {
+    setSelectedBoxIds(new Set())
+    setRangeInput("")
+  }
+
+  const openPrintDialog = () => {
+    setRangeInput("")
+    setSelectedBoxIds(new Set())
+    setShowPrintDialog(true)
+  }
+
+  const handlePrintSelected = async () => {
+    if (!data) return
+    const toPrint = data.boxes.filter((b) => selectedBoxIds.has(b.box_id))
+    if (!toPrint.length) return
+    setShowPrintDialog(false)
+    await printBoxes(toPrint)
+  }
+
   if (loading) {
     return (
       <div className="p-3 sm:p-4 md:p-6 max-w-[1100px] mx-auto space-y-4">
@@ -239,12 +434,14 @@ export default function InwardDetailPage({ params }: InwardDetailPageProps) {
 
   const { transaction: txn, articles, boxes, edit_logs } = data
 
-  // Compute article stats from actual boxes (overrides stale DB values)
-  const articleBoxStats = new Map<string, { count: number; netWeight: number; grossWeight: number }>()
+  // Compute article stats from actual boxes (overrides stale DB values). Keyed by
+  // line_number (the stable per-article identity) so two same-name articles keep
+  // separate box stats and their boxes never collide.
+  const articleBoxStats = new Map<number, { count: number; netWeight: number; grossWeight: number }>()
   for (const box of boxes) {
-    const key = (box.article_description && box.article_description.trim() !== "")
-      ? box.article_description
-      : (articles.length === 1 ? articles[0].item_description : "")
+    const key = box.line_number != null
+      ? box.line_number
+      : (articles.length === 1 ? (articles[0].line_number ?? 1) : 0)
     const existing = articleBoxStats.get(key) || { count: 0, netWeight: 0, grossWeight: 0 }
     existing.count += 1
     existing.netWeight += box.net_weight || 0
@@ -278,6 +475,20 @@ export default function InwardDetailPage({ params }: InwardDetailPageProps) {
   const isEdited = (boxId: string | undefined, field: string) =>
     boxId ? editedFields.get(boxId)?.has(field) ?? false : false
 
+  // Print-dialog derived values
+  const allBoxIds = new Set(boxes.filter((b) => b.box_id).map((b) => b.box_id))
+  const isAllSelected = selectedBoxIds.size > 0 && selectedBoxIds.size === allBoxIds.size
+  // Grouped by line_number (not description) so same-name articles list separately.
+  const boxesByArticle = (() => {
+    const m = new Map<number, typeof boxes>()
+    for (const box of boxes) {
+      const key = box.line_number ?? 0
+      if (!m.has(key)) m.set(key, [])
+      m.get(key)!.push(box)
+    }
+    return m
+  })()
+
   return (
     <PermissionGuard module="inward" action="view">
       <div className="p-3 sm:p-4 md:p-6 max-w-[1100px] mx-auto space-y-3 sm:space-y-4">
@@ -308,6 +519,25 @@ export default function InwardDetailPage({ params }: InwardDetailPageProps) {
               <Link href={`/${company}/inward/${transactionNo}/approve`}>
                 <CheckCircle2 className="h-3.5 w-3.5" /> {isPending ? "Review" : "Edit & Review"}
               </Link>
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5 h-8 text-xs sm:text-sm"
+              onClick={() => printBoxes(boxes)}
+              disabled={printingAll || boxes.length === 0}
+            >
+              {printingAll ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Printer className="h-3.5 w-3.5" />}
+              Print All ({boxes.length})
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5 h-8 text-xs sm:text-sm"
+              onClick={openPrintDialog}
+              disabled={printingAll || boxes.length === 0}
+            >
+              <Printer className="h-3.5 w-3.5" /> Print Labels
             </Button>
             {isPending && (
               <Button
@@ -410,7 +640,9 @@ export default function InwardDetailPage({ params }: InwardDetailPageProps) {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3 px-3 sm:px-6">
-                {articles.map((article, idx) => (
+                {articles.map((article, idx) => {
+                  const line = article.line_number ?? (idx + 1)
+                  return (
                   <div key={article.id || idx} className="p-3 border rounded-lg bg-muted/20 space-y-2">
                     <div className="flex items-start justify-between gap-2">
                       <p className="text-sm font-medium break-words min-w-0">{article.item_description}</p>
@@ -424,14 +656,14 @@ export default function InwardDetailPage({ params }: InwardDetailPageProps) {
                       <Field label="Sub-category" value={article.sub_category} />
                       <Field label="Quality" value={article.quality_grade} />
                       <Field label="UOM" value={article.uom} />
-                      <Field label="Qty Units" value={articleBoxStats.get(article.item_description)?.count || article.quantity_units} />
+                      <Field label="Qty Units" value={articleBoxStats.get(line)?.count || article.quantity_units} />
                       <Field label="Net Weight" value={(() => {
-                        const computed = articleBoxStats.get(article.item_description)?.netWeight
+                        const computed = articleBoxStats.get(line)?.netWeight
                         const val = computed && computed > 0 ? computed : article.net_weight
                         return val ? `${parseFloat(val.toFixed(3))} kg` : undefined
                       })()} />
                       <Field label="Total Weight" value={(() => {
-                        const computed = articleBoxStats.get(article.item_description)?.grossWeight
+                        const computed = articleBoxStats.get(line)?.grossWeight
                         const val = computed && computed > 0 ? computed : article.total_weight
                         return val ? `${parseFloat(val.toFixed(3))} kg` : undefined
                       })()} />
@@ -444,7 +676,8 @@ export default function InwardDetailPage({ params }: InwardDetailPageProps) {
                       <Field label="Carton Weight" value={article.carton_weight ? `${article.carton_weight} kg` : undefined} />
                     </div>
                   </div>
-                ))}
+                  )
+                })}
               </CardContent>
             </Card>
 
@@ -632,6 +865,96 @@ export default function InwardDetailPage({ params }: InwardDetailPageProps) {
             )}
           </div>
         </div>
+
+        {/* Print Labels Dialog (range / selection) */}
+        <Dialog open={showPrintDialog} onOpenChange={setShowPrintDialog}>
+          <DialogContent className="max-w-[95vw] sm:max-w-lg max-h-[90vh] flex flex-col">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Printer className="h-4 w-4" />
+                Print Box Labels
+              </DialogTitle>
+            </DialogHeader>
+
+            <div className="space-y-3 flex-1 min-h-0">
+              {/* Range input */}
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">Box Range</Label>
+                <Input
+                  placeholder="e.g. 1-50, 3, 7-10"
+                  value={rangeInput}
+                  onChange={(e) => handleRangeChange(e.target.value)}
+                  className="h-9 font-mono text-sm"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Enter box numbers or ranges separated by commas. Or select boxes below.
+                </p>
+              </div>
+
+              {/* Select all / Deselect all */}
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-muted-foreground">
+                  {selectedBoxIds.size} of {allBoxIds.size} boxes selected
+                </p>
+                <div className="flex gap-2">
+                  <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={selectAllBoxes} disabled={isAllSelected}>
+                    Select All
+                  </Button>
+                  <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={deselectAllBoxes} disabled={selectedBoxIds.size === 0}>
+                    Clear
+                  </Button>
+                </div>
+              </div>
+
+              {/* Box list grouped by article */}
+              <div className="overflow-y-auto max-h-[40vh] border rounded-lg divide-y">
+                {Array.from(boxesByArticle.entries()).map(([line, articleBoxes]) => (
+                  <div key={line}>
+                    <div className="sticky top-0 bg-muted/80 backdrop-blur-sm px-3 py-1.5 border-b">
+                      <p className="text-xs font-semibold truncate">{getBoxArticleDesc(articleBoxes[0])}</p>
+                    </div>
+                    <div className="divide-y">
+                      {articleBoxes.map((box) => (
+                        <label
+                          key={box.box_id || `${box.article_description}-${box.box_number}`}
+                          className={cn(
+                            "flex items-center gap-3 px-3 py-2 cursor-pointer transition-colors hover:bg-muted/30",
+                            selectedBoxIds.has(box.box_id) && "bg-primary/5"
+                          )}
+                        >
+                          <Checkbox
+                            checked={selectedBoxIds.has(box.box_id)}
+                            onCheckedChange={() => toggleBox(box.box_id)}
+                            disabled={!box.box_id}
+                          />
+                          <div className="h-6 w-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[10px] font-bold flex-shrink-0">
+                            {box.box_number}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-mono text-muted-foreground truncate">{box.box_id}</p>
+                          </div>
+                          {box.net_weight != null && (
+                            <span className="text-[10px] text-muted-foreground flex-shrink-0">{box.net_weight}kg</span>
+                          )}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button variant="outline" onClick={() => setShowPrintDialog(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handlePrintSelected} disabled={selectedBoxIds.size === 0 || printingAll} className="gap-1.5">
+                {printingAll ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+                Print {selectedBoxIds.size} {selectedBoxIds.size === 1 ? "Label" : "Labels"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Delete Dialog */}
         <AlertDialog open={showDelete} onOpenChange={setShowDelete}>

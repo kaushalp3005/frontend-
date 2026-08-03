@@ -248,7 +248,9 @@ function ColdStorageStockSearch({
               </thead>
               <tbody>
                 {results.map((record, idx) => (
-                  <tr key={record.id} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}>
+                  // pile_key, not id: the search unions cfpl + cdpl and their id
+                  // sequences overlap, so ids are not unique across the result set.
+                  <tr key={record.pile_key || `${record.company}-${record.id}`} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}>
                     <td className="px-3 py-2 text-gray-600">{idx + 1}</td>
                     <td className="px-3 py-2 whitespace-nowrap">{record.inward_dt || "-"}</td>
                     <td className="px-3 py-2">{record.unit || "-"}</td>
@@ -305,6 +307,9 @@ interface Article {
   cs_transaction_no: string | null
   cs_inward_no: string | null
   cs_company: string | null
+  // Unique identity of the selected cold pile — see /cold-storage/stocks/search.
+  // Same lot at two inward dates / units / sites = two piles, both selectable.
+  cs_pile_key: string | null
   cold_company: string
   item_mark: string
 }
@@ -366,6 +371,7 @@ const emptyArticle = (): Article => ({
   cs_transaction_no: null,
   cs_inward_no: null,
   cs_company: null,
+  cs_pile_key: null,
   cold_company: "",
   item_mark: "",
 })
@@ -904,6 +910,7 @@ export default function MaterialOutPage({ params }: MaterialOutPageProps) {
         cs_transaction_no: record.transaction_no || null,
         cs_inward_no: record.inward_no || null,
         cs_company: coldCompany || null,
+        cs_pile_key: record.pile_key || null,
         cold_company: coldUnitName,
         item_mark: record.item_mark || "",
       }
@@ -946,19 +953,23 @@ export default function MaterialOutPage({ params }: MaterialOutPageProps) {
       // inward_no is intentionally NOT required: transfer-in / bulk-mirror cold
       // stock has a NULL inward_no but is still identifiable by box_id +
       // transaction_no. pick-boxes matches on COALESCE(inward_no,'').
-      if (!article.item_description || !article.lot_number || !article.cs_company) {
+      // A pile_key identifies the row on its own, so a blank lot number is fine —
+      // transfer-in / disposition-recovered cold piles legitimately carry no lot_no.
+      if (!article.item_description || (!article.lot_number && !article.cs_pile_key) || !article.cs_company) {
         toast({ title: "Cannot Add Cold Storage Item", description: "Re-select the stock record from the search — item/lot/company details are missing, so per-box IDs cannot be fetched.", variant: "destructive" })
         return
       }
       try {
         // Use cs_company (the selected row's REAL source company from the company-
-        // independent search), NOT the URL/navbar company.
+        // independent search), NOT the URL/navbar company. pile_key pins the exact
+        // pile so a same-lot/different-date pile isn't picked from the wrong one.
         const pickResult = await ColdStorageApiService.pickBoxes({
           company: article.cs_company,
           item_description: article.item_description,
-          lot_no: article.lot_number,
+          lot_no: article.lot_number || '',
           inward_no: article.cs_inward_no || '',
           qty,
+          pile_key: article.cs_pile_key,
         })
         pickedBoxes = pickResult.boxes
       } catch (err) {
@@ -970,9 +981,21 @@ export default function MaterialOutPage({ params }: MaterialOutPageProps) {
         toast({ title: "Insufficient Boxes Available", description: `Requested ${qty} boxes of ${article.item_description}, but only ${pickedBoxes.length} unique boxes exist in cold storage for lot ${article.lot_number} / inward ${article.cs_inward_no}.`, variant: "destructive" })
         return
       }
+      // Surface WHICH failure mode trips the guard (NULL box_ids vs a repeated box_id
+      // from a cross-transaction base collision) so support can repair the exact pile.
       const uniqueIds = new Set(pickedBoxes.map(b => b.box_id))
       if (uniqueIds.size !== pickedBoxes.length) {
-        toast({ title: "Duplicate Box IDs From Source", description: `Cold storage returned duplicate box_id values for ${article.item_description}. Aborting — please report this to support.`, variant: "destructive" })
+        const nullBoxCount = pickedBoxes.filter(b => !b.box_id || !String(b.box_id).trim()).length
+        const counts = new Map<string, number>()
+        for (const b of pickedBoxes) {
+          const k = String(b.box_id ?? "")
+          counts.set(k, (counts.get(k) || 0) + 1)
+        }
+        const dupIds = [...counts.entries()].filter(([k, n]) => k.trim() !== "" && n > 1).map(([k]) => k)
+        const detail = nullBoxCount > 0
+          ? `${nullBoxCount} box(es) have no box_id`
+          : `box_id(s) ${dupIds.slice(0, 5).join(", ")}${dupIds.length > 5 ? "…" : ""} repeat`
+        toast({ title: "Duplicate Box IDs From Source", description: `Cold storage returned non-unique box_id values for ${article.item_description} (lot ${article.lot_number}): ${detail}. Aborting to protect inventory — report this lot to support for a box-ID repair.`, variant: "destructive" })
         return
       }
     }

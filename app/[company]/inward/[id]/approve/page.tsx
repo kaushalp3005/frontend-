@@ -47,6 +47,9 @@ interface ApprovePageProps {
 }
 
 interface ArticleForm {
+  // Stable per-article identity (1-based). Boxes group to their article by line_number,
+  // not by item_description, so two same-name articles stay separate.
+  line_number: number
   item_description: string
   po_weight?: number
   sku_id?: number
@@ -73,6 +76,9 @@ interface ArticleForm {
 }
 
 interface BoxForm {
+  // Parent article's stable identity (1-based). Boxes are grouped/filtered by this,
+  // never by article_description, so same-name articles keep separate boxes/box IDs.
+  line_number: number
   article_description: string
   box_number: number
   net_weight: string
@@ -118,8 +124,8 @@ export default function ApprovePage({ params }: ApprovePageProps) {
   const [isServiceOrder, setIsServiceOrder] = useState(false)
   const [isRtv, setIsRtv] = useState(false)
 
-  // Bulk add boxes state
-  const [bulkAddArticle, setBulkAddArticle] = useState<string | null>(null)
+  // Bulk add boxes state — tracked by article line_number so same-name articles toggle independently
+  const [bulkAddArticle, setBulkAddArticle] = useState<number | null>(null)
   const [bulkAddQty, setBulkAddQty] = useState("")
   const [bulkAddNetWeight, setBulkAddNetWeight] = useState("")
   const [bulkAddGrossWeight, setBulkAddGrossWeight] = useState("")
@@ -138,9 +144,9 @@ export default function ApprovePage({ params }: ApprovePageProps) {
   const [boxPageMap, setBoxPageMap] = useState<Record<string, number>>({})
   const [highlightBoxMap, setHighlightBoxMap] = useState<Record<string, { boxNumber: number; key: number } | null>>({})
 
-  const getBoxPage = (articleDesc: string) => boxPageMap[articleDesc] ?? 1
-  const setBoxPage = (articleDesc: string, page: number) =>
-    setBoxPageMap((prev) => ({ ...prev, [articleDesc]: page }))
+  const getBoxPage = (line: number) => boxPageMap[String(line)] ?? 1
+  const setBoxPage = (line: number, page: number) =>
+    setBoxPageMap((prev) => ({ ...prev, [String(line)]: page }))
 
   // Submit state
   const [submitting, setSubmitting] = useState(false)
@@ -198,8 +204,10 @@ export default function ApprovePage({ params }: ApprovePageProps) {
           remark: txn.remark,
         })
 
-        // Initialize existing boxes — create a default box per article if none exist
+        // Initialize existing boxes — create a default box per article if none exist.
+        // Each box carries its parent article's line_number (the grouping key).
         const existingBoxes: BoxForm[] = detail.boxes.map((b) => ({
+          line_number: b.line_number ?? 0,
           article_description: b.article_description,
           box_number: b.box_number,
           net_weight: b.net_weight?.toString() || "",
@@ -211,9 +219,16 @@ export default function ApprovePage({ params }: ApprovePageProps) {
         }))
 
         const articlesWithoutBoxes = detail.articles.filter(
-          (a) => !existingBoxes.some((b) => b.article_description === a.item_description)
+          (a, idx) => {
+            const line = a.line_number ?? (idx + 1)
+            return !existingBoxes.some((b) => b.line_number === line)
+          }
         )
-        const defaultBoxes: BoxForm[] = articlesWithoutBoxes.map((a) => ({
+        const defaultBoxes: BoxForm[] = articlesWithoutBoxes.map((a, idx) => ({
+          // articlesWithoutBoxes preserves detail.articles order, but its own index is not
+          // the article's line — resolve the line from a.line_number (with a positional
+          // fallback against the FULL article list).
+          line_number: a.line_number ?? (detail.articles.indexOf(a) + 1),
           article_description: a.item_description,
           box_number: 1,
           net_weight: "",
@@ -229,13 +244,15 @@ export default function ApprovePage({ params }: ApprovePageProps) {
 
         // Initialize article forms — compute quantity_units/net_weight/total_weight from boxes
         setArticleForms(
-          detail.articles.map((a) => {
-            const articleBoxes = allBoxes.filter((b) => b.article_description === a.item_description)
+          detail.articles.map((a, idx) => {
+            const line = a.line_number ?? (idx + 1)
+            const articleBoxes = allBoxes.filter((b) => b.line_number === line)
             const boxCount = articleBoxes.length
             const sumNet = articleBoxes.reduce((s, b) => s + (parseFloat(b.net_weight) || 0), 0)
             const sumGross = articleBoxes.reduce((s, b) => s + (parseFloat(b.gross_weight) || 0), 0)
 
             return {
+              line_number: line,
               item_description: a.item_description,
               po_weight: a.po_weight,
               sku_id: a.sku_id,
@@ -276,13 +293,13 @@ export default function ApprovePage({ params }: ApprovePageProps) {
       prev.map((a, i) => (i === idx ? { ...a, [field]: value } : a))
     )
 
-    const articleDesc = articleForms[idx]?.item_description
-    if (!articleDesc) return
+    const line = articleForms[idx]?.line_number
+    if (line == null) return
 
     // Propagate lot_number to all boxes of this article
     if (field === "lot_number") {
       setBoxForms((prev) =>
-        prev.map((b) => b.article_description === articleDesc ? { ...b, lot_number: value } : b)
+        prev.map((b) => b.line_number === line ? { ...b, lot_number: value } : b)
       )
     }
 
@@ -302,7 +319,7 @@ export default function ApprovePage({ params }: ApprovePageProps) {
     if (field === "carton_weight") {
       const carton = parseFloat(value) || 0
       const newBoxes = boxForms.map((b) => {
-        if (b.article_description !== articleDesc) return b
+        if (b.line_number !== line) return b
         const gross = parseFloat(b.gross_weight) || 0
         if (carton > 0 && gross > 0) {
           const net = Math.max(0, gross - carton)
@@ -311,16 +328,16 @@ export default function ApprovePage({ params }: ApprovePageProps) {
         return b
       })
       setBoxForms(newBoxes)
-      recomputeArticleFromBoxes(newBoxes, articleDesc)
+      recomputeArticleFromBoxes(newBoxes, line)
     }
   }
 
   // Recompute article totals from its boxes (shared, tested helper — see lib/inward/aggregates.ts)
-  const recomputeArticleFromBoxes = (boxes: BoxForm[], articleDesc: string) => {
-    const agg = computeArticleAggregatesFromBoxes(boxes, articleDesc)
+  const recomputeArticleFromBoxes = (boxes: BoxForm[], line: number) => {
+    const agg = computeArticleAggregatesFromBoxes(boxes, line)
     setArticleForms((prev) =>
       prev.map((a) =>
-        a.item_description === articleDesc
+        a.line_number === line
           ? {
               ...a,
               ...agg,
@@ -335,8 +352,8 @@ export default function ApprovePage({ params }: ApprovePageProps) {
     )
   }
   // Live box sum per article — drives the red variance note next to the stored Net/Total Wt.
-  const boxSumFor = (articleDesc: string) => {
-    const ab = boxForms.filter((b) => b.article_description === articleDesc)
+  const boxSumFor = (line: number) => {
+    const ab = boxForms.filter((b) => b.line_number === line)
     return {
       net: ab.reduce((s, b) => s + (parseFloat(b.net_weight) || 0), 0),
       gross: ab.reduce((s, b) => s + (parseFloat(b.gross_weight) || 0), 0),
@@ -348,21 +365,23 @@ export default function ApprovePage({ params }: ApprovePageProps) {
     if (value !== "" && (isNaN(parsed) || parsed < 0)) return
     const desired = value === "" ? 0 : parsed
 
-    const articleDesc = articleForms[articleIdx]?.item_description
-    if (!articleDesc) return
+    const parentArticle = articleForms[articleIdx]
+    const line = parentArticle?.line_number
+    if (line == null) return
+    const articleDesc = parentArticle.item_description
 
     setArticleForms((prev) =>
       prev.map((a, i) => (i === articleIdx ? { ...a, quantity_units: value } : a))
     )
 
-    const currentBoxes = boxForms.filter((b) => b.article_description === articleDesc)
+    const currentBoxes = boxForms.filter((b) => b.line_number === line)
     const currentCount = currentBoxes.length
 
     if (desired > currentCount) {
-      const parentArticle = articleForms[articleIdx]
       const newBlankBoxes: BoxForm[] = []
       for (let i = currentCount; i < desired; i++) {
         newBlankBoxes.push({
+          line_number: line,
           article_description: articleDesc,
           box_number: i + 1,
           net_weight: "",
@@ -375,37 +394,37 @@ export default function ApprovePage({ params }: ApprovePageProps) {
       }
       const updatedBoxes = [...boxForms, ...newBlankBoxes]
       setBoxForms(updatedBoxes)
-      recomputeWeightsOnly(updatedBoxes, articleDesc)
+      recomputeWeightsOnly(updatedBoxes, line)
     } else if (desired < currentCount) {
       let removed = 0
       const toRemove = currentCount - desired
       const updatedBoxes = [...boxForms]
       for (let i = updatedBoxes.length - 1; i >= 0 && removed < toRemove; i--) {
-        if (updatedBoxes[i].article_description === articleDesc) {
+        if (updatedBoxes[i].line_number === line) {
           updatedBoxes.splice(i, 1)
           removed++
         }
       }
       let boxNum = 1
       const renumbered = updatedBoxes.map((b) => {
-        if (b.article_description === articleDesc) {
+        if (b.line_number === line) {
           return { ...b, box_number: boxNum++ }
         }
         return b
       })
       setBoxForms(renumbered)
-      recomputeWeightsOnly(renumbered, articleDesc)
+      recomputeWeightsOnly(renumbered, line)
     }
   }
 
-  const recomputeWeightsOnly = (boxes: BoxForm[], articleDesc: string) => {
-    const articleBoxes = boxes.filter((b) => b.article_description === articleDesc)
+  const recomputeWeightsOnly = (boxes: BoxForm[], line: number) => {
+    const articleBoxes = boxes.filter((b) => b.line_number === line)
     const totalNet = articleBoxes.reduce((sum, b) => sum + (parseFloat(b.net_weight) || 0), 0)
     const totalGross = articleBoxes.reduce((sum, b) => sum + (parseFloat(b.gross_weight) || 0), 0)
 
     setArticleForms((prev) =>
       prev.map((a) =>
-        a.item_description === articleDesc
+        a.line_number === line
           ? {
               ...a,
               // Only fill when blank — keep the stored/edited Net/Total authoritative (variance shown in red).
@@ -417,13 +436,14 @@ export default function ApprovePage({ params }: ApprovePageProps) {
     )
   }
 
-  const addBox = (articleDescription: string) => {
-    const existing = boxForms.filter((b) => b.article_description === articleDescription)
-    const parentArticle = articleForms.find((a) => a.item_description === articleDescription)
+  const addBox = (line: number) => {
+    const existing = boxForms.filter((b) => b.line_number === line)
+    const parentArticle = articleForms.find((a) => a.line_number === line)
     const newBoxes: BoxForm[] = [
       ...boxForms,
       {
-        article_description: articleDescription,
+        line_number: line,
+        article_description: parentArticle?.item_description ?? "",
         box_number: existing.length + 1,
         net_weight: "",
         gross_weight: "",
@@ -434,7 +454,7 @@ export default function ApprovePage({ params }: ApprovePageProps) {
       },
     ]
     setBoxForms(newBoxes)
-    recomputeArticleFromBoxes(newBoxes, articleDescription)
+    recomputeArticleFromBoxes(newBoxes, line)
   }
 
   // Item 2: batch-print every just-added box in ONE print dialog (mirrors handlePrintBox's 4x2in
@@ -443,6 +463,7 @@ export default function ApprovePage({ params }: ApprovePageProps) {
     boxes: Array<{
       box_id: string
       box_number: number
+      line_number?: number
       article_description: string
       net_weight?: string
       gross_weight?: string
@@ -471,7 +492,7 @@ export default function ApprovePage({ params }: ApprovePageProps) {
     )
 
     const labelsHtml = boxes.map((box, i) => {
-      const article = articleForms.find((a) => a.item_description === box.article_description)
+      const article = articleForms.find((a) => a.line_number === box.line_number)
       return `
         <div class="label">
           <div class="qr"><img src="${qrCodes[i]}" /></div>
@@ -553,12 +574,12 @@ export default function ApprovePage({ params }: ApprovePageProps) {
     }, 30000)
   }
 
-  const addBulkBoxes = async (articleDescription: string) => {
+  const addBulkBoxes = async (articleDescription: string, line: number) => {
     const qty = parseInt(bulkAddQty) || 0
     if (qty < 1) return
 
-    const existing = boxForms.filter((b) => b.article_description === articleDescription)
-    const parentArticle = articleForms.find((a) => a.item_description === articleDescription)
+    const existing = boxForms.filter((b) => b.line_number === line)
+    const parentArticle = articleForms.find((a) => a.line_number === line)
     const startNum = existing.length + 1
     const carton = parseFloat(parentArticle?.carton_weight || "") || 0
 
@@ -575,6 +596,7 @@ export default function ApprovePage({ params }: ApprovePageProps) {
           netVal = String(parseFloat(net.toFixed(3)))
         }
         drafts.push({
+          line_number: line,
           article_description: articleDescription,
           box_number: startNum + i,
           net_weight: netVal,
@@ -591,6 +613,7 @@ export default function ApprovePage({ params }: ApprovePageProps) {
       const persisted = await Promise.all(
         drafts.map((b) =>
           inwardApiService.upsertBox(company, transactionNo, {
+            line_number: b.line_number,
             article_description: b.article_description,
             box_number: b.box_number,
             net_weight: b.net_weight ? parseFloat(b.net_weight) : undefined,
@@ -602,7 +625,7 @@ export default function ApprovePage({ params }: ApprovePageProps) {
 
       const updatedBoxes = [...boxForms, ...persisted]
       setBoxForms(updatedBoxes)
-      recomputeArticleFromBoxes(updatedBoxes, articleDescription)
+      recomputeArticleFromBoxes(updatedBoxes, line)
 
       // One print dialog for all the just-added labels.
       await printBulkLabels(
@@ -611,6 +634,7 @@ export default function ApprovePage({ params }: ApprovePageProps) {
           .map((b) => ({
             box_id: b.box_id as string,
             box_number: b.box_number,
+            line_number: b.line_number,
             article_description: b.article_description,
             net_weight: b.net_weight,
             gross_weight: b.gross_weight,
@@ -631,10 +655,10 @@ export default function ApprovePage({ params }: ApprovePageProps) {
     }
   }
 
-  const applyLotRanges = (articleDescription: string, ranges: LotRange[]) => {
+  const applyLotRanges = (line: number, ranges: LotRange[]) => {
     setBoxForms((prev) =>
       prev.map((box) => {
-        if (box.article_description !== articleDescription) return box
+        if (box.line_number !== line) return box
         const match = ranges.find((r) => box.box_number >= r.from && box.box_number <= r.to)
         return match ? { ...box, lot_number: match.lot } : box
       })
@@ -646,8 +670,8 @@ export default function ApprovePage({ params }: ApprovePageProps) {
 
     // Auto-calc net_weight when gross_weight changes and article has carton_weight
     if (field === "gross_weight") {
-      const articleDesc = boxForms[idx].article_description
-      const parentArticle = articleForms.find((a) => a.item_description === articleDesc)
+      const line = boxForms[idx].line_number
+      const parentArticle = articleForms.find((a) => a.line_number === line)
       const carton = parseFloat(parentArticle?.carton_weight || "") || 0
       if (carton > 0) {
         const gross = parseFloat(String(value)) || 0
@@ -658,15 +682,15 @@ export default function ApprovePage({ params }: ApprovePageProps) {
 
     setBoxForms(newBoxes)
     if (field === "net_weight" || field === "gross_weight") {
-      recomputeArticleFromBoxes(newBoxes, boxForms[idx].article_description)
+      recomputeArticleFromBoxes(newBoxes, boxForms[idx].line_number)
     }
   }
 
   const removeBox = (idx: number) => {
-    const articleDesc = boxForms[idx].article_description
+    const line = boxForms[idx].line_number
     const newBoxes = boxForms.filter((_, i) => i !== idx)
     setBoxForms(newBoxes)
-    recomputeArticleFromBoxes(newBoxes, articleDesc)
+    recomputeArticleFromBoxes(newBoxes, line)
     // Clean up edit state if this box was being edited
     if (editingBoxIndices.has(idx)) {
       setEditingBoxIndices((prev) => {
@@ -685,7 +709,7 @@ export default function ApprovePage({ params }: ApprovePageProps) {
   const handlePrintBox = async (boxIdx: number) => {
     if (!data) return
     const box = boxForms[boxIdx]
-    const article = articleForms.find((a) => a.item_description === box.article_description)
+    const article = articleForms.find((a) => a.line_number === box.line_number)
     if (!article) return
 
     const txn = data.transaction
@@ -695,6 +719,7 @@ export default function ApprovePage({ params }: ApprovePageProps) {
 
       // 1. Save box to backend via upsert
       const upsertResult = await inwardApiService.upsertBox(company, transactionNo, {
+        line_number: box.line_number,
         article_description: box.article_description,
         box_number: box.box_number,
         net_weight: box.net_weight ? parseFloat(box.net_weight) : undefined,
@@ -887,6 +912,7 @@ export default function ApprovePage({ params }: ApprovePageProps) {
           rtv: isRtv,
         },
         articles: articleForms.map((a) => ({
+          line_number: a.line_number,
           item_description: a.item_description,
           quality_grade: a.quality_grade || undefined,
           uom: a.uom || undefined,
@@ -908,6 +934,7 @@ export default function ApprovePage({ params }: ApprovePageProps) {
           } : {}),
         })),
         boxes: boxForms.map((b) => ({
+          line_number: b.line_number,
           article_description: b.article_description,
           box_number: b.box_number,
           net_weight: b.net_weight ? parseFloat(b.net_weight) : undefined,
@@ -1157,7 +1184,9 @@ export default function ApprovePage({ params }: ApprovePageProps) {
             <CardDescription className="text-xs">Fill weights, quantities, dates, and pricing for each article</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4 px-3 sm:px-6">
-            {articleForms.map((article, idx) => (
+            {articleForms.map((article, idx) => {
+              const line = article.line_number
+              return (
               <div key={idx} className="p-3 sm:p-4 border rounded-lg space-y-3">
                 {/* Article header (read-only PO data) */}
                 <div>
@@ -1214,7 +1243,7 @@ export default function ApprovePage({ params }: ApprovePageProps) {
                     <Label className="text-[11px]">Net Wt <span className="text-muted-foreground text-[9px]">(kg)</span></Label>
                     <Input type="number" value={article.net_weight} onChange={(e) => updateArticle(idx, "net_weight", e.target.value)} className="h-8 text-xs" />
                     {(() => {
-                      const bn = boxSumFor(article.item_description).net
+                      const bn = boxSumFor(line).net
                       const d = bn - (parseFloat(article.net_weight) || 0)
                       return bn > 0 && Math.abs(d) > 0.01 ? (
                         <button type="button" onClick={() => updateArticle(idx, "net_weight", String(parseFloat(bn.toFixed(3))))}
@@ -1228,7 +1257,7 @@ export default function ApprovePage({ params }: ApprovePageProps) {
                     <Label className="text-[11px]">Total Wt <span className="text-muted-foreground text-[9px]">(kg)</span></Label>
                     <Input type="number" value={article.total_weight} onChange={(e) => updateArticle(idx, "total_weight", e.target.value)} className="h-8 text-xs" />
                     {(() => {
-                      const bg = boxSumFor(article.item_description).gross
+                      const bg = boxSumFor(line).gross
                       const d = bg - (parseFloat(article.total_weight) || 0)
                       return bg > 0 && Math.abs(d) > 0.01 ? (
                         <button type="button" onClick={() => updateArticle(idx, "total_weight", String(parseFloat(bg.toFixed(3))))}
@@ -1290,12 +1319,12 @@ export default function ApprovePage({ params }: ApprovePageProps) {
                 {/* Lot Range Dedicator — available on all warehouses */}
                 <LotRangeDedicator
                   warehouse={warehouse}
-                  totalBoxes={boxForms.filter((b) => b.article_description === article.item_description).length}
-                  onApply={(ranges) => applyLotRanges(article.item_description, ranges)}
+                  totalBoxes={boxForms.filter((b) => b.line_number === line).length}
+                  onApply={(ranges) => applyLotRanges(line, ranges)}
                 />
 
                 {/* Bulk Add Boxes Form */}
-                {bulkAddArticle === article.item_description && (
+                {bulkAddArticle === line && (
                   <div className="mt-2 p-2.5 rounded-lg border bg-blue-50/50 space-y-2">
                     <p className="text-[11px] font-semibold text-muted-foreground">Bulk Add Boxes</p>
                     <div className="grid grid-cols-3 gap-2">
@@ -1337,7 +1366,7 @@ export default function ApprovePage({ params }: ApprovePageProps) {
                       <Button
                         size="sm"
                         className="h-6 text-xs gap-1"
-                        onClick={() => addBulkBoxes(article.item_description)}
+                        onClick={() => addBulkBoxes(article.item_description, line)}
                         disabled={addingBulkBoxes || !bulkAddQty || parseInt(bulkAddQty) < 1}
                       >
                         {addingBulkBoxes ? (
@@ -1360,9 +1389,8 @@ export default function ApprovePage({ params }: ApprovePageProps) {
                 )}
 
                 {(() => {
-                  const articleDesc = article.item_description
-                  const allArticleBoxes = boxForms.filter((b) => b.article_description === articleDesc)
-                  const artPage = getBoxPage(articleDesc)
+                  const allArticleBoxes = boxForms.filter((b) => b.line_number === line)
+                  const artPage = getBoxPage(line)
                   const artTotalPages = Math.max(1, Math.ceil(allArticleBoxes.length / BOX_PAGE_SIZE))
                   const pageStart = (artPage - 1) * BOX_PAGE_SIZE
                   const pageBoxes = allArticleBoxes.slice(pageStart, pageStart + BOX_PAGE_SIZE)
@@ -1372,19 +1400,19 @@ export default function ApprovePage({ params }: ApprovePageProps) {
                   boxCount={allArticleBoxes.length}
                   currentPage={artPage}
                   totalPages={artTotalPages}
-                  onPageChange={(page) => setBoxPage(articleDesc, page)}
+                  onPageChange={(page) => setBoxPage(line, page)}
                   onNavigate={(boxNum) => {
                     const targetPage = Math.ceil(boxNum / BOX_PAGE_SIZE)
-                    setBoxPage(articleDesc, targetPage)
-                    setHighlightBoxMap((prev) => ({ ...prev, [articleDesc]: { boxNumber: boxNum, key: Date.now() } }))
+                    setBoxPage(line, targetPage)
+                    setHighlightBoxMap((prev) => ({ ...prev, [String(line)]: { boxNumber: boxNum, key: Date.now() } }))
                   }}
-                  highlightBox={highlightBoxMap[articleDesc] ?? null}
-                  onAddBox={() => addBox(articleDesc)}
+                  highlightBox={highlightBoxMap[String(line)] ?? null}
+                  onAddBox={() => addBox(line)}
                   onBulkAdd={() => {
-                    if (bulkAddArticle === articleDesc) {
+                    if (bulkAddArticle === line) {
                       setBulkAddArticle(null)
                     } else {
-                      setBulkAddArticle(articleDesc)
+                      setBulkAddArticle(line)
                       setBulkAddQty("")
                       setBulkAddNetWeight("")
                       setBulkAddGrossWeight("")
@@ -1485,7 +1513,7 @@ export default function ApprovePage({ params }: ApprovePageProps) {
                               variant="ghost"
                               size="icon"
                               className="h-7 w-7 text-primary hover:text-primary"
-                              onClick={() => addBox(article.item_description)}
+                              onClick={() => addBox(line)}
                               title="Add box below"
                             >
                               <Plus className="h-3 w-3" />
@@ -1541,7 +1569,8 @@ export default function ApprovePage({ params }: ApprovePageProps) {
                   )
                 })()}
               </div>
-            ))}
+              )
+            })}
           </CardContent>
         </Card>
 

@@ -766,7 +766,10 @@ function ColdStorageStockSearch({
               <tbody>
                 {results.map((record, idx) => (
                   <tr
-                    key={record.id}
+                    // pile_key, not id: the search unions cfpl + cdpl, whose id
+                    // sequences overlap, and a duplicate React key made the second
+                    // row's Select fire with the first row's record.
+                    key={record.pile_key || `${record.company}-${record.id}`}
                     className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}
                   >
                     <td className="px-3 py-2 text-gray-600">{idx + 1}</td>
@@ -886,6 +889,10 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     cs_inward_no: string | null
     cs_total_inventory_kgs: number | null
     cs_item_mark: string | null
+    // Unique identity of the selected cold pile (item+lot+inward+mark+site+unit+date).
+    // Same lot inwarded on two dates = two piles = two pile_keys, so both can go on
+    // one challan. Also what pick-boxes filters on.
+    cs_pile_key: string | null
   }
 
   const [articles, setArticles] = useState<Article[]>([
@@ -919,6 +926,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       cs_company: null,
       cs_total_inventory_kgs: null,
       cs_item_mark: null,
+      cs_pile_key: null,
     },
   ])
 
@@ -986,6 +994,9 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       const now = new Date()
       const today = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}`
       setFormData(prev => ({ ...prev, requestDate: today, fromWarehouse: "Cold Storage" }))
+      // Same reason for the transfer number: a restored draft carries the number minted
+      // when the draft was started, which the transfer saved back then already took.
+      setTransferNo(generateTransferNo())
     }
   }, [])
 
@@ -1445,6 +1456,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
           cs_company: null,
           cs_total_inventory_kgs: null,
           cs_item_mark: null,
+          cs_pile_key: null,
         })))
         setArticleEntryMode({})
       }
@@ -1485,6 +1497,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       cs_company: null,
       cs_total_inventory_kgs: null,
       cs_item_mark: null,
+      cs_pile_key: null,
     }
     setArticles(prev => [...prev, newArticle])
   }
@@ -1543,6 +1556,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
           cs_company: sourceCompany,
           cs_total_inventory_kgs: (record.net_qty_on_cartons != null && record.weight_kg != null) ? record.net_qty_on_cartons * record.weight_kg : null,
           cs_item_mark: record.item_mark || null,
+          cs_pile_key: record.pile_key || null,
         }
 
         console.log('✅ [DEBUG] Article Updated with CS Data:', {
@@ -1771,7 +1785,10 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       // transfer-in / bulk-mirror has a NULL inward_no but is still fully
       // identifiable by box_id + transaction_no. pick-boxes matches on
       // COALESCE(inward_no,'') so the empty-inward pile resolves correctly.
-      if (!article.item_description || !article.lot_number) {
+      // A pile_key identifies the row on its own, so a blank lot number is fine —
+      // transfer-in / disposition-recovered piles legitimately carry no lot_no and
+      // used to be untransferable (3,900+ boxes stuck behind this check).
+      if (!article.item_description || (!article.lot_number && !article.cs_pile_key)) {
         toast({
           title: "Cannot Add Cold Storage Item",
           description: "Re-select the stock record from the search — item/lot details are missing, so per-box IDs cannot be fetched.",
@@ -1791,21 +1808,28 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         return
       }
 
-      // Block re-adding the SAME (item, lot) pile. Backend pickBoxes returns FIFO
-      // box_ids by id ASC and has no memory of what's already in this draft, so a
-      // second add for the same pile re-picks the same box_ids → backend rejects
-      // with "Duplicate box_id" on save. Force the user to use one entry per pile.
-      const newItem = String(article.item_description || "").trim().toLowerCase()
-      const newLot = String(article.lot_number || "").trim().toLowerCase()
-      const alreadyAdded = scannedBoxes.some(b => {
-        const bi = String(b.itemDescription || "").trim().toLowerCase()
-        const bl = String(b.lotNumber || "").trim().toLowerCase()
-        return bi === newItem && bl === newLot
-      })
+      // Block re-adding the SAME pile. Backend pickBoxes returns FIFO box_ids by id
+      // ASC and has no memory of what's already in this draft, so a second add for
+      // the same pile re-picks the same box_ids → backend rejects with "Duplicate
+      // box_id" on save. Force the user to use one entry per pile.
+      //
+      // Compared by cs_pile_key, NOT (item, lot): the same lot inwarded on two dates —
+      // or held at two units/sites, or under two item marks — is two DIFFERENT piles
+      // of stock, and the old (item, lot) key rejected the second one as a duplicate.
+      // That was the multi-select failure.
+      // When either side has no pile_key (rows loaded in edit mode, or an older
+      // backend) fall back to the old (item, lot) comparison — stricter, never looser.
+      const lotKey = (item: any, lot: any) =>
+        `${String(item || "").trim().toLowerCase()}|${String(lot || "").trim().toLowerCase()}`
+      const alreadyAdded = scannedBoxes.some(b =>
+        (article.cs_pile_key && b.pileKey)
+          ? b.pileKey === article.cs_pile_key
+          : lotKey(b.itemDescription, b.lotNumber) === lotKey(article.item_description, article.lot_number)
+      )
       if (alreadyAdded) {
         toast({
-          title: "Item Already Added",
-          description: `"${article.item_description}" (lot ${article.lot_number}) is already in the list. Remove the existing rows and re-add with the full quantity in one go — boxes have to be picked together to keep box IDs unique.`,
+          title: "Pile Already Added",
+          description: `"${article.item_description}" (lot ${article.lot_number || "no lot"}, inward ${article.cs_inward_no || "-"}) is already in the list. Remove those rows and re-add with the full quantity in one go — boxes have to be picked together to keep box IDs unique. A different inward date / unit / site for the same lot is a separate pile and CAN be added alongside.`,
           variant: "destructive",
         })
         return
@@ -1815,9 +1839,10 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         const pickResult = await ColdStorageApiService.pickBoxes({
           company: article.cs_company,
           item_description: article.item_description,
-          lot_no: article.lot_number,
+          lot_no: article.lot_number || '',
           inward_no: article.cs_inward_no || '',
           qty,
+          pile_key: article.cs_pile_key,
         })
         pickedBoxes = pickResult.boxes
       } catch (err) {
@@ -1837,11 +1862,25 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         })
         return
       }
+      // Two failure modes trip this guard; surface WHICH so support can repair the
+      // exact pile instead of guessing (see cold_stocks box-ID collision incidents):
+      //  - NULL/empty box_id rows (a Set collapses multiple empties to one)
+      //  - the same box_id string on >1 physical box (cross-transaction base collision)
       const uniqueIds = new Set(pickedBoxes.map(b => b.box_id))
       if (uniqueIds.size !== pickedBoxes.length) {
+        const nullBoxCount = pickedBoxes.filter(b => !b.box_id || !String(b.box_id).trim()).length
+        const counts = new Map<string, number>()
+        for (const b of pickedBoxes) {
+          const k = String(b.box_id ?? "")
+          counts.set(k, (counts.get(k) || 0) + 1)
+        }
+        const dupIds = [...counts.entries()].filter(([k, n]) => k.trim() !== "" && n > 1).map(([k]) => k)
+        const detail = nullBoxCount > 0
+          ? `${nullBoxCount} box(es) have no box_id`
+          : `box_id(s) ${dupIds.slice(0, 5).join(", ")}${dupIds.length > 5 ? "…" : ""} repeat`
         toast({
           title: "Duplicate Box IDs From Source",
-          description: `Cold storage returned duplicate box_id values for ${article.item_description}. Aborting — please report this to support.`,
+          description: `Cold storage returned non-unique box_id values for ${article.item_description} (lot ${article.lot_number}): ${detail}. Aborting to protect inventory — report this lot to support for a box-ID repair.`,
           variant: "destructive",
         })
         return
@@ -1882,6 +1921,8 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         totalWeight: String(parseFloat(boxGrossWeight.toFixed(3))),
         batchNumber: article.batch_number || 'N/A',
         lotNumber: article.lot_number || 'N/A',
+        // Which cold pile these boxes came out of — the "already added?" key.
+        pileKey: article.cs_pile_key || null,
         manufacturingDate: article.manufacturing_date || 'N/A',
         expiryDate: article.expiry_date || 'N/A',
         packagingType: isColdStorageArticle ? '' : (String(article.packaging_type) || 'N/A'),
@@ -1935,6 +1976,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
       cs_company: null,
       cs_total_inventory_kgs: null,
       cs_item_mark: null,
+      cs_pile_key: null,
     }
     setArticles(prev => prev.map(a => a.id === article.id ? resetArticle : a))
   }
@@ -2791,7 +2833,9 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         response = await InterunitApiService.createColdTransferOut(coldOutPayload)
         toast({
           title: "Transfer Submitted Successfully",
-          description: `Transfer ${payload.header.challan_no} has been created successfully`,
+          // Show the challan the SERVER stored — it re-mints the number when the
+          // form's client-side one is already taken (stale draft / same-minute submit).
+          description: `Transfer ${response?.challan_no || payload.header.challan_no} has been created successfully`,
         })
       }
 
