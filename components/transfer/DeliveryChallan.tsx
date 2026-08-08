@@ -84,22 +84,22 @@ export default function DeliveryChallan({
     /(^|[^a-z])a[-\s]?68([^a-z]|$)/i.test(warehouseAddresses[fromWarehouse]?.name || "")
   const showCountColumn = hasPMItems || fromWarehouseIsA68
 
-  // Compute total count (sum of unit_pack_size × qty for PM/packaging items)
-  const totalPMCount = validItems
-    .filter(isCountableItem)
-    .reduce((sum: number, item: any) => {
-      const packSize = parseFloat(String(item.unit_pack_size || item.pack_size || "0")) || 0
-      const qty = parseFloat(String(item.qty || item.quantity || "1")) || 1
-      return sum + packSize * qty
-    }, 0)
-
-  // Per-row count helper (consolidated qty × unit_pack_size)
-  const itemCountFor = (item: any) => {
-    if (!isCountableItem(item)) return 0
-    const ups = parseFloat(String(item.unit_pack_size || item.pack_size || "0")) || 0
+  // Pieces on the challan = unit_pack_size x qty. NEVER fall back to pack_size:
+  // the two mean different things (packs-per-box vs weight-per-pack), so the
+  // fallback silently turned a pack count into a weight and back again.
+  const pieceCountFor = (item: any) => {
+    const ups = parseFloat(String(item.unit_pack_size ?? "0")) || 0
+    if (ups <= 0) return 0
     const qty = parseFloat(String(item.qty || item.quantity || "1")) || 1
     return ups * qty
   }
+
+  const totalPMCount = validItems
+    .filter(isCountableItem)
+    .reduce((sum: number, item: any) => sum + pieceCountFor(item), 0)
+
+  const itemCountFor = (item: any) =>
+    isCountableItem(item) ? pieceCountFor(item) : 0
 
   // Total column count for colSpan computations (default 8, +1 when Count column is visible)
   const DC_COLS = showCountColumn ? 10 : 9
@@ -226,7 +226,12 @@ export default function DeliveryChallan({
         <td style={{ padding: '6px 6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', fontSize: '10.5px' }}>No. of Boxes</td>
         <td style={{ padding: '6px 6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', fontSize: '10.5px', whiteSpace: 'nowrap' }}>Qty</td>
         <td style={{ padding: '6px 6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', fontSize: '10.5px', whiteSpace: 'nowrap' }}>UOM</td>
-        <td style={{ padding: '6px 6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', fontSize: '10.5px' }}>Pack Size (kg)</td>
+        {/* NOT kilograms. pack_size is how many retail packs sit in one box; the
+            box weight is pack_size x unit_pack_size. Printing it under "(kg)" is
+            what made TRANS202608061552 read "Pack Size 16.000 / Net Wt 200.220"
+            for 20 boxes — 20 x 16 = 320, which the reader is invited to compute
+            and which was never the weight of anything. */}
+        <td style={{ padding: '6px 6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'center', fontSize: '10.5px' }}>Packs/Box</td>
         <td style={{ padding: '6px 6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'right', fontSize: '10.5px' }}>Net Wt (kg)</td>
         {showCountColumn && (
           <td style={{ padding: '6px 6px', border: '1px solid #000', fontWeight: 'bold', textAlign: 'right', fontSize: '10.5px', whiteSpace: 'nowrap' }}>Count</td>
@@ -311,10 +316,11 @@ export default function DeliveryChallan({
                     </td>
                     <td style={{ padding: '5px 6px', border: '1px solid #000', textAlign: 'center', fontSize: '10.5px', whiteSpace: 'nowrap' }}>
                       {(() => {
-                        // PM/packaging items carry their per-box pack quantity as a COUNT in
-                        // unit_pack_size (pack_size/box-weight is 0 for them); FG/RM use pack_size (kg).
+                        // Both branches print a COUNT of packs per box, which is what
+                        // pack_size holds. PM items carry it in unit_pack_size instead.
+                        // Neither is a weight — the column is headed Packs/Box.
                         const countable = isCountableItem(item)
-                        const n = parseFloat(String((countable ? (item.unit_pack_size ?? item.pack_size) : item.pack_size) ?? '0')) || 0
+                        const n = parseFloat(String((countable ? item.unit_pack_size : item.pack_size) ?? '0')) || 0
                         if (n === 0) return 'N/A'
                         return countable
                           ? n.toLocaleString('en-IN')
@@ -500,9 +506,7 @@ export default function DeliveryChallan({
           </tr>
           {consolidatedItems.map((item, index) => {
             const countable = isCountableItem(item)
-            const itemCount = countable
-              ? (parseFloat(String(item.unit_pack_size || item.pack_size || "0")) || 0) * (parseFloat(String(item.qty || "1")) || 1)
-              : 0
+            const itemCount = itemCountFor(item)
             return (
               <tr key={index}>
                 <td style={{ padding: '5px', border: '1px solid #000', textAlign: 'center' }}>{index + 1}</td>

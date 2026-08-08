@@ -1677,6 +1677,12 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         uom: article.uom,
         pack_size: Number(article.pack_size) || 0,
         unit_pack_size: article.unit_pack_size ? String(article.unit_pack_size) : null,
+        // Send the figure the operator actually saw. Omitting it left the server
+        // to re-derive the weight from pack_size, so the total on screen and the
+        // total on the challan could differ with nothing able to notice — the
+        // form showed 320 kg for TRANS202608061552 and the DC printed 200.220.
+        net_weight: article.net_weight ? String(article.net_weight) : null,
+        total_weight: article.total_weight ? String(article.total_weight) : null,
         batch_number: null,
         lot_number: null,
         vakkal: article.vakkal || null
@@ -1699,15 +1705,29 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     }
 
     
-    // Debug: Log scanned boxes details
-    if (payload.boxes.length > 0) {
-      payload.boxes.forEach((box, index) => {
-      })
-    } else {
+    // What is actually being submitted. The bodies of these loops had been
+    // stripped, leaving empty forEach shells — so the one place that could have
+    // shown the form's total diverging from the scanned boxes printed nothing.
+    const scannedNet = payload.boxes.reduce(
+      (s: number, b: any) => s + (parseFloat(b.net_weight) || 0), 0)
+    const linesNet = payload.lines.reduce(
+      (s: number, l: any) => s + (parseFloat(l.net_weight) || 0), 0)
+    console.info(
+      `[transfer submit] challan=${payload.header.challan_no} ` +
+      `${payload.header.from_warehouse}→${payload.header.to_warehouse} ` +
+      `lines=${payload.lines.length} (${linesNet.toFixed(3)} kg) ` +
+      `boxes=${payload.boxes.length} (${scannedNet.toFixed(3)} kg)`)
+    if (payload.boxes.length > 0 && Math.abs(linesNet - scannedNet) > 0.5) {
+      console.warn(
+        `[transfer submit] line total ${linesNet.toFixed(3)} kg disagrees with the ` +
+        `${payload.boxes.length} scanned boxes (${scannedNet.toFixed(3)} kg) — ` +
+        `the server will use the boxes.`)
     }
-    
-    // Debug: Log the actual article values being sent
-    payload.lines.forEach((line, index) => {
+    payload.lines.forEach((line: any, i: number) => {
+      console.debug(
+        `  line ${i + 1}: ${line.item_desc_raw} | ${line.rm_pm_fg_type} | ` +
+        `qty ${line.qty} ${line.uom} | packs/box ${line.pack_size} | ` +
+        `unit pack ${line.unit_pack_size} | net ${line.net_weight}`)
     })
 
     try {
@@ -2943,12 +2963,22 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
           </CardContent>
         </Card>
 
-        {/* ── Requested vs Actual Weight Comparison ── */}
-        {loadedItems.length > 0 && (
+        {/* ── Weight comparison ──
+            Shown whenever there is something to compare, not only for transfers
+            raised against a request. Gating it on loadedItems meant a direct
+            transfer — the common case — could go out with the keyed total and
+            the scanned boxes disagreeing and nothing on screen saying so.
+            With no request it compares what you typed against what you scanned. */}
+        {(loadedItems.length > 0 || scannedBoxes.length > 0) && (
           (() => {
-            const requestedNetWt = loadedItems.reduce((sum, it) => sum + (parseFloat(it.net_weight) || 0), 0)
+            const hasRequest = loadedItems.length > 0
             const scannedNetWt = scannedBoxes.reduce((sum, box) => sum + (parseFloat(box.netWeight) || 0), 0)
             const articlesNetWt = articles.reduce((sum, art) => sum + (art.net_weight || 0), 0)
+            // Baseline: the request when there is one, otherwise the operator's
+            // own keyed total. Either way the boxes are what actually ships.
+            const requestedNetWt = hasRequest
+              ? loadedItems.reduce((sum, it) => sum + (parseFloat(it.net_weight) || 0), 0)
+              : articlesNetWt
             const actualNetWt = scannedNetWt > 0 ? scannedNetWt : articlesNetWt
             const diff = actualNetWt - requestedNetWt
             const isMatch = Math.abs(diff) < 0.01
@@ -2964,13 +2994,16 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                     Weight Comparison — {isMatch ? 'Matched' : isOver ? 'Over by ' + diff.toFixed(3) + ' Kg' : 'Under by ' + Math.abs(diff).toFixed(3) + ' Kg'}
                   </CardTitle>
                   <p className={`text-xs ${textColor} opacity-80`}>
-                    {isMatch ? 'Actual weight matches requested weight' : 'Weight does not match — you can still submit'}
+                    {isMatch
+                      ? (hasRequest ? 'Actual weight matches requested weight' : 'Scanned boxes match the weight you entered')
+                      : (hasRequest ? 'Weight does not match the request — check before submitting'
+                                    : 'The scanned boxes do not match the weight you entered — the challan will show the boxes')}
                   </p>
                 </CardHeader>
                 <CardContent className={`pt-3 pb-4 ${bgColor}`}>
                   <div className="grid grid-cols-3 gap-4 text-center">
                     <div className="bg-white rounded-lg p-3 border">
-                      <p className="text-[10px] uppercase font-semibold text-gray-500 mb-1">Requested</p>
+                      <p className="text-[10px] uppercase font-semibold text-gray-500 mb-1">{hasRequest ? 'Requested' : 'You entered'}</p>
                       <p className="text-lg font-bold text-blue-700">{requestedNetWt.toFixed(3)}</p>
                       <p className="text-[10px] text-gray-400">Kg</p>
                     </div>
