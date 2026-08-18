@@ -823,6 +823,36 @@ export default function TransferInPage({ params }: TransferInPageProps) {
     })
   }
 
+  // Carton tare for a line = dispatched Total Wt - dispatched Net Wt, i.e. the weight
+  // of the packaging itself. Returns 0 when the dispatch carries no usable total, so
+  // Total then tracks Net exactly rather than inventing a difference.
+  const cartonTareFor = (lineIndex: number): number => {
+    const line = lines[lineIndex]
+    if (!line) return 0
+    const net = Number(line.net_weight ?? 0)
+    const total = Number(line.total_weight ?? 0)
+    const tare = total - net
+    return Number.isFinite(tare) && tare > 0 ? tare : 0
+  }
+
+  // Keep Total Wt in step with Net Wt while the operator types.
+  //
+  // The two fields used to drift independently: correcting a mis-keyed net of 5.000
+  // to 0.500 left Total sitting at 5.500, and nothing on screen contradicted it — the
+  // discrepancy only surfaced once the batch had already been written, by which point
+  // the box carried a printed label with the wrong weight. Total stays editable, so an
+  // operator weighing the actual carton can still override it.
+  const updateIssueNetWeight = (value: string) => {
+    setIssueForm(prev => {
+      const next = { ...prev, net_weight: value }
+      const net = Number(value)
+      if (value.trim() !== "" && Number.isFinite(net) && issueOpenIndex !== null) {
+        next.total_weight = String(Number((net + cartonTareFor(issueOpenIndex)).toFixed(3)))
+      }
+      return next
+    })
+  }
+
   const handleSubmitIssue = async (lineIndex: number) => {
     const headerId = await ensurePendingHeader()
     if (!headerId) return
@@ -897,11 +927,15 @@ export default function TransferInPage({ params }: TransferInPageProps) {
       const count = targetIndices.length
       toast.success(count > 1 ? `Discrepancy noted for ${count} boxes of ${itemName}` : `Discrepancy noted for ${itemName}`)
 
-      // Auto-print issue QR for cold storage transfers
-      if (isColdStorageFrom) {
-        for (const idx of targetIndices) {
-          await handlePrintQR(idx, { skipAcknowledge: true, issueOverride: issueData })
-        }
+      // Reprint the label for every box the issue touched, whatever the source.
+      //
+      // This was gated to cold-storage dispatches, but the reason for reprinting has
+      // nothing to do with where the goods came from: an issue changes the weights and
+      // case pack recorded against the box, so the sticker already on the carton now
+      // disagrees with the receipt. A warehouse-sourced carton flagged for holding 8
+      // was left wearing its dispatched label reading 10.
+      for (const idx of targetIndices) {
+        await handlePrintQR(idx, { skipAcknowledge: true, issueOverride: issueData })
       }
     } catch (err: any) {
       toast.error(err.message || "Failed to save issue")
@@ -2469,7 +2503,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                                           </div>
                                           <div className="space-y-1">
                                             <Label className="text-xs font-medium text-red-700">Net Weight</Label>
-                                            <Input type="number" step="any" value={issueForm.net_weight} onChange={(e) => setIssueForm(prev => ({ ...prev, net_weight: e.target.value }))} placeholder="e.g. 500" className="h-9 bg-white border-red-200 focus-visible:ring-red-300 text-sm" />
+                                            <Input type="number" step="any" value={issueForm.net_weight} onChange={(e) => updateIssueNetWeight(e.target.value)} placeholder="e.g. 500" className="h-9 bg-white border-red-200 focus-visible:ring-red-300 text-sm" />
                                           </div>
                                           <div className="space-y-1">
                                             <Label className="text-xs font-medium text-red-700">Total Weight</Label>
@@ -2655,7 +2689,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                                   </div>
                                   <div className="space-y-1">
                                     <Label className="text-xs font-medium text-red-700">Net Weight</Label>
-                                    <Input type="number" step="any" value={issueForm.net_weight} onChange={(e) => setIssueForm(prev => ({ ...prev, net_weight: e.target.value }))} placeholder="e.g. 500" className="h-9 bg-white border-red-200 focus-visible:ring-red-300 text-sm" />
+                                    <Input type="number" step="any" value={issueForm.net_weight} onChange={(e) => updateIssueNetWeight(e.target.value)} placeholder="e.g. 500" className="h-9 bg-white border-red-200 focus-visible:ring-red-300 text-sm" />
                                   </div>
                                   <div className="space-y-1">
                                     <Label className="text-xs font-medium text-red-700">Total Weight</Label>
