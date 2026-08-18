@@ -805,9 +805,18 @@ export default function TransferPage({ params }: TransferPageProps) {
                         <Badge variant="outline" className="text-[11px] bg-blue-50 text-blue-700 border-blue-200">
                           {t.items_count} Item{t.items_count !== 1 ? 's' : ''}
                         </Badge>
+                        {/* The column is headed "Items/Boxes": show the box count, which
+                            is the physical truth (COUNT of interunit_transfer_boxes).
+                            It reads Qty (SUM of line qty) only when the two disagree —
+                            that divergence is the signal something is off, not noise. */}
                         <Badge variant="outline" className="text-[11px] bg-amber-50 text-amber-700 border-amber-200">
-                          Qty: {t.total_qty || 0}
+                          Boxes: {t.boxes_count ?? 0}
                         </Badge>
+                        {(t.total_qty ?? 0) !== (t.boxes_count ?? 0) && (
+                          <Badge variant="outline" className="text-[11px] bg-gray-50 text-gray-600 border-gray-200">
+                            Qty: {t.total_qty || 0}
+                          </Badge>
+                        )}
                       </div>
                       <div className="flex gap-2 pt-1">
                         <Button variant="outline" size="sm"
@@ -896,7 +905,11 @@ export default function TransferPage({ params }: TransferPageProps) {
                           <td className="py-3 px-4">
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <Badge variant="outline" className="text-[11px] bg-blue-50 text-blue-700 border-blue-200">{t.items_count} Item{t.items_count !== 1 ? 's' : ''}</Badge>
-                              <Badge variant="outline" className="text-[11px] bg-amber-50 text-amber-700 border-amber-200">Qty: {t.total_qty || 0}</Badge>
+                              {/* Boxes = physical truth; Qty shown only when it disagrees. */}
+                              <Badge variant="outline" className="text-[11px] bg-amber-50 text-amber-700 border-amber-200">Boxes: {t.boxes_count ?? 0}</Badge>
+                              {(t.total_qty ?? 0) !== (t.boxes_count ?? 0) && (
+                                <Badge variant="outline" className="text-[11px] bg-gray-50 text-gray-600 border-gray-200">Qty: {t.total_qty || 0}</Badge>
+                              )}
                             </div>
                           </td>
                           <td className="py-3 px-4">

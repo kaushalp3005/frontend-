@@ -610,10 +610,18 @@ export class InterunitApiService {
     })
   }
 
-  static async deleteColdTransferOut(headerId: number): Promise<any> {
-    return await fetchJSON(`${API_BASE_URL}/interunit/cold-transfer-out/${headerId}`, {
-      method: "DELETE",
-    })
+  // user_email/user_role are required by the server's delete allowlist (the same
+  // check DELETE /transfers/{id} uses). This endpoint used to have no check at all.
+  static async deleteColdTransferOut(
+    headerId: number,
+    userEmail: string,
+    userRole: string = "",
+  ): Promise<any> {
+    const params = new URLSearchParams({ user_email: userEmail, user_role: userRole })
+    return await fetchJSON(
+      `${API_BASE_URL}/interunit/cold-transfer-out/${headerId}?${params.toString()}`,
+      { method: "DELETE" },
+    )
   }
 
   // ── Pending Transfer IN (real-time acknowledge) ──

@@ -2679,22 +2679,54 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     const clean = (val: any) => (val && val !== 'N/A') ? val : ""
     const cleanNull = (val: any) => (val && val !== 'N/A') ? val : null
 
-    // Build lines from scannedBoxes (manually added articles)
-    // net_weight and total_weight are already in Kg (converted at add time)
-    const lines = scannedBoxes.map((box) => ({
-      material_type: clean(box.materialType),
-      item_category: clean(box.itemCategory),
-      sub_category: clean(box.subCategory),
-      item_description: clean(box.itemDescription),
-      quantity: String(box.quantityUnits && box.quantityUnits !== 'N/A' ? box.quantityUnits : 0),
-      uom: clean(box.uom),
-      pack_size: String(clean(box.packagingType)),
-      unit_pack_size: box.packageSize ? String(clean(box.packageSize)) : null,
-      net_weight: String(box.netWeight || 0),
-      total_weight: String(box.totalWeight || 0),
-      batch_number: cleanNull(box.batchNumber),
-      lot_number: cleanNull(box.lotNumber)
-    }))
+    // Build lines from scannedBoxes, grouped by (item, lot) — ONE line per pile,
+    // quantity = the BOX COUNT. net_weight/total_weight are already in Kg
+    // (converted at add time), so they sum across the pile's boxes.
+    //
+    // This used to be `scannedBoxes.map(...)`: one line PER BOX, each stamping
+    // that box's `quantityUnits` (bags per box) as the quantity. The DB grain is
+    // one row per (article, lot), so those rows collapsed onto one key — the last
+    // won the box mapping and the rest were orphaned with their per-box qty
+    // intact. TRANS202608171318 shipped 100 boxes and listed "2 Items / Qty: 198"
+    // (100 from the two mapped lines + 98 orphans), and the same 98 were parked
+    // as phantom 'LINE-' rows in pending_transfer_stock.
+    const lineGroups = new Map<string, any>()
+    for (const box of scannedBoxes) {
+      const item_description = clean(box.itemDescription)
+      const lot_number = cleanNull(box.lotNumber)
+      // Must match the key the boxes payload below sends, or the backend links
+      // the box to the wrong line.
+      const key = `${String(item_description).trim().toUpperCase()}||${String(lot_number ?? "").trim().toUpperCase()}`
+      const group = lineGroups.get(key)
+      if (group) {
+        group.boxCount += 1
+        group.netWeight += parseFloat(box.netWeight) || 0
+        group.totalWeight += parseFloat(box.totalWeight) || 0
+        continue
+      }
+      lineGroups.set(key, {
+        material_type: clean(box.materialType),
+        item_category: clean(box.itemCategory),
+        sub_category: clean(box.subCategory),
+        item_description,
+        uom: clean(box.uom),
+        pack_size: String(clean(box.packagingType)),
+        unit_pack_size: box.packageSize ? String(clean(box.packageSize)) : null,
+        batch_number: cleanNull(box.batchNumber),
+        lot_number,
+        boxCount: 1,
+        netWeight: parseFloat(box.netWeight) || 0,
+        totalWeight: parseFloat(box.totalWeight) || 0,
+      })
+    }
+    const lines = Array.from(lineGroups.values()).map(
+      ({ boxCount, netWeight, totalWeight, ...rest }) => ({
+        ...rest,
+        quantity: String(boxCount),
+        net_weight: String(Number(netWeight.toFixed(3))),
+        total_weight: String(Number(totalWeight.toFixed(3))),
+      })
+    )
 
     // Only include boxes that were actually QR-scanned (not manually added via "Add to Articles List")
     console.log('🔍 [DEBUG] Filtering scanned boxes:', {
@@ -2726,8 +2758,11 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         box_number: box.boxNumber,
         box_id: box.boxId || "",
         article: box.itemDescription || "Unknown Article",
-        lot_number: box.lotNumber || "",
-        batch_number: box.batchNumber || "",
+        // cleanNull, not `|| ""` — this fed the literal 'N/A' through while the
+        // matching line sent null, so lot-less cold piles never matched on the
+        // backend's (article, lot) key and every box fell back to an arbitrary line.
+        lot_number: cleanNull(box.lotNumber) || "",
+        batch_number: clean(box.batchNumber),
         transaction_no: box.transactionNo || "",
         net_weight: String(Number(netVal.toFixed(3))),
         gross_weight: String(Number(grossVal.toFixed(3)))
