@@ -150,11 +150,12 @@ export default function TransferInPage({ params }: TransferInPageProps) {
   }
 
   // ── Authorized users for acknowledge / print QR / issue actions ──
-  const AUTHORIZED_ACKNOWLEDGE_USERS = ["yash@candorfoods.in", "b.hrithik@candorfoods.in", "sunil.jasoria@candorfoods.in"]
+  const AUTHORIZED_ACKNOWLEDGE_USERS = ["yash@candorfoods.in", "b.hrithik@candorfoods.in", "sunil.jasoria@candorfoods.in", "digamber.sawant@candorfoods.in"]
   const isAuthorizedUser = AUTHORIZED_ACKNOWLEDGE_USERS.includes(user?.email?.toLowerCase() || "")
-  // Only this user may re-open a Received transfer-in back to Pending (to correct
+  // Only these users may re-open a Received transfer-in back to Pending (to correct
   // a lot number / raise a box issue). Enforced again server-side.
-  const canReopenReceived = (user?.email?.toLowerCase() || "") === "b.hrithik@candorfoods.in"
+  const REOPEN_ALLOWED_EMAILS = ["b.hrithik@candorfoods.in", "digamber.sawant@candorfoods.in"]
+  const canReopenReceived = REOPEN_ALLOWED_EMAILS.includes(user?.email?.toLowerCase() || "")
 
   // ── Cold storage check (moved above `lines` so cold-storage branch can swap source) ──
   const COLD_STORAGE_WAREHOUSES = ["Cold Storage", "Rishi", "Savla D-39", "Savla D-514", "Supreme", "Eskimo"]
@@ -655,7 +656,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
   const handleSearch = () => loadTransferDetails(transferNumber)
 
   // Re-open a Received transfer-in: reverses the receipt's stock movement
-  // (server-side, gated to b.hrithik), then reloads so the user can un-acknowledge
+  // (server-side, gated to b.hrithik / digamber.sawant), then reloads so the user can un-acknowledge
   // a box, correct its lot / raise an issue, and Confirm Receipt again.
   const handleReopenReceipt = async () => {
     if (!transferData?.id) return
@@ -3449,7 +3450,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
   )
 }
 
-// ── Privileged "Edit Receipt" dialog (gated to b.hrithik server-side) ──
+// ── Privileged "Edit Receipt" dialog (gated to b.hrithik / digamber.sawant server-side) ──
 // Loads the transfer-in (header + boxes) for the transfer-out, lets the fields be
 // edited, and on Save calls the edit endpoint which syncs receipt + source
 // transfer-out boxes + destination cold stock.

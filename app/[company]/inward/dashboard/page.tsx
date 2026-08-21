@@ -79,7 +79,7 @@ function chipToggle(set: Set<string>, val: string): Set<string> {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-const DASHBOARD_ALLOWED_EMAILS = ["yash@candorfoods.in", "b.hrithik@candorfoods.in"]
+const DASHBOARD_ALLOWED_EMAILS = ["yash@candorfoods.in", "b.hrithik@candorfoods.in", "digamber.sawant@candorfoods.in"]
 
 export default function InwardDashboard({ params }: Props) {
   const { company } = params
