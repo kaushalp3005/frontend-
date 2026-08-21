@@ -729,8 +729,8 @@ export class InterunitApiService {
 
   /**
    * POST /interunit/transfer-in/reopen-by-transfer-out/{transferOutId} — re-open a
-   * Received transfer-in back to Pending (gated server-side to
-   * b.hrithik@candorfoods.in) so a box can be un-acknowledged / its lot corrected /
+   * Received transfer-in back to Pending (gated server-side to b.hrithik@ /
+   * digamber.sawant@candorfoods.in) so a box can be un-acknowledged / its lot corrected /
    * an issue raised, then re-finalized. Reverses the receipt's stock movement;
    * boxes are kept. Keyed by the Transfer OUT id (which the receive screen holds).
    */
@@ -746,7 +746,7 @@ export class InterunitApiService {
   }
 
   /**
-   * PUT a privileged full-receipt edit (gated server-side to b.hrithik@candorfoods.in).
+   * PUT a privileged full-receipt edit (gated server-side to b.hrithik@ / digamber.sawant@).
    * Updates the transfer-in header + boxes and syncs the source transfer-out boxes
    * and the destination cold-storage stock.
    */

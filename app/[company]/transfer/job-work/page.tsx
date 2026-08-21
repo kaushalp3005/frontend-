@@ -328,7 +328,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
   const router = useRouter()
   const { toast } = useToast()
   const { user } = useAuthStore()
-  const DELETE_ALLOWED_EMAILS = ["b.hrithik@candorfoods.in", "yash@candorfoods.in"]
+  const DELETE_ALLOWED_EMAILS = ["b.hrithik@candorfoods.in", "yash@candorfoods.in", "digamber.sawant@candorfoods.in"]
   const canDelete = user?.email ? DELETE_ALLOWED_EMAILS.includes(user.email) : false
 
   const [activeTab, setActiveTab] = useState("records")

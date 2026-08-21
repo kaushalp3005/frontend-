@@ -134,9 +134,10 @@ export default function DashboardPage({ params }: DashboardPageProps) {
 
   const { user } = useAuthStore()
 
-  // Only show summary redirects for developers or specific user
+  // Only show summary redirects for developers or specific users
+  const SUMMARY_REDIRECT_EMAILS = ["b.hrithik@candorfoods.in", "digamber.sawant@candorfoods.in"]
   const showSummaryRedirects =
-    user?.isDeveloper === true || user?.email === "b.hrithik@candorfoods.in"
+    user?.isDeveloper === true || SUMMARY_REDIRECT_EMAILS.includes(user?.email || "")
 
   // Fetch dashboard data
   useEffect(() => {
@@ -355,7 +356,7 @@ export default function DashboardPage({ params }: DashboardPageProps) {
           </CardContent>
         </Card>
 
-        {/* Summary Dashboards — visible to developers and b.hrithik@candorfoods.in */}
+        {/* Summary Dashboards — visible to developers, b.hrithik@ and digamber.sawant@ */}
         {showSummaryRedirects && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">

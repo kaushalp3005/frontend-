@@ -20,7 +20,7 @@ import { cn } from "@/lib/utils"
 import { PermissionGuard } from "@/components/auth/permission-gate"
 import { useAuthStore } from "@/lib/stores/auth"
 
-const DASHBOARD_ALLOWED_EMAILS = ["yash@candorfoods.in", "b.hrithik@candorfoods.in"]
+const DASHBOARD_ALLOWED_EMAILS = ["yash@candorfoods.in", "b.hrithik@candorfoods.in", "digamber.sawant@candorfoods.in"]
 import { transferDashboardApi, readTransferCache, writeTransferCache, type TransferRecord, type TransferFilterOptions } from "@/lib/api/transferDashboardApi"
 import { getDisplayWarehouseName, normalizeWarehouseName } from "@/lib/constants/warehouses"
 import { canonicalizeCategory } from "@/lib/categories/canonicalize"

@@ -38,7 +38,7 @@ type Props = {
   userRole?: string
 }
 
-const ALLOWED_CANCEL_EMAILS = new Set(["yash@candorfoods.in", "b.hrithik@candorfoods.in"])
+const ALLOWED_CANCEL_EMAILS = new Set(["yash@candorfoods.in", "b.hrithik@candorfoods.in", "digamber.sawant@candorfoods.in"])
 const ADMIN_ROLES = new Set(["admin", "developer"])
 
 const canCancel = (email?: string, role?: string) => {

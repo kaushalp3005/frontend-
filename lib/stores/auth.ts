@@ -73,6 +73,7 @@ const STATIC_COMPANIES: Array<{code: Company, name: string}> = [
 export const LOT_SEARCH_ALLOWED_EMAILS = new Set<string>([
   "yash@candorfoods.in",
   "b.hrithik@candorfoods.in",
+  "digamber.sawant@candorfoods.in",
 ])
 
 export const useAuthStore = create<AuthState>()(

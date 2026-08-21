@@ -34,7 +34,8 @@ export default function TransferPage({ params }: TransferPageProps) {
   const { toast } = useToast()
   const { user } = useAuthStore()
   const canDelete = user?.email === 'yash@candorfoods.in'
-  const canDeleteInnerCold = user?.email === 'hrithik@candorfoods.in' || user?.email === 'yash@candorfoods.in'
+  const INNER_COLD_DELETE_EMAILS = ['hrithik@candorfoods.in', 'yash@candorfoods.in', 'digamber.sawant@candorfoods.in']
+  const canDeleteInnerCold = INNER_COLD_DELETE_EMAILS.includes(user?.email || '')
   const [activeTab, setActiveTab] = useState("transferout")
   const [warehouseFilter, setWarehouseFilter] = useState<string>("all")
   const [userDefaultWarehouses, setUserDefaultWarehouses] = useState<string[]>([])
