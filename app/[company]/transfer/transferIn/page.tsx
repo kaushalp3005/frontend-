@@ -31,6 +31,33 @@ interface TransferInPageProps {
   }
 }
 
+// ── Did a finalize / bulk-create actually CLOSE the receipt? ──────────────────────
+//
+// Both endpoints honour the same bridge invariant: post only the boxes this GRN claims,
+// and flip to 'Received' ONLY when nothing is left In Transit. A short receipt is not an
+// error — it returns 200 with `remaining_in_transit > 0` and a status still 'Pending'.
+// So "the call did not throw" is NOT evidence the receipt is done, and treating it that
+// way is what let a shortfall be announced as a completed GRN.
+//
+// `remaining_in_transit` is the primary signal; `status` is the cross-check, and it is
+// the ONLY signal on the idempotent already-finalized early return, which omits the
+// count entirely (interunit_tools.finalize_transfer_in returns `already_finalized: True`
+// there). A response carrying neither is unreachable against this backend — both paths
+// always set the count — and is treated as complete so an unrecognised shape can never
+// block a legitimate receipt.
+const shortfallOf = (result: any): number | null => {
+  const n = Number(result?.remaining_in_transit)
+  return Number.isFinite(n) ? n : null
+}
+
+const isFinalizeComplete = (result: any): boolean => {
+  if (result?.already_finalized) return true
+  const remaining = shortfallOf(result)
+  if (remaining !== null) return remaining === 0
+  const status = String(result?.status || "").toLowerCase()
+  return status ? status === "received" : true
+}
+
 export default function TransferInPage({ params }: TransferInPageProps) {
   const { company } = params
   const router = useRouter()
@@ -133,12 +160,22 @@ export default function TransferInPage({ params }: TransferInPageProps) {
   const isSyntheticLineBoxId = (id: any) =>
     typeof id === "string" && id.startsWith("LINE-")
 
-  // For cold-storage transfers, render Article Entries directly from the boxes table —
-  // each box already has box_id + transaction_no populated, while transfer_lines does not.
+  // Render Article Entries directly from the boxes table — one row per PHYSICAL box.
+  //
+  // This used to be gated on `isColdStorageFrom`, which made the receive screen show a
+  // different thing depending on where the goods came from. The dispatch form sends ONE
+  // LINE PER ARTICLE carrying a quantity (transferform: `lines: articles.map(...)` with
+  // `qty: quantity_units`) plus one box row per scanned carton — so on a warehouse source
+  // the `rawLines` fallback below rendered a 148-carton dispatch as a SINGLE row.
+  // Measured on production: 112 warehouse-source transfers collapse this way, e.g.
+  // TRANS202608201905 (id 1913, W202 -> Savla D-514) — 148 boxes, 1 line, qty 148, every
+  // box carrying its own distinct box_id. That one row showed the LINE's total net
+  // (740.000 kg) and acknowledged ONE box at 740 kg instead of 148 boxes at 5 kg.
+  // Cold sources were unaffected only because they took this branch already.
   // Memoized so its reference is stable across renders (prevents downstream effect loops).
   const linesFromBoxes = useMemo(() => {
     const _boxes = transferData?.boxes || []
-    if (!isColdStorageFrom || _boxes.length === 0) return null
+    if (_boxes.length === 0) return null
     return _boxes.map((b: any) => {
       const synthetic = isSyntheticLineBoxId(b.box_id)
       return {
@@ -161,7 +198,54 @@ export default function TransferInPage({ params }: TransferInPageProps) {
         unit_pack_size: "1",
       }
     })
-  }, [transferData, isColdStorageFrom])
+  }, [transferData])
+
+  // Units a line DECLARED but no carton was scanned for — the shortfall between the
+  // line's qty and the boxes actually bound to it. The dispatch parks exactly these as
+  // `LINE-<line_id>-<n>` rows in pending_transfer_stock (reversal park_lines), so they
+  // are real cartons on the vehicle and must stay receivable; without them a partially
+  // scanned dispatch would show only what was scanned. Verified against production:
+  // TRANS202608041512-class transfers park qty-minus-boxes sentinels per line
+  // (id 1826: qty 9, 6 boxes, 3 sentinels; id 1772: 31/5/26; id 1614: 58/6/52).
+  //
+  // The synthetic id is a STRING (`<lineId>-u<n>`) on purpose: lineBoxDataMap is keyed by
+  // the numeric line id, so a string key can never collide with it and hand a synthetic
+  // row a real box's sticker.
+  const unscannedUnits = useMemo(() => {
+    const _boxes = transferData?.boxes || []
+    if (_boxes.length === 0) return []
+    const boundPerLine = new Map<any, number>()
+    for (const b of _boxes) {
+      if (b.transfer_line_id == null) continue
+      boundPerLine.set(b.transfer_line_id, (boundPerLine.get(b.transfer_line_id) ?? 0) + 1)
+    }
+    const out: any[] = []
+    for (const l of rawLines as any[]) {
+      const declared = Math.trunc(Number(l.qty ?? l.quantity ?? 0)) || 0
+      const short = Math.max(declared - (boundPerLine.get(l.id) ?? 0), 0)
+      if (short <= 0) continue
+      // Per unit, rounded the way park_lines rounds, so the on-screen rows sum back to
+      // the line's printed totals instead of drifting by a few grams.
+      const perNet = declared > 0 ? Math.round((Number(l.net_weight || 0) / declared) * 1000) / 1000 : 0
+      const perGross = declared > 0 ? Math.round((Number(l.total_weight || 0) / declared) * 1000) / 1000 : 0
+      for (let n = 1; n <= short; n++) {
+        out.push({
+          ...l,
+          id: `${l.id}-u${n}`,
+          _source: "unit",
+          _line_id: l.id,
+          box_id: "",
+          transaction_no: "",
+          net_weight: perNet,
+          total_weight: perGross || perNet,
+          quantity: "1",
+          qty: 1,
+          uom: "BOX",
+        })
+      }
+    }
+    return out
+  }, [transferData, rawLines])
 
   // True whenever scanned boxes exist on a non-cold transfer. Every entry (scanned OR
   // manually typed) is shown as an Article Entry line and acknowledged via the line flow —
@@ -173,11 +257,15 @@ export default function TransferInPage({ params }: TransferInPageProps) {
   const allLinesCoveredByBoxes = boxes.length > 0
   // Memoized so `lines` ref is stable — downstream effects with `lines` in deps must not re-fire every render.
   const lines = useMemo(() => {
-    if (linesFromBoxes) return linesFromBoxes
-    if (allLinesCoveredByBoxes) return rawLines
-    const _boxLineIds = new Set((transferData?.boxes || []).map((b: any) => b.transfer_line_id).filter(Boolean))
-    return rawLines.filter((l: any) => !_boxLineIds.has(l.id))
-  }, [transferData, linesFromBoxes, allLinesCoveredByBoxes])
+    // No cartons scanned at all — the dispatch is line-only, so the lines ARE the entries.
+    if (!linesFromBoxes) {
+      const _boxLineIds = new Set((transferData?.boxes || []).map((b: any) => b.transfer_line_id).filter(Boolean))
+      return rawLines.filter((l: any) => !_boxLineIds.has(l.id))
+    }
+    // One row per scanned carton, then the declared-but-unscanned units of every line.
+    // A line fully covered by its boxes contributes nothing here, so nothing is doubled.
+    return unscannedUnits.length ? [...linesFromBoxes, ...unscannedUnits] : linesFromBoxes
+  }, [transferData, linesFromBoxes, unscannedUnits, rawLines])
   const totalBoxes = boxes.length
   const totalLines = lines.length
   const uniqueArticleCount = useMemo(() => {
@@ -396,17 +484,22 @@ export default function TransferInPage({ params }: TransferInPageProps) {
       // When boxes cover all lines (1:1), use per-box weights instead of line totals
       const respLines = response.lines || []
       const respBoxes = response.boxes || []
-      const boxesCoverLines = respBoxes.length > 0 && respBoxes.length >= respLines.length
       const weightsMap: Record<number, { net_weight: string; total_weight: string }> = {}
-      respLines.forEach((line: any, i: number) => {
-        const boxWt = boxesCoverLines && respBoxes[i]
-          ? { net: respBoxes[i].net_weight, gross: respBoxes[i].gross_weight }
-          : null
-        weightsMap[i] = {
-          net_weight: boxWt ? String(boxWt.net) : (line.net_weight ? String(line.net_weight) : ""),
-          total_weight: boxWt ? String(boxWt.gross || boxWt.net) : (line.total_weight ? String(line.total_weight) : ""),
-        }
-      })
+      // lineWeights is keyed by the ROW index of `lines`. Once cartons exist, `lines` is
+      // box-derived (plus per-unit rows) and each row already carries its OWN net/gross,
+      // so there is nothing to seed — and seeding here would be actively wrong: this map
+      // was built by walking `response.lines`, so on a dispatch with fewer boxes than
+      // lines (6 boxes / 55 lines) row 0 is a 5 kg carton while weightsMap[0] holds line
+      // 0's 300 kg TOTAL, and the carton would render its whole article's weight.
+      // Seed only the line-only dispatch, where row index and line index still coincide.
+      if (respBoxes.length === 0) {
+        respLines.forEach((line: any, i: number) => {
+          weightsMap[i] = {
+            net_weight: line.net_weight ? String(line.net_weight) : "",
+            total_weight: line.total_weight ? String(line.total_weight) : "",
+          }
+        })
+      }
       setLineWeights(weightsMap)
 
       const boxCount = (response.boxes || []).length
@@ -439,7 +532,12 @@ export default function TransferInPage({ params }: TransferInPageProps) {
 
           const restoredWeights: Record<number, { net_weight: string; total_weight: string }> = {}
 
-          const _coldLines = (_isColdFrom && (response.boxes || []).length > 0) ? (response.boxes || []) : null
+          // Box-derived rows now lead `lines` for EVERY source, not just cold, and they
+          // keep response.boxes' order — so the stable (box_id + transaction_no) remap
+          // applies everywhere. Gating it on the cold flag left warehouse receipts
+          // restoring by positional line_index, which the comment above says lands the
+          // green flags on the wrong box after a reopen/resume.
+          const _coldLines = (response.boxes || []).length > 0 ? (response.boxes || []) : null
           const idxByBoxKey: Record<string, number> = {}
           if (_coldLines) {
             _coldLines.forEach((b: any, i: number) => {
@@ -948,6 +1046,30 @@ export default function TransferInPage({ params }: TransferInPageProps) {
     setIssueForm({ remarks: "", net_weight: "", total_weight: "", case_pack: "" })
     setApplyToAllIssue(false)
   }
+
+  // ── Bulk acknowledge: HIDDEN pending the conflicts fix ────────────────────────
+  // POST /transfer-in/{id}/acknowledge-batch returns HTTP **200** carrying
+  // { success: false, conflicts: [...] } when individual boxes are refused
+  // (interunit_tools.acknowledge_pending_boxes_batch catches each HTTPException and
+  // collects it rather than failing the batch). fetchJSON only throws on
+  // `!response.ok`, so both handlers below read a partial failure as a full success:
+  // they mark EVERY row green — including rows that were never in the batch — which
+  // flips `allMatched` and unlocks Confirm Receipt while the refused boxes were never
+  // written to the GRN. On the 148-row receipts this screen now renders correctly,
+  // that is the difference between a receipt and a stock loss.
+  //
+  // Both controls are gated on this single flag because they are the same action under
+  // two labels: once cartons exist, `linesAreBoxes || allLinesCoveredByBoxes` is true,
+  // so handleAcknowledgeAll skips its boxes loop and does exactly what
+  // handleAcknowledgeAllLines does. Hiding one and leaving the other reachable would
+  // change nothing.
+  //
+  // Per-row Acknowledge is NOT affected — it awaits a single POST and surfaces its own
+  // 409/422 — so the flow stays usable, just slower.
+  //
+  // Set back to true once both handlers read `conflicts` and mark only the box_ids the
+  // server actually accepted (see web_replica onAckAll for the shape).
+  const BULK_ACK_ENABLED = false
 
   // ── Acknowledge all ──
   const handleAcknowledgeAll = async () => {
@@ -1835,7 +1957,26 @@ export default function TransferInPage({ params }: TransferInPageProps) {
           condition_remarks: conditionRemarks.trim() || null,
         }
 
-        await InterunitApiService.finalizeTransferIn(pendingHeaderId, finalizePayload)
+        const result = await InterunitApiService.finalizeTransferIn(pendingHeaderId, finalizePayload)
+
+        // THE BRIDGE INVARIANT. finalize posts only the boxes THIS GRN claims and leaves
+        // both headers Pending when anything is still In Transit — it does NOT fail, it
+        // returns `remaining_in_transit` and a status that is still 'Pending'
+        // (interunit_tools.finalize_transfer_in: `if remaining == 0 -> Received, else
+        // keep Pending`). Announcing "finalized successfully" and navigating away
+        // regardless reported a SHORT receipt as a complete one: the shortfall stayed on
+        // the bridge with nobody told, and the operator's next signal was the challan
+        // still sitting in Incoming Material days later.
+        if (!isFinalizeComplete(result)) {
+          const short = shortfallOf(result)
+          toast.warning(
+            `GRN ${pendingGrnNumber}: posted what arrived, but ${short === null ? "some boxes are" : `${short} box(es) are`} `
+            + `still in transit — the receipt stays PENDING. Acknowledge the rest, or use `
+            + `"Close with shortage" to write them off.`,
+            { duration: 12000 } as any,
+          )
+          return   // NOT complete: stay on the receipt, do not navigate away
+        }
 
         toast.success(`GRN ${pendingGrnNumber} finalized successfully.`)
       } else {
@@ -1925,7 +2066,20 @@ export default function TransferInPage({ params }: TransferInPageProps) {
           scanned_boxes: allScannedBoxes,
         }
 
-        await InterunitApiService.createTransferIn(payload)
+        const result = await InterunitApiService.createTransferIn(payload)
+
+        // Same invariant on the bulk-create path: create_transfer_in runs the identical
+        // completion gate and reports `remaining_in_transit` + the resulting status.
+        if (!isFinalizeComplete(result)) {
+          const short = shortfallOf(result)
+          toast.warning(
+            `GRN ${grnNumber} recorded ${allScannedBoxes.length} item(s), but `
+            + `${short === null ? "some boxes are" : `${short} box(es) are`} still in transit — `
+            + `the receipt stays PENDING. Acknowledge the rest, or use "Close with shortage".`,
+            { duration: 12000 } as any,
+          )
+          return   // NOT complete: stay put rather than reporting a clean receipt
+        }
 
         toast.success(`GRN ${grnNumber} created successfully with ${allScannedBoxes.length} items.`)
       }
@@ -2109,7 +2263,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                   )}
                 </div>
               </div>
-              {!allMatched && totalItems > 0 && isAuthorizedUser && (
+              {BULK_ACK_ENABLED && !allMatched && totalItems > 0 && isAuthorizedUser && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -2182,8 +2336,11 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                 </div>
               )}
 
-              {/* ──── BULK QR PRINT BAR (cold storage FROM transfers) ──── */}
-              {totalLines > 0 && isColdStorageFrom && (
+              {/* ──── BULK QR PRINT BAR ────
+                   No longer cold-only: entries are one-per-carton for every source now, so a
+                   warehouse dispatch of 148 boxes needs the range printer just as much. Hiding
+                   it there meant the only way to label that receipt was 148 single Print QRs. */}
+              {totalLines > 0 && (
                 <div className="px-3 sm:px-4 py-3 border-b-2 border-blue-200 bg-blue-50/40">
                   <div className="flex items-center gap-2 mb-2">
                     <Printer className="h-4 w-4 text-blue-600" />
@@ -2265,7 +2422,7 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                           {issuedLines} issue{issuedLines !== 1 ? "s" : ""}
                         </Badge>
                       )}
-                      {resolvedLines < totalLines && isAuthorizedUser && (
+                      {BULK_ACK_ENABLED && resolvedLines < totalLines && isAuthorizedUser && (
                         <Button variant="ghost" size="sm" onClick={handleAcknowledgeAllLines} className="text-xs text-teal-600 hover:text-teal-800 h-7 px-2">
                           <CheckCheck className="h-3 w-3 mr-1" /> All
                         </Button>
@@ -2648,8 +2805,10 @@ export default function TransferInPage({ params }: TransferInPageProps) {
                               <div><span className="text-gray-500">Qty:</span> <span className="font-bold text-blue-600">{line.qty || line.quantity || 0}</span> <span className="text-gray-500">{line.uom || ""}</span></div>
                               <div><span className="text-gray-500">Net Wt:</span> <span className={`font-medium ${issued && linesIssueMap[index]?.net_weight ? "text-red-600 font-bold" : ""}`}>{(issued && linesIssueMap[index]?.net_weight) || lineWeights[index]?.net_weight || line.net_weight || "-"}</span></div>
                               <div><span className="text-gray-500">Total Wt:</span> <span className={`font-medium ${issued && linesIssueMap[index]?.total_weight ? "text-red-600 font-bold" : ""}`}>{(issued && linesIssueMap[index]?.total_weight) || lineWeights[index]?.total_weight || line.total_weight || "-"}</span></div>
-                              {isColdStorageFrom && <div><span className="text-gray-500">Trans No:</span> <span className="font-mono font-medium">{scannedLineData[index]?.transaction_no || line.transaction_no || mobileBoxData.transaction_no || "-"}</span></div>}
-                              {isColdStorageFrom && <div><span className="text-gray-500">Box ID:</span> <span className="font-mono font-medium">{scannedLineData[index]?.box_id || line.box_id || mobileBoxData.box_id || "-"}</span></div>}
+                              {/* Shown for every source: a warehouse entry now carries a real
+                                  sticker id too, and the desktop table has always printed both. */}
+                              <div><span className="text-gray-500">Trans No:</span> <span className="font-mono font-medium">{scannedLineData[index]?.transaction_no || line.transaction_no || mobileBoxData.transaction_no || "-"}</span></div>
+                              <div><span className="text-gray-500">Box ID:</span> <span className="font-mono font-medium">{scannedLineData[index]?.box_id || line.box_id || mobileBoxData.box_id || "-"}</span></div>
                               {line.batch_number && <div><span className="text-gray-500">Batch:</span> <span className="font-mono font-medium">{line.batch_number}</span></div>}
                               {line.lot_number && <div><span className="text-gray-500">Lot:</span> <span className="font-mono font-medium">{line.lot_number}</span></div>}
                             </div>
