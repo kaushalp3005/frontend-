@@ -1997,7 +1997,11 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
         batch_number: box.batchNumber || "",
         transaction_no: box.transactionNo || "",
         net_weight: String(Number(netVal.toFixed(3))),
-        gross_weight: String(Number(grossVal.toFixed(3)))
+        gross_weight: String(Number(grossVal.toFixed(3))),
+        // Packs in THIS box — the same figure the Total Count tile sums. It was never
+        // sent, so the challan had to fall back to unit_pack_size x qty, which reads a
+        // part box as a full one (18 x 5,000 + 1,600 printed as 19 x 5,000 = 95,000).
+        pack_count: parseFloat(String(box.packageSize ?? "")) || null,
       }
     })
 
@@ -2129,11 +2133,22 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
     return driverPhones[driverName] || ""
   }
 
-  // Compute PM total count for footer display
-  const hasPMMaterial = scannedBoxes.some((b) => b.materialType === "PM")
+  // Compute PM total count for footer display.
+  //
+  // "Countable" must mean the SAME thing here as on the delivery challan, or the tile
+  // and the printed Count disagree about which rows they include. The challan counts
+  // material type PM **or** category PACKAGING (DeliveryChallan.isCountableItem); this
+  // tested material type alone. Every one of the 25,861 PM/PACKAGING lines on record
+  // carries both values, so the two agreed by luck rather than by rule — a single row
+  // categorised PACKAGING without the PM type would have been counted on the challan
+  // and silently omitted from this tile.
+  const isCountableBox = (b: any) =>
+    String(b.materialType || "").toUpperCase() === "PM" ||
+    String(b.itemCategory || "").toUpperCase() === "PACKAGING"
+  const hasPMMaterial = scannedBoxes.some(isCountableBox)
   const isColdDest = isColdWarehouse(normalizeWarehouseName(formData.toWarehouse))
   const totalPMCount = scannedBoxes
-    .filter((b) => b.materialType === "PM")
+    .filter(isCountableBox)
     .reduce((sum, b) => {
       const pack = parseFloat(String(b.packageSize ?? "0")) || 0
       return sum + pack
