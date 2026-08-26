@@ -84,23 +84,22 @@ export default function DeliveryChallan({
     /(^|[^a-z])a[-\s]?68([^a-z]|$)/i.test(warehouseAddresses[fromWarehouse]?.name || "")
   const showCountColumn = hasPMItems || fromWarehouseIsA68
 
-  // Pieces on the challan = unit_pack_size x qty. NEVER fall back to pack_size:
-  // the two mean different things (packs-per-box vs weight-per-pack), so the
-  // fallback silently turned a pack count into a weight and back again.
-  const pieceCountFor = (item: any) => {
-    const ups = parseFloat(String(item.unit_pack_size ?? "0")) || 0
-    if (ups <= 0) return 0
-    const qty = parseFloat(String(item.qty || item.quantity || "1")) || 1
-    return ups * qty
-  }
-
-  const totalPMCount = validItems
-    .filter(isCountableItem)
-    .reduce((sum: number, item: any) => sum + pieceCountFor(item), 0)
-
-  const itemCountFor = (item: any) =>
-    isCountableItem(item) ? pieceCountFor(item) : 0
-
+  // Packs per article, SUMMED OVER THE ACTUAL BOXES.
+  //
+  // This was `unit_pack_size x qty`, which assumes every box of an article is full. The
+  // last box of a consignment routinely is not: TRANS202608261534 shipped 18 boxes of
+  // 5,000 pouches and a 19th holding 1,600 — 91,600 packs — and the challan printed
+  // 19 x 5,000 = 95,000, overstating the consignment by 3,400 pouches. The dispatch
+  // form's own Total Count tile already summed the per-box figures and read 91,600, so
+  // the two screens disagreed about the same consignment.
+  //
+  // It cannot be recovered from weight: that 19th box weighed 6.18 kg, which at the full
+  // box's 19.54 kg / 5,000 implies 1,581, not the 1,600 actually counted. The per-box
+  // count is a physical count and only the dispatch records it.
+  //
+  // Boxes dispatched before pack_count was persisted carry null, so the per-box figure
+  // falls back to the line's unit_pack_size — reproducing the old ups x qty exactly for
+  // historical challans rather than printing 0 for them.
   // Total column count for colSpan computations (default 8, +1 when Count column is visible)
   const DC_COLS = showCountColumn ? 10 : 9
 
@@ -145,6 +144,77 @@ export default function DeliveryChallan({
     }
     return out
   }, [validItems, boxes])
+
+  // A description carried by MORE THAN ONE consolidated row. The box list is keyed by
+  // description alone, so charging every such row the article's full box-sum would count
+  // the same cartons twice. Reachable on a cold-source dispatch, where
+  // _boxes_authoritative returns early and does not collapse an article to one line.
+  // Those rows keep the per-row unit_pack_size x qty reading, which cannot double count.
+  const ambiguousDescs = React.useMemo(() => {
+    const seen = new Map<string, number>()
+    for (const it of consolidatedItems) {
+      const d = (it.item_description || it.item_desc_raw || '').trim().toUpperCase()
+      if (d) seen.set(d, (seen.get(d) || 0) + 1)
+    }
+    return new Set(Array.from(seen.entries()).filter(([, n]) => n > 1).map(([d]) => d))
+  }, [consolidatedItems])
+
+  const boxesByDesc = React.useMemo(() => {
+    const m = new Map<string, any[]>()
+    for (const bx of (boxes || [])) {
+      const d = (bx.article || bx.item_description || '').trim().toUpperCase()
+      if (!d) continue
+      const arr = m.get(d)
+      if (arr) arr.push(bx); else m.set(d, [bx])
+    }
+    return m
+  }, [boxes])
+
+  const pieceCountFor = (item: any) => {
+    const ups = parseFloat(String(item.unit_pack_size ?? "0")) || 0
+    const desc = (item.item_description || item.item_desc_raw || '').trim().toUpperCase()
+    const artBoxes = ambiguousDescs.has(desc) ? [] : (boxesByDesc.get(desc) || [])
+    if (artBoxes.length > 0) {
+      return artBoxes.reduce((sum: number, bx: any) => {
+        const per = parseFloat(String(bx.pack_count ?? ""))
+        return sum + (Number.isFinite(per) && per > 0 ? per : ups)
+      }, 0)
+    }
+    // No box rows to read (line-only dispatch, or an ambiguous description above):
+    // qty is the only multiplier available.
+    if (ups <= 0) return 0
+    const qty = parseFloat(String(item.qty || item.quantity || "1")) || 1
+    return ups * qty
+  }
+
+  const itemCountFor = (item: any) =>
+    isCountableItem(item) ? pieceCountFor(item) : 0
+
+  // Do this article's boxes hold DIFFERENT numbers of packs? Then "Packs/Box" is a
+  // nominal full-box figure, not something you can multiply by No. of Boxes to reach
+  // Count. Without saying so the sheet reads as an arithmetic error: 5,000 x 19 boxes
+  // beside a Count of 91,600 looks wrong until you know the 19th box held 1,600.
+  const hasMixedPacks = (item: any) => {
+    const desc = (item.item_description || item.item_desc_raw || '').trim().toUpperCase()
+    if (ambiguousDescs.has(desc)) return false
+    const artBoxes = boxesByDesc.get(desc) || []
+    if (artBoxes.length < 2) return false
+    const ups = parseFloat(String(item.unit_pack_size ?? "0")) || 0
+    const distinct = new Set(artBoxes.map((bx: any) => {
+      const per = parseFloat(String(bx.pack_count ?? ""))
+      return Number.isFinite(per) && per > 0 ? per : ups
+    }))
+    return distinct.size > 1
+  }
+
+  const anyMixedPacks = consolidatedItems.filter(isCountableItem).some(hasMixedPacks)
+
+  // Summed over the CONSOLIDATED rows, not the raw lines. Two raw lines of one article
+  // are one row and one set of boxes; reducing over the raw lines would add that
+  // article's box-sum once per line.
+  const totalPMCount = consolidatedItems
+    .filter(isCountableItem)
+    .reduce((sum: number, item: any) => sum + pieceCountFor(item), 0)
 
   // Split consolidated items into chunks for pagination - 10 items per page
   const itemsPerPage = 10
@@ -215,6 +285,12 @@ export default function DeliveryChallan({
             fontWeight: 'bold', fontSize: '12px', color: '#8B4049', letterSpacing: '0.3px'
           }}>
             <strong>Total Count (PM):</strong> {totalPMCount.toLocaleString('en-IN')}
+            {anyMixedPacks && (
+              <span style={{ fontWeight: 'normal', fontSize: '10px', color: '#555', marginLeft: '10px' }}>
+                * part box on the consignment — Count is the sum of the actual per-box
+                counts, not Packs/Box × No. of Boxes.
+              </span>
+            )}
           </td>
         </tr>
       )}
@@ -322,8 +398,10 @@ export default function DeliveryChallan({
                         const countable = isCountableItem(item)
                         const n = parseFloat(String((countable ? item.unit_pack_size : item.pack_size) ?? '0')) || 0
                         if (n === 0) return 'N/A'
+                        // Asterisk = the boxes of this article do NOT all hold `n` packs,
+                        // so n x No. of Boxes will not equal Count. See the footnote.
                         return countable
-                          ? n.toLocaleString('en-IN')
+                          ? `${n.toLocaleString('en-IN')}${hasMixedPacks(item) ? ' *' : ''}`
                           : n.toLocaleString('en-IN', { minimumFractionDigits: 3, maximumFractionDigits: 3 })
                       })()}
                     </td>
