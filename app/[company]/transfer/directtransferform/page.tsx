@@ -22,6 +22,7 @@ import { useFormPersistence } from "@/hooks/useFormPersistence"
 import HighPerformanceQRScanner from "@/components/transfer/high-performance-qr-scanner"
 import { BoxScrollContainer } from "@/components/modules/inward/BoxScrollContainer"
 import { isColdWarehouse, normalizeWarehouseName } from "@/lib/constants/warehouses"
+import { boxPackSize } from "@/lib/transfer/packCount"
 import { ColdStorageApiService } from "@/lib/api/coldStorageApiService"
 
 interface NewTransferRequestPageProps {
@@ -762,7 +763,10 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
               manufacturingDate: "",
               expiryDate: "",
               packagingType: matchedLine?.pack_size || "0",
-              packageSize: matchedLine?.unit_pack_size || "0",
+              // The count this box actually holds, not the line's nominal packs-per-box.
+              // This field is posted straight back as pack_count, so seeding the nominal
+              // here overwrote a recorded part box with a full one on every re-save.
+              packageSize: boxPackSize(box, matchedLine),
               quantityUnits: "1",
               uom: matchedLine?.uom || "",
               scannedAt: new Date().toLocaleTimeString(),
