@@ -176,6 +176,16 @@ export default function DeliveryChallan({
     const artBoxes = ambiguousDescs.has(desc) ? [] : (boxesByDesc.get(desc) || [])
     if (artBoxes.length > 0) {
       return artBoxes.reduce((sum: number, bx: any) => {
+        // The count recorded at dispatch when there is one; otherwise the line's
+        // nominal packs-per-box.
+        //
+        // Reconstructing the missing count from weight (net_weight / pack_size x ups)
+        // looks obviously better on a part box and is NOT: scored against the 37 lines
+        // that now carry true recorded counts, weight-derivation matched 30 where this
+        // nominal reading matched 33, and its worst case was 6,041 packs out (100%)
+        // against 4,600 (37.9%). Boxes whose net_weight is 0 or whose pack_size is not
+        // the full-box weight break it. Historical challans therefore keep printing what
+        // they always printed rather than a worse guess.
         const per = parseFloat(String(bx.pack_count ?? ""))
         return sum + (Number.isFinite(per) && per > 0 ? per : ups)
       }, 0)
