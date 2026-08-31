@@ -97,6 +97,10 @@ export interface RTVHeader {
   transporter_name: string | null
   driver_name: string | null
   inward_manager: string | null
+  // Free-text collection location and POC contact detail (backend addition).
+  // poc_contact is display-only -- it is never added to the mail CC.
+  location: string | null
+  poc_contact: string | null
   status: RTVStatus
   created_by: string | null
   created_ts: string | null
@@ -118,6 +122,8 @@ export interface RTVHeaderCreate {
   transporter_name?: string
   driver_name?: string
   inward_manager?: string
+  location?: string
+  poc_contact?: string
 }
 
 export interface RTVHeaderUpdate {
@@ -135,6 +141,8 @@ export interface RTVHeaderUpdate {
   transporter_name?: string
   driver_name?: string
   inward_manager?: string
+  location?: string
+  poc_contact?: string
   status?: RTVStatus
 }
 
@@ -297,6 +305,8 @@ export interface RTVListItem {
   transporter_name: string | null
   driver_name: string | null
   inward_manager: string | null
+  location: string | null
+  poc_contact: string | null
   status: RTVStatus
   conversion: string | null
   created_by: string | null
@@ -363,6 +373,8 @@ export interface RTVApprovalHeaderFields {
   transporter_name?: string
   driver_name?: string
   inward_manager?: string
+  location?: string
+  poc_contact?: string
 }
 
 export interface RTVApprovalLineFields {

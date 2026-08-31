@@ -96,6 +96,8 @@ export default function NewRTVPage({ params }: NewRTVPageProps) {
   const [transporterName, setTransporterName] = useState("")
   const [driverName, setDriverName] = useState("")
   const [inwardManager, setInwardManager] = useState("")
+  const [rtvLocation, setRtvLocation] = useState("")
+  const [pocContact, setPocContact] = useState("")
 
   // Lines
   const [lines, setLines] = useState<RTVLineForm[]>([emptyLine()])
@@ -155,6 +157,8 @@ export default function NewRTVPage({ params }: NewRTVPageProps) {
         transporter_name: transporterName || undefined,
         driver_name: driverName || undefined,
         inward_manager: inwardManager || undefined,
+        location: rtvLocation || undefined,
+        poc_contact: pocContact || undefined,
       },
       lines: validLines.map((l): RTVLineCreate => ({
         material_type: l.material_type || "RM",
@@ -755,6 +759,14 @@ export default function NewRTVPage({ params }: NewRTVPageProps) {
               <div className="space-y-1">
                 <Label className="text-xs">Inward Manager</Label>
                 <Input value={inwardManager} onChange={(e) => setInwardManager(e.target.value)} placeholder="Priya Nair" className="h-9" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Location</Label>
+                <Input value={rtvLocation} onChange={(e) => setRtvLocation(e.target.value)} placeholder="Bhiwandi Gate 3" className="h-9" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">POC Contact</Label>
+                <Input value={pocContact} onChange={(e) => setPocContact(e.target.value)} placeholder="9876543210" className="h-9" />
               </div>
             </div>
             <div className="space-y-1">

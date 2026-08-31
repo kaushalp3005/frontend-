@@ -117,6 +117,8 @@ export default function RTVDetailPage({ params }: Props) {
                 <Field label="Transporter" value={data.transporter_name || "—"} />
                 <Field label="Driver Name" value={data.driver_name || "—"} />
                 <Field label="Inward Manager" value={data.inward_manager || "—"} />
+                <Field label="Location" value={data.location || "—"} />
+                <Field label="POC Contact" value={data.poc_contact || "—"} />
                 <Field label="Created By" value={data.created_by || "—"} />
                 {data.remark && (
                   <div className="col-span-full">

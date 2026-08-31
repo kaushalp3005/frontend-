@@ -99,6 +99,8 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
   const [transporterName, setTransporterName] = useState("")
   const [driverName, setDriverName] = useState("")
   const [inwardManager, setInwardManager] = useState("")
+  const [rtvLocation, setRtvLocation] = useState("")
+  const [pocContact, setPocContact] = useState("")
 
   // Lines
   const [lineForms, setLineForms] = useState<LineForm[]>([])
@@ -169,6 +171,8 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
         setTransporterName(detail.transporter_name || "")
         setDriverName(detail.driver_name || "")
         setInwardManager(detail.inward_manager || "")
+        setRtvLocation(detail.location || "")
+        setPocContact(detail.poc_contact || "")
 
         // Initialize line forms
         setLineForms(
@@ -783,6 +787,8 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
           transporter_name: transporterName || undefined,
           driver_name: driverName || undefined,
           inward_manager: inwardManager || undefined,
+          location: rtvLocation || undefined,
+          poc_contact: pocContact || undefined,
         },
         lines: lineForms.map((l) => ({
           material_type: l.material_type || "RM",
@@ -981,6 +987,14 @@ export default function RTVApprovePage({ params }: ApprovePageProps) {
               <div className="space-y-1">
                 <Label className="text-xs">Inward Manager</Label>
                 <Input value={inwardManager} onChange={(e) => setInwardManager(e.target.value)} className="h-9" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Location</Label>
+                <Input value={rtvLocation} onChange={(e) => setRtvLocation(e.target.value)} placeholder="Bhiwandi Gate 3" className="h-9" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">POC Contact</Label>
+                <Input value={pocContact} onChange={(e) => setPocContact(e.target.value)} placeholder="9876543210" className="h-9" />
               </div>
             </div>
             <div className="space-y-1">

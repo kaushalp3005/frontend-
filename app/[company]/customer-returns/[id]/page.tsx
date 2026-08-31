@@ -643,6 +643,8 @@ export default function RTVDetailPage({ params }: RTVDetailPageProps) {
                   <Field label="Transporter" value={data.transporter_name} />
                   <Field label="Driver Name" value={data.driver_name} />
                   <Field label="Inward Manager" value={data.inward_manager} />
+                  <Field label="Location" value={data.location} />
+                  <Field label="POC Contact" value={data.poc_contact} />
                 </div>
                 {data.remark && (
                   <div className="mt-3 pt-3 border-t">

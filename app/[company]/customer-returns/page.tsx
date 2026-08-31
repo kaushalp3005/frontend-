@@ -123,7 +123,8 @@ function CustomerReturnCard({ item }: { item: RTVListItem }) {
         </div>
 
         {/* Transport / handling */}
-        {(item.vehicle_number || item.transporter_name || item.driver_name || item.inward_manager) && (
+        {(item.vehicle_number || item.transporter_name || item.driver_name || item.inward_manager
+          || item.location || item.poc_contact) && (
           <div className="pt-1.5 border-t border-blue-100/50 flex flex-wrap gap-1">
             {item.vehicle_number && (
               <span className={toneChip("sky")}><span className="opacity-60">Vehicle:</span> {item.vehicle_number}</span>
@@ -136,6 +137,12 @@ function CustomerReturnCard({ item }: { item: RTVListItem }) {
             )}
             {item.inward_manager && (
               <span className={toneChip("blue")}><span className="opacity-60">Inward Mgr:</span> {item.inward_manager}</span>
+            )}
+            {item.location && (
+              <span className={toneChip("blue")}><span className="opacity-60">Location:</span> {item.location}</span>
+            )}
+            {item.poc_contact && (
+              <span className={toneChip("blue")}><span className="opacity-60">POC:</span> {item.poc_contact}</span>
             )}
           </div>
         )}
