@@ -2133,7 +2133,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                 <SelectContent>
                   <SelectItem value="MH43BP6885">MH43BP6885</SelectItem>
                   <SelectItem value="MH43BX1881">MH43BX1881</SelectItem>
-                  <SelectItem value="MH46BM5987">MH46BM5987 (Contract Vehicle)</SelectItem>
+                  <SelectItem value="MH43CA1756">MH43CA1756</SelectItem>
                   <SelectItem value="other">Other</SelectItem>
                 </SelectContent>
               </Select>
@@ -2164,6 +2164,7 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                   <SelectItem value="Tukaram (+919930056340)">Tukaram (+919930056340)</SelectItem>
                   <SelectItem value="Sachin (8692885298)">Sachin (8692885298)</SelectItem>
                   <SelectItem value="Gopal (+919975887148)">Gopal (+919975887148)</SelectItem>
+                  <SelectItem value="Amant">Amant</SelectItem>
                   <SelectItem value="other">Other</SelectItem>
                 </SelectContent>
               </Select>
