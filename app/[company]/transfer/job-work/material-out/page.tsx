@@ -438,6 +438,11 @@ export default function MaterialOutPage({ params }: MaterialOutPageProps) {
       state: "MAHARASHTRA", city: "NAVI MUMBAI (TURBHE)", pin_code: "400705",
       contact_company: "9321161659", contact_mobile: "9321161659", email: "hajigodil@gmail.com", sub_category: "",
     },
+    {
+      name: "Lagom food labs private limited ( sale )", address: "Unit No. 127, Building No. E7, Bhumi World Industrial Park, Mumbai Nashik Highway, Pimplas, Bhiwandi, Thane, Maharashtra 421302",
+      state: "MAHARASHTRA", city: "Thane", pin_code: "421302",
+      contact_company: "8796442621", contact_mobile: "8796442621", email: "", sub_category: "",
+    },
   ]
 
   const handleVendorSelect = (vendorName: string) => {

@@ -1287,7 +1287,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
   const fMatrix = rptQ ? rptVendorItem.filter((r: any) => (String(r.vendor || "") + " " + String(r.item || "")).toLowerCase().includes(rptQ)) : rptVendorItem
   // Hardcoded options (same as material-out form) merged with DB options
   const PROCESS_OPTIONS = ["De seeding", "Dicing", "Cracking", "Stuffing", "Vacuum Packaging", "Slicing", "Thermopacking"]
-  const VENDOR_OPTIONS = ["UNAZO CORPORATION", "Krishnat Kerba Chavan", "AL SAKHI ENTERPRISES", "MIE FOODS INDIA PRIVATE LIMITED", "HAG CORPORATION"]
+  const VENDOR_OPTIONS = ["UNAZO CORPORATION", "Krishnat Kerba Chavan", "AL SAKHI ENTERPRISES", "MIE FOODS INDIA PRIVATE LIMITED", "HAG CORPORATION", "Lagom food labs private limited ( sale )"]
 
   const dbFilterOpts = rptData?.filter_options || { sub_categories: [], vendors: [], items: [], groups: [] }
   const rptFilterOpts = {
