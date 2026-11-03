@@ -62,6 +62,11 @@ export const WAREHOUSES: Record<string, WarehouseConfig> = {
     address: "Eskimo Ice Mfg. Co. Pvt. Ltd., Plot No. A-824/1, Khairne MIDC, Thane-Belapur Road, Navi Mumbai, Maharashtra 400710",
     type: "cold",
   },
+  PM: {
+    name: "PM Cold Storage",
+    address: "", // TODO: confirm PM cold storage address for challans
+    type: "cold",
+  },
 }
 
 /**
@@ -114,6 +119,11 @@ export const WAREHOUSE_ALIASES: Record<string, string> = {
   "eskimo": "Eskimo",
   "eskimo cold": "Eskimo",
   "eskimo cold storage": "Eskimo",
+
+  // PM aliases (canonical code stays "PM")
+  "pm": "PM",
+  "pm cold": "PM",
+  "pm cold storage": "PM",
 }
 
 /**
@@ -127,6 +137,7 @@ export const WAREHOUSE_DISPLAY_NAMES: Record<string, string> = {
   "Rishi": "Rishi",
   "Supreme": "Supreme Cold",
   "Eskimo": "Eskimo",
+  "PM": "PM Cold",
 }
 
 /** User-to-warehouse default mapping. "ALL" means no filter applied. */

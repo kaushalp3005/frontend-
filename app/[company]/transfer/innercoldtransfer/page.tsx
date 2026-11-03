@@ -15,7 +15,7 @@ import { useAuthStore } from "@/lib/stores/auth"
 import { useToast } from "@/hooks/use-toast"
 import { ColdStorageApiService, type ColdStorageStockRecord } from "@/lib/api/coldStorageApiService"
 
-const COLD_STORAGE_LOCATIONS = ["Savla Bond", "Savla D-39", "Savla D-514", "Rishi", "Supreme", "Eskimo"]
+const COLD_STORAGE_LOCATIONS = ["Savla Bond", "Savla D-39", "Savla D-514", "Rishi", "Supreme", "Eskimo", "PM"]
 
 function LocationChips({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (

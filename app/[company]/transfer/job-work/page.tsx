@@ -1813,6 +1813,7 @@ export default function JobWorkPage({ params }: JobWorkPageProps) {
                           <SelectItem value="Rishi">Rishi</SelectItem>
                           <SelectItem value="Supreme">Supreme</SelectItem>
                           <SelectItem value="Eskimo">Eskimo</SelectItem>
+                          <SelectItem value="PM">PM Cold</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>

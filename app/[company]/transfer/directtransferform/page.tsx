@@ -266,7 +266,7 @@ function ItemDescriptionDropdown({
 }
 
 // Cold storage warehouse values that trigger the cold-destination summary popup on submit
-const COLD_STORAGE_WAREHOUSES = ["Cold Storage", "Rishi", "Savla D-39", "Savla D-514", "Supreme", "Eskimo"]
+const COLD_STORAGE_WAREHOUSES = ["Cold Storage", "Rishi", "Savla D-39", "Savla D-514", "Supreme", "Eskimo", "PM"]
 
 export default function NewTransferRequestPage({ params }: NewTransferRequestPageProps) {
   const { company } = params
@@ -2296,6 +2296,8 @@ export default function NewTransferRequestPage({ params }: NewTransferRequestPag
                   <SelectItem value="Supreme">Supreme</SelectItem>
 
                   <SelectItem value="Eskimo">Eskimo</SelectItem>
+
+                  <SelectItem value="PM">PM Cold</SelectItem>
 
                 </SelectContent>
 
