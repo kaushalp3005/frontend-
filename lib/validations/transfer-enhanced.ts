@@ -1,8 +1,10 @@
 import type { Company } from "@/types/auth"
 // Updated to fix TypeScript cache issues
 
-export type SourceLocation = "W202" | "A185" | "A101" | "A68" | "F53"
-export type DestinationLocation = "W202" | "A185" | "A101" | "A68" | "F53" | "Cold Storage"
+// "F53" is no longer offered in the transfer dropdowns but stays in the type:
+// existing transfers still carry it.
+export type SourceLocation = "W202" | "A185" | "A101" | "A68" | "H60" | "F53"
+export type DestinationLocation = "W202" | "A185" | "A101" | "A68" | "H60" | "F53" | "Cold Storage"
 export type SiteCode = SourceLocation | DestinationLocation
 
 // Inter-Unit Movement Types - ENHANCED VERSION

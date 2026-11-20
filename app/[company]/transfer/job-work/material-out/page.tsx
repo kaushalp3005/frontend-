@@ -1368,7 +1368,7 @@ export default function MaterialOutPage({ params }: MaterialOutPageProps) {
                       <SelectItem value="A185">A185</SelectItem>
                       <SelectItem value="A101">A101</SelectItem>
                       <SelectItem value="A68">A68</SelectItem>
-                      <SelectItem value="F53">F53</SelectItem>
+                      <SelectItem value="H60">H60</SelectItem>
                       <SelectItem value="Cold storage">Cold storage</SelectItem>
                     </SelectContent>
                   </Select>
