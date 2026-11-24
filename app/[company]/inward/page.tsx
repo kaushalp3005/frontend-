@@ -20,7 +20,7 @@ import { Separator } from "@/components/ui/separator"
 import {
   Plus, Eye, Edit, Trash2, Search, X, ChevronLeft, ChevronRight,
   FileCheck, Clock, CheckCircle2, Loader2, ArrowDownToLine, ClipboardCheck, ClipboardList, Download, Snowflake, BarChart3, CalendarClock,
-  Package, MapPin, Truck, FileText, AlertCircle, CheckCheck, Snowflake as SnowflakeIcon, ArrowRight,
+  Package, MapPin, Truck, FileText, AlertCircle, CheckCheck, Snowflake as SnowflakeIcon, ArrowRight, Globe,
 } from "lucide-react"
 import { format } from "date-fns"
 import {
@@ -338,6 +338,12 @@ export default function InwardListPage({ params }: InwardListPageProps) {
             </p>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
+            <Button asChild size="sm" variant="outline" className="gap-1.5 border-amber-300 text-amber-700 hover:bg-amber-50 hover:text-amber-800 dark:border-amber-800 dark:text-amber-300 dark:hover:bg-amber-900/30">
+              <Link href={`/${company}/inward/new-domain`} title="Inward has shifted to erpcf.in">
+                <Globe className="h-4 w-4" />
+                <span className="hidden sm:inline">Shifted to New Domain</span>
+              </Link>
+            </Button>
             <Button asChild size="sm" variant="outline" className="gap-1.5">
               <Link href={`/${company}/inward/bulk-sticker`}>
                 <Snowflake className="h-4 w-4" />
