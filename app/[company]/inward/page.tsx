@@ -41,6 +41,9 @@ interface InwardListPageProps {
   params: { company: Company }
 }
 
+// New inward entries are made on erpcf.in now, so the "New Entry" button is hidden.
+// The /inward/new page itself still works; set this to true to show the button again.
+const SHOW_NEW_ENTRY_BUTTON = false
 
 function StatusBadge({ status, hasEdits }: { status: InwardStatus; hasEdits?: boolean }) {
   const config = {
@@ -474,12 +477,14 @@ export default function InwardListPage({ params }: InwardListPageProps) {
                 </div>
               </PopoverContent>
             </Popover>
-            <Button asChild size="sm" className="gap-1.5">
-              <Link href={`/${company}/inward/new`}>
-                <Plus className="h-4 w-4" />
-                <span className="hidden xs:inline">New Entry</span>
-              </Link>
-            </Button>
+            {SHOW_NEW_ENTRY_BUTTON && (
+              <Button asChild size="sm" className="gap-1.5">
+                <Link href={`/${company}/inward/new`}>
+                  <Plus className="h-4 w-4" />
+                  <span className="hidden xs:inline">New Entry</span>
+                </Link>
+              </Button>
+            )}
           </div>
         </div>
 
