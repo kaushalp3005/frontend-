@@ -7,11 +7,12 @@ export const NEW_DOMAIN_URL = "https://erpcf.in"
 
 interface NewDomainNoticeProps {
   company: string
+  // Off on the lock overlay, where "back" would only lead to the locked page.
+  showBackLink?: boolean
 }
 
-// Points users to Inward's new home. The existing IMS inward screens stay in place,
-// so the notice keeps a way back rather than forcing the move.
-export function NewDomainNotice({ company }: NewDomainNoticeProps) {
+// Points users to Inward's new home on erpcf.in.
+export function NewDomainNotice({ company, showBackLink = true }: NewDomainNoticeProps) {
   return (
     <Card>
       <CardHeader className="text-center">
@@ -30,12 +31,14 @@ export function NewDomainNotice({ company }: NewDomainNoticeProps) {
             <ExternalLink className="h-4 w-4" />
           </a>
         </Button>
-        <Button asChild variant="ghost" size="sm" className="gap-1.5 text-muted-foreground">
-          <Link href={`/${company}/inward`}>
-            <ArrowLeft className="h-4 w-4" />
-            Back to Inward Entries
-          </Link>
-        </Button>
+        {showBackLink && (
+          <Button asChild variant="ghost" size="sm" className="gap-1.5 text-muted-foreground">
+            <Link href={`/${company}/inward`}>
+              <ArrowLeft className="h-4 w-4" />
+              Back to Inward Entries
+            </Link>
+          </Button>
+        )}
       </CardContent>
     </Card>
   )

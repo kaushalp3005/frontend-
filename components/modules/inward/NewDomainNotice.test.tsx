@@ -23,4 +23,10 @@ describe('NewDomainNotice', () => {
     render(<NewDomainNotice company="cdpl" />)
     expect(screen.getByRole('link', { name: /back to inward entries/i })).toHaveAttribute('href', '/cdpl/inward')
   })
+
+  it('can drop the back link (used by the lock overlay, where "back" is the locked page)', () => {
+    render(<NewDomainNotice company="cfpl" showBackLink={false} />)
+    expect(screen.queryByRole('link', { name: /back to inward entries/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /go to erpcf\.in/i })).toBeInTheDocument()
+  })
 })
